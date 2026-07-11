@@ -34,6 +34,11 @@ model Loja {
   cotacoesCambio       CotacaoCambio[]
   pagamentos           Pagamento[]
   custosPedido         CustoPedido[]
+  localizacoesProprias Localizacao[]
+  lotes                Lote[]
+  movimentosPatrimoniais MovimentoPatrimonial[]
+  lancamentosPatrimoniais LancamentoPatrimonial[]
+  saldosLoteLocalizacao SaldoLoteLocalizacao[]
 }
 
 model Usuario {
@@ -53,6 +58,7 @@ model Usuario {
   recebimentosConfirmados Recebimento[]
   movimentacoesEstoque    MovimentacaoEstoque[]
   cotacoesCambio          CotacaoCambio[]
+  movimentosPatrimoniais  MovimentoPatrimonial[]
 }
 
 model Perfil {
@@ -135,6 +141,7 @@ model RefreshToken {
 model AuditLog {
   id        String   @id @default(cuid())
   usuarioId String?
+  lojaId    String?
   action    String
   entity    String
   entityId  String?
@@ -146,6 +153,7 @@ model AuditLog {
   @@index([action])
   @@index([entity])
   @@index([usuarioId])
+  @@index([lojaId, createdAt])
 }
 
 model Categoria {
@@ -189,6 +197,9 @@ model Produto {
   estoques             Estoque[]
   recebimentoItens     RecebimentoItem[]
   movimentacoesEstoque MovimentacaoEstoque[]
+  lotes                Lote[]
+  lancamentosPatrimoniais LancamentoPatrimonial[]
+  saldosLoteLocalizacao SaldoLoteLocalizacao[]
 
   @@unique([lojaId, slug])
   @@unique([id, lojaId])
@@ -282,6 +293,7 @@ model PedidoCompraItem {
   recebimentosMiami       RecebimentoMiami[]
   recebimentoItens        RecebimentoItem[]
   custosRateados          CustoPedidoItem[]
+  lotes                   Lote[]
 
   @@unique([pedidoCompraId, produtoId])
   @@unique([id, lojaId])
@@ -628,4 +640,207 @@ model CustoPedidoItem {
 
   @@unique([custoPedidoId, pedidoCompraItemId])
   @@index([lojaId, pedidoCompraItemId])
+}
+
+// ─── Ledger Patrimonial (ARQUITETURA_OPERACIONAL_V2 §3, §5, §15) ──────────────
+//
+// Fonte única de verdade de quantidade: MovimentoPatrimonial + LancamentoPatrimonial
+// (append-only). SaldoLoteLocalizacao é projeção materializada reconstruível.
+// Lote e Localizacao são criados aqui em nível de schema por dependência de FK;
+// lifecycle/split/merge (Batch 5) e Endereco/LocalizacaoLoja (Batch 6) vêm depois.
+
+enum ContaPatrimonial {
+  EXTERNAL_SUPPLIER
+  OWNED_IN_TRANSIT
+  OWNED_AT_LOCATION
+  QUARANTINE
+  SELLABLE
+  RESERVED
+  RETURN_IN_TRANSIT
+  SOLD
+  LOST
+  WRITTEN_OFF
+}
+
+enum MovimentoPatrimonialTipo {
+  INCORPORATION
+  INCORPORATION_CANCEL
+  TRANSFER
+  RESERVE
+  RESERVE_RELEASE
+  SALE_SETTLEMENT
+  RETURN_RECEIPT
+  RETURN_CONFERENCE
+  LOSS
+  LOSS_RECOVERY
+  ADJUSTMENT_POSITIVE
+  ADJUSTMENT_NEGATIVE
+  LOTE_SPLIT
+  LOTE_MERGE
+  ADMIN_REVERSAL
+  OPENING_BACKFILL
+}
+
+enum LoteLifecycleStatus {
+  ACTIVE
+  CLOSED_SPLIT
+  CLOSED_MERGED
+}
+
+enum LoteCostStatus {
+  KNOWN
+  UNKNOWN
+}
+
+enum LoteCondicao {
+  UNKNOWN
+  NEW
+  NEW_IN_NAME_OF_THIRD_PARTY
+  USED
+  USED_NO_CABLES
+  OPEN_BOX
+}
+
+enum LoteOrigem {
+  PURCHASE_ORDER
+  OPENING_BALANCE
+  SPLIT
+  MERGE
+  RETURN
+}
+
+enum LocalizacaoTipo {
+  WAREHOUSE
+  TRAVELER_ADDRESS
+  HOTEL
+  OFFICE
+  STORE
+  TRANSIT_HUB
+  PARAGUAY_HUB
+  CUSTOMER
+  OTHER
+}
+
+model Localizacao {
+  id          String          @id @default(cuid())
+  nome        String
+  tipo        LocalizacaoTipo
+  timezone    String
+  pais        String?
+  estado      String?
+  cidade      String?
+  ativo       Boolean         @default(true)
+  ownerLojaId String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  ownerLoja   Loja?                   @relation(fields: [ownerLojaId], references: [id], onDelete: Restrict)
+  lancamentos LancamentoPatrimonial[]
+  saldos      SaldoLoteLocalizacao[]
+
+  @@index([tipo, ativo])
+  @@index([ownerLojaId])
+}
+
+model Lote {
+  id                    String              @id @default(cuid())
+  lojaId                String
+  produtoId             String
+  origem                LoteOrigem
+  pedidoCompraItemId    String?
+  condicao              LoteCondicao        @default(UNKNOWN)
+  costStatus            LoteCostStatus      @default(UNKNOWN)
+  lifecycleStatus       LoteLifecycleStatus @default(ACTIVE)
+  moedaOriginal         String?
+  valorUnitarioOriginal Decimal?            @db.Decimal(12, 2)
+  cotacaoReferencia     Decimal?            @db.Decimal(18, 6)
+  ajusteCambio          Decimal?            @db.Decimal(18, 6)
+  cotacaoAplicada       Decimal?            @db.Decimal(18, 6)
+  custoUnitarioUsd      Decimal?            @db.Decimal(12, 2)
+  incorporadoEm         DateTime?
+  closedAt              DateTime?
+  closedByMovimentoId   String?
+  legacyEntity          String?
+  legacyId              String?
+  migrationVersion      String?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  loja              Loja                    @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  produto           Produto                 @relation(fields: [produtoId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  pedidoCompraItem  PedidoCompraItem?       @relation(fields: [pedidoCompraItemId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  closedByMovimento MovimentoPatrimonial?   @relation("LoteClosedBy", fields: [closedByMovimentoId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  lancamentos       LancamentoPatrimonial[]
+  saldos            SaldoLoteLocalizacao[]
+
+  @@unique([id, lojaId])
+  @@unique([legacyEntity, legacyId, migrationVersion])
+  @@index([lojaId, produtoId])
+  @@index([lojaId, lifecycleStatus])
+  @@index([lojaId, pedidoCompraItemId])
+}
+
+model MovimentoPatrimonial {
+  id                  String                   @id @default(cuid())
+  lojaId              String
+  tipo                MovimentoPatrimonialTipo
+  realizadoPorId      String
+  observacoes         String?
+  compensaMovimentoId String?
+  createdAt           DateTime                 @default(now())
+
+  loja              Loja                    @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  realizadoPor      Usuario                 @relation(fields: [realizadoPorId], references: [id], onDelete: Restrict)
+  compensaMovimento MovimentoPatrimonial?   @relation("MovimentoCompensacao", fields: [compensaMovimentoId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  compensadoPor     MovimentoPatrimonial[]  @relation("MovimentoCompensacao")
+  lancamentos       LancamentoPatrimonial[]
+  lotesFechados     Lote[]                  @relation("LoteClosedBy")
+
+  @@unique([id, lojaId])
+  @@index([lojaId, createdAt])
+  @@index([lojaId, tipo])
+}
+
+model LancamentoPatrimonial {
+  id              String           @id @default(cuid())
+  lojaId          String
+  movimentoId     String
+  loteId          String
+  produtoId       String
+  conta           ContaPatrimonial
+  localizacaoId   String?
+  quantidadeDelta Int
+  createdAt       DateTime         @default(now())
+
+  loja        Loja                 @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  movimento   MovimentoPatrimonial @relation(fields: [movimentoId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  lote        Lote                 @relation(fields: [loteId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  produto     Produto              @relation(fields: [produtoId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  localizacao Localizacao?         @relation(fields: [localizacaoId], references: [id], onDelete: Restrict)
+
+  @@index([lojaId, loteId, createdAt, id])
+  @@index([lojaId, produtoId, createdAt])
+  @@index([movimentoId])
+}
+
+model SaldoLoteLocalizacao {
+  id            String           @id @default(cuid())
+  lojaId        String
+  loteId        String
+  produtoId     String
+  conta         ContaPatrimonial
+  localizacaoId String?
+  saldo         Int              @default(0)
+  version       Int              @default(0)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  loja        Loja         @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  lote        Lote         @relation(fields: [loteId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  produto     Produto      @relation(fields: [produtoId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  localizacao Localizacao? @relation(fields: [localizacaoId], references: [id], onDelete: Restrict)
+
+  @@unique([lojaId, loteId, conta, localizacaoId])
+  @@index([lojaId, produtoId, conta])
+  @@index([lojaId, localizacaoId, conta])
 }
