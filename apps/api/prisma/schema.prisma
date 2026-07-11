@@ -21,6 +21,12 @@ model Loja {
   fornecedores Fornecedor[]
   pedidosCompra PedidoCompra[]
   pedidoCompraItens PedidoCompraItem[]
+  viajantes Viajante[]
+  viagens Viagem[]
+  malas Mala[]
+  volumesLogisticos VolumeLogistico[]
+  alocacoesMala AlocacaoMala[]
+  recebimentosMiami RecebimentoMiami[]
 }
 
 model Usuario {
@@ -36,6 +42,7 @@ model Usuario {
   perfis        UsuarioPerfil[]
   refreshTokens RefreshToken[]
   auditLogs     AuditLog[]
+  recebimentosMiami RecebimentoMiami[]
 }
 
 model Perfil {
@@ -254,7 +261,136 @@ model PedidoCompraItem {
   loja Loja @relation(fields: [lojaId], references: [id], onDelete: Restrict)
   pedido PedidoCompra @relation(fields: [pedidoCompraId, lojaId], references: [id, lojaId], onDelete: Cascade)
   produto Produto @relation(fields: [produtoId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  alocacoesMala AlocacaoMala[]
+  recebimentosMiami RecebimentoMiami[]
   @@unique([pedidoCompraId, produtoId])
+  @@unique([id, lojaId])
   @@index([lojaId, produtoId])
   @@index([lojaId, pedidoCompraId])
+}
+
+enum ViagemStatus {
+  PLANNED
+  OPEN_FOR_ALLOCATION
+  CLOSED_FOR_ALLOCATION
+  IN_TRANSIT
+  ARRIVED_BRAZIL
+  CANCELLED
+}
+enum MalaStatus {
+  PLANNING
+  CLOSED
+  CHECKED_IN
+  ARRIVED_BRAZIL
+  RECEIVED
+  CANCELLED
+}
+
+model Viajante {
+  id String @id @default(cuid())
+  lojaId String
+  nome String
+  email String?
+  telefone String?
+  documento String?
+  observacoes String?
+  ativo Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  loja Loja @relation(fields:[lojaId],references:[id],onDelete:Restrict)
+  viagens Viagem[]
+  @@unique([id,lojaId])
+  @@index([lojaId,ativo])
+}
+
+model Viagem {
+  id String @id @default(cuid())
+  lojaId String
+  viajanteId String
+  origem String
+  destino String
+  partidaEm DateTime
+  chegadaPrevistaEm DateTime
+  chegadaRealEm DateTime?
+  status ViagemStatus @default(PLANNED)
+  periodoEnvio String @default("MANHA")
+  observacoes String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  loja Loja @relation(fields:[lojaId],references:[id],onDelete:Restrict)
+  viajante Viajante @relation(fields:[viajanteId,lojaId],references:[id,lojaId],onDelete:Restrict)
+  malas Mala[]
+  @@unique([id,lojaId])
+  @@index([lojaId,status])
+  @@index([lojaId,partidaEm])
+}
+
+model Mala {
+  id String @id @default(cuid())
+  lojaId String
+  viagemId String
+  codigo String
+  limitePesoKg Decimal @default(23) @db.Decimal(8,3)
+  status MalaStatus @default(PLANNING)
+  observacoes String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  loja Loja @relation(fields:[lojaId],references:[id],onDelete:Restrict)
+  viagem Viagem @relation(fields:[viagemId,lojaId],references:[id,lojaId],onDelete:Restrict)
+  volumes VolumeLogistico[]
+  alocacoes AlocacaoMala[]
+  @@unique([viagemId,codigo])
+  @@unique([id,lojaId])
+  @@index([lojaId,status])
+}
+
+model VolumeLogistico {
+  id String @id @default(cuid())
+  lojaId String
+  malaId String
+  codigo String
+  taraKg Decimal @default(0.5) @db.Decimal(8,3)
+  observacoes String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  loja Loja @relation(fields:[lojaId],references:[id],onDelete:Restrict)
+  mala Mala @relation(fields:[malaId,lojaId],references:[id,lojaId],onDelete:Cascade)
+  alocacoes AlocacaoMala[]
+  @@unique([malaId,codigo])
+  @@unique([id,lojaId])
+  @@index([lojaId,malaId])
+}
+
+model AlocacaoMala {
+  id String @id @default(cuid())
+  lojaId String
+  pedidoCompraItemId String
+  malaId String
+  volumeLogisticoId String
+  quantidade Int
+  pesoConteudoKg Decimal @db.Decimal(10,3)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  loja Loja @relation(fields:[lojaId],references:[id],onDelete:Restrict)
+  item PedidoCompraItem @relation(fields:[pedidoCompraItemId,lojaId],references:[id,lojaId],onDelete:Restrict)
+  mala Mala @relation(fields:[malaId,lojaId],references:[id,lojaId],onDelete:Restrict)
+  volume VolumeLogistico @relation(fields:[volumeLogisticoId,lojaId],references:[id,lojaId],onDelete:Restrict)
+  @@unique([pedidoCompraItemId,malaId,volumeLogisticoId])
+  @@index([lojaId,malaId])
+}
+
+model RecebimentoMiami {
+  id String @id @default(cuid())
+  lojaId String
+  pedidoCompraItemId String
+  quantidadeRecebida Int
+  recebidoEm DateTime
+  confirmadoPorId String
+  observacao String?
+  atraso Boolean @default(false)
+  createdAt DateTime @default(now())
+  loja Loja @relation(fields:[lojaId],references:[id],onDelete:Restrict)
+  item PedidoCompraItem @relation(fields:[pedidoCompraItemId,lojaId],references:[id,lojaId],onDelete:Restrict)
+  confirmadoPor Usuario @relation(fields:[confirmadoPorId],references:[id],onDelete:Restrict)
+  @@index([lojaId,pedidoCompraItemId])
 }

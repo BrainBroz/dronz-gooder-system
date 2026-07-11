@@ -43,6 +43,11 @@ export const purchasingQueryKeys = {
   suppliers: (storeId: string | null) => ["suppliers", storeId] as const,
   orders: (storeId: string | null) => ["purchase-orders", storeId] as const
 };
+export const logisticsQueryKeys = {
+  travelers: (id: string | null) => ["travelers", id] as const,
+  trips: (id: string | null) => ["trips", id] as const,
+  suitcases: (id: string | null) => ["suitcases", id] as const
+};
 export const formatSalePrice = (value: string) =>
   Number(value) === 0 ? "A definir" : value;
 
@@ -929,6 +934,92 @@ function PurchaseOrdersPage() {
     </Box>
   );
 }
+function LogisticsPage() {
+  const store = useAuthStore((s) => s.activeStoreId),
+    headers = { ...authHeader(), "x-store-id": store };
+  const travelers = useQuery({
+    queryKey: logisticsQueryKeys.travelers(store),
+    enabled: !!store,
+    queryFn: async () =>
+      (await api.get("/logistics/travelers", { headers })).data
+  });
+  const trips = useQuery({
+    queryKey: logisticsQueryKeys.trips(store),
+    enabled: !!store,
+    queryFn: async () => (await api.get("/logistics/trips", { headers })).data
+  });
+  const bags = useQuery({
+    queryKey: logisticsQueryKeys.suitcases(store),
+    enabled: !!store,
+    queryFn: async () =>
+      (await api.get("/logistics/suitcases", { headers })).data
+  });
+  return (
+    <Box p={3}>
+      <Typography variant="h4">Logística Internacional</Typography>
+      {travelers.isLoading && <Typography>Carregando...</Typography>}
+      {travelers.isError && <Typography>Falha ao carregar dados</Typography>}
+      <Typography variant="h6" mt={2}>
+        Viajantes
+      </Typography>
+      {travelers.data?.map(
+        (v: { id: string; nome: string; ativo: boolean }) => (
+          <Card key={v.id}>
+            <CardContent>
+              <Typography>{v.nome}</Typography>
+              <Typography>{v.ativo ? "Ativo" : "Inativo"}</Typography>
+            </CardContent>
+          </Card>
+        )
+      )}
+      <Typography variant="h6" mt={2}>
+        Viagens
+      </Typography>
+      {trips.data?.map(
+        (t: {
+          id: string;
+          origem: string;
+          destino: string;
+          status: string;
+        }) => (
+          <Card key={t.id}>
+            <CardContent>
+              <Typography>
+                {t.origem} → {t.destino}
+              </Typography>
+              <Typography>{t.status}</Typography>
+            </CardContent>
+          </Card>
+        )
+      )}
+      <Typography variant="h6" mt={2}>
+        Malas e volumes
+      </Typography>
+      {bags.data?.map(
+        (b: {
+          id: string;
+          codigo: string;
+          status: string;
+          limitePesoKg: string;
+          volumes: unknown[];
+          alocacoes: unknown[];
+        }) => (
+          <Card key={b.id}>
+            <CardContent>
+              <Typography>
+                {b.codigo} — {b.status}
+              </Typography>
+              <Typography>
+                Limite {b.limitePesoKg} kg · {b.volumes.length} volume(s) ·{" "}
+                {b.alocacoes.length} alocação(ões)
+              </Typography>
+            </CardContent>
+          </Card>
+        )
+      )}
+    </Box>
+  );
+}
 
 export function NotFoundPage() {
   return <div>404</div>;
@@ -986,6 +1077,16 @@ export function AppRoutes() {
               <AuthGate>
                 <Shell>
                   <PurchaseOrdersPage />
+                </Shell>
+              </AuthGate>
+            }
+          />
+          <Route
+            path="/logistica"
+            element={
+              <AuthGate>
+                <Shell>
+                  <LogisticsPage />
                 </Shell>
               </AuthGate>
             }

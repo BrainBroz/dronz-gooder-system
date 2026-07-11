@@ -114,6 +114,7 @@ async function main() {
         descricao: "Produto de demonstração",
         precoVenda: "0.00",
         markup: "25.00",
+        peso: "1.000",
         ativo: true
       },
       create: {
@@ -125,6 +126,7 @@ async function main() {
         descricao: "Produto de demonstração",
         precoVenda: "0.00",
         markup: "25.00",
+        peso: "1.000",
         ativo: true
       }
     }),
@@ -138,6 +140,7 @@ async function main() {
         descricao: "Produto de demonstração",
         precoVenda: "49.90",
         markup: "25.00",
+        peso: "1.000",
         ativo: true
       },
       create: {
@@ -149,6 +152,7 @@ async function main() {
         descricao: "Produto de demonstração",
         precoVenda: "49.90",
         markup: "25.00",
+        peso: "1.000",
         ativo: true
       }
     })
@@ -273,6 +277,74 @@ async function main() {
       });
     })
   );
+  for (const [index, store] of [dronz, gooder].entries()) {
+    const suffix = index === 0 ? "dronz" : "gooder",
+      item = await prisma.pedidoCompraItem.findFirstOrThrow({
+        where: { pedidoCompraId: orders[index].id }
+      });
+    const traveler = await prisma.viajante.upsert({
+      where: { id: `seed-traveler-${suffix}` },
+      update: { lojaId: store.id, nome: `Viajante ${suffix}`, ativo: true },
+      create: {
+        id: `seed-traveler-${suffix}`,
+        lojaId: store.id,
+        nome: `Viajante ${suffix}`
+      }
+    });
+    const trip = await prisma.viagem.upsert({
+      where: { id: `seed-trip-${suffix}` },
+      update: {},
+      create: {
+        id: `seed-trip-${suffix}`,
+        lojaId: store.id,
+        viajanteId: traveler.id,
+        origem: "Miami",
+        destino: "Brasil",
+        partidaEm: new Date("2026-08-06T13:00:00Z"),
+        chegadaPrevistaEm: new Date("2026-08-07T13:00:00Z"),
+        status: "OPEN_FOR_ALLOCATION"
+      }
+    });
+    const suitcase = await prisma.mala.upsert({
+      where: { id: `seed-suitcase-${suffix}` },
+      update: {},
+      create: {
+        id: `seed-suitcase-${suffix}`,
+        lojaId: store.id,
+        viagemId: trip.id,
+        codigo: "MALA-1"
+      }
+    });
+    const volume = await prisma.volumeLogistico.upsert({
+      where: { id: `seed-volume-${suffix}` },
+      update: {},
+      create: {
+        id: `seed-volume-${suffix}`,
+        lojaId: store.id,
+        malaId: suitcase.id,
+        codigo: "VOL-1",
+        taraKg: "0.500"
+      }
+    });
+    await prisma.alocacaoMala.upsert({
+      where: {
+        pedidoCompraItemId_malaId_volumeLogisticoId: {
+          pedidoCompraItemId: item.id,
+          malaId: suitcase.id,
+          volumeLogisticoId: volume.id
+        }
+      },
+      update: { quantidade: 1, pesoConteudoKg: "1.000" },
+      create: {
+        lojaId: store.id,
+        pedidoCompraItemId: item.id,
+        malaId: suitcase.id,
+        volumeLogisticoId: volume.id,
+        quantidade: 1,
+        pesoConteudoKg: "1.000"
+      }
+    });
+  }
 }
 
 main().finally(async () => {

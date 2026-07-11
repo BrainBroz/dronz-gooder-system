@@ -8,6 +8,7 @@ import { categoriesRouter } from "./modules/categories/categories.routes";
 import { productsRouter } from "./modules/products/products.routes";
 import { suppliersRouter } from "./modules/suppliers/suppliers.routes";
 import { purchaseOrdersRouter } from "./modules/purchase-orders/purchase-orders.routes";
+import { logisticsRouter } from "./modules/logistics/logistics.routes";
 
 export function createApp() {
   const app = express();
@@ -20,6 +21,7 @@ export function createApp() {
   app.use("/products", productsRouter);
   app.use("/suppliers", suppliersRouter);
   app.use("/purchase-orders", purchaseOrdersRouter);
+  app.use("/logistics", logisticsRouter);
   app.use(errorHandler);
   return app;
 }
