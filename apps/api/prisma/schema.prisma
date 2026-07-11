@@ -15,40 +15,44 @@ model Loja {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  usuarios  UsuarioLoja[]
-  categorias Categoria[]
-  produtos   Produto[]
-  fornecedores Fornecedor[]
-  pedidosCompra PedidoCompra[]
-  pedidoCompraItens PedidoCompraItem[]
-  viajantes Viajante[]
-  viagens Viagem[]
-  malas Mala[]
-  volumesLogisticos VolumeLogistico[]
-  alocacoesMala AlocacaoMala[]
-  recebimentosMiami RecebimentoMiami[]
-  recebimentos Recebimento[]
-  recebimentoItens RecebimentoItem[]
-  estoques Estoque[]
+  usuarios             UsuarioLoja[]
+  categorias           Categoria[]
+  produtos             Produto[]
+  fornecedores         Fornecedor[]
+  pedidosCompra        PedidoCompra[]
+  pedidoCompraItens    PedidoCompraItem[]
+  viajantes            Viajante[]
+  viagens              Viagem[]
+  malas                Mala[]
+  volumesLogisticos    VolumeLogistico[]
+  alocacoesMala        AlocacaoMala[]
+  recebimentosMiami    RecebimentoMiami[]
+  recebimentos         Recebimento[]
+  recebimentoItens     RecebimentoItem[]
+  estoques             Estoque[]
   movimentacoesEstoque MovimentacaoEstoque[]
+  cotacoesCambio       CotacaoCambio[]
+  pagamentos           Pagamento[]
+  custosPedido         CustoPedido[]
 }
 
 model Usuario {
-  id           String         @id @default(cuid())
+  id           String   @id @default(cuid())
   name         String
-  email        String         @unique
+  email        String   @unique
   passwordHash String
-  active       Boolean        @default(true)
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  lojas         UsuarioLoja[]
-  perfis        UsuarioPerfil[]
-  refreshTokens RefreshToken[]
-  auditLogs     AuditLog[]
-  recebimentosMiami RecebimentoMiami[]
+  lojas                   UsuarioLoja[]
+  perfis                  UsuarioPerfil[]
+  refreshTokens           RefreshToken[]
+  auditLogs               AuditLog[]
+  recebimentosMiami       RecebimentoMiami[]
   recebimentosConfirmados Recebimento[]
-  movimentacoesEstoque MovimentacaoEstoque[]
+  movimentacoesEstoque    MovimentacaoEstoque[]
+  cotacoesCambio          CotacaoCambio[]
 }
 
 model Perfil {
@@ -104,22 +108,22 @@ model PerfilPermissao {
   permissaoId String
   createdAt   DateTime @default(now())
 
-  perfil    Perfil     @relation(fields: [perfilId], references: [id], onDelete: Cascade)
-  permissao Permissao  @relation(fields: [permissaoId], references: [id], onDelete: Cascade)
+  perfil    Perfil    @relation(fields: [perfilId], references: [id], onDelete: Cascade)
+  permissao Permissao @relation(fields: [permissaoId], references: [id], onDelete: Cascade)
 
   @@unique([perfilId, permissaoId])
   @@index([permissaoId])
 }
 
 model RefreshToken {
-  id              String   @id @default(cuid())
-  tokenHash       String   @unique
-  usuarioId       String
-  expiresAt       DateTime
-  revokedAt       DateTime?
-  replacedById    String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id           String    @id @default(cuid())
+  tokenHash    String    @unique
+  usuarioId    String
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  replacedById String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
 
@@ -129,13 +133,13 @@ model RefreshToken {
 }
 
 model AuditLog {
-  id         String   @id @default(cuid())
-  usuarioId  String?
-  action     String
-  entity     String
-  entityId   String?
-  data       Json?
-  createdAt  DateTime @default(now())
+  id        String   @id @default(cuid())
+  usuarioId String?
+  action    String
+  entity    String
+  entityId  String?
+  data      Json?
+  createdAt DateTime @default(now())
 
   usuario Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
 
@@ -179,18 +183,18 @@ model Produto {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  loja      Loja      @relation(fields: [lojaId], references: [id], onDelete: Cascade)
-  categoria Categoria @relation(fields: [categoriaId, lojaId], references: [id, lojaId], onDelete: Restrict)
-  pedidoCompraItens PedidoCompraItem[]
-  estoques Estoque[]
-  recebimentoItens RecebimentoItem[]
+  loja                 Loja                  @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  categoria            Categoria             @relation(fields: [categoriaId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  pedidoCompraItens    PedidoCompraItem[]
+  estoques             Estoque[]
+  recebimentoItens     RecebimentoItem[]
   movimentacoesEstoque MovimentacaoEstoque[]
 
+  @@unique([lojaId, slug])
+  @@unique([id, lojaId])
   @@index([lojaId])
   @@index([lojaId, categoriaId])
   @@index([lojaId, ativo])
-  @@unique([lojaId, slug])
-  @@unique([id, lojaId])
 }
 
 enum PedidoCompraStatus {
@@ -207,46 +211,50 @@ enum PedidoCompraStatus {
 }
 
 model Fornecedor {
-  id String @id @default(cuid())
-  lojaId String
-  nome String
-  nomeFantasia String?
-  site String?
-  email String?
-  telefone String?
-  pais String?
-  moedaPadrao String?
-  observacoes String?
-  ativo Boolean @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  loja Loja @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  id            String         @id @default(cuid())
+  lojaId        String
+  nome          String
+  nomeFantasia  String?
+  site          String?
+  email         String?
+  telefone      String?
+  pais          String?
+  moedaPadrao   String?
+  observacoes   String?
+  ativo         Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  loja          Loja           @relation(fields: [lojaId], references: [id], onDelete: Restrict)
   pedidosCompra PedidoCompra[]
+
   @@unique([id, lojaId])
   @@index([lojaId, ativo])
   @@index([lojaId, nome])
 }
 
 model PedidoCompra {
-  id String @id @default(cuid())
-  lojaId String
-  fornecedorId String
-  numeroPedido String
-  dataCompra DateTime
-  moeda String @default("USD")
-  status PedidoCompraStatus @default(DRAFT)
-  descontoPedido Decimal @default(0) @db.Decimal(12, 2)
-  frete Decimal @default(0) @db.Decimal(12, 2)
-  imposto Decimal @default(0) @db.Decimal(12, 2)
-  subtotal Decimal @default(0) @db.Decimal(12, 2)
-  total Decimal @default(0) @db.Decimal(12, 2)
-  observacoes String?
-  canceladoEm DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  loja Loja @relation(fields: [lojaId], references: [id], onDelete: Restrict)
-  fornecedor Fornecedor @relation(fields: [fornecedorId, lojaId], references: [id, lojaId], onDelete: Restrict)
-  itens PedidoCompraItem[]
+  id             String             @id @default(cuid())
+  lojaId         String
+  fornecedorId   String
+  numeroPedido   String
+  dataCompra     DateTime
+  moeda          String             @default("USD")
+  status         PedidoCompraStatus @default(DRAFT)
+  descontoPedido Decimal            @default(0) @db.Decimal(12, 2)
+  frete          Decimal            @default(0) @db.Decimal(12, 2)
+  imposto        Decimal            @default(0) @db.Decimal(12, 2)
+  subtotal       Decimal            @default(0) @db.Decimal(12, 2)
+  total          Decimal            @default(0) @db.Decimal(12, 2)
+  observacoes    String?
+  canceladoEm    DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  loja           Loja               @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  fornecedor     Fornecedor         @relation(fields: [fornecedorId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  itens          PedidoCompraItem[]
+  pagamentos     Pagamento[]
+  custo          CustoPedido?
+
   @@unique([lojaId, fornecedorId, numeroPedido])
   @@unique([id, lojaId])
   @@index([lojaId, status])
@@ -255,24 +263,26 @@ model PedidoCompra {
 }
 
 model PedidoCompraItem {
-  id String @id @default(cuid())
-  pedidoCompraId String
-  lojaId String
-  produtoId String
-  quantidade Int
-  quantidadeRecebidaMiami Int @default(0)
-  precoUnitario Decimal @db.Decimal(12, 2)
-  descontoItem Decimal @default(0) @db.Decimal(12, 2)
-  totalItem Decimal @db.Decimal(12, 2)
-  observacoes String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  loja Loja @relation(fields: [lojaId], references: [id], onDelete: Restrict)
-  pedido PedidoCompra @relation(fields: [pedidoCompraId, lojaId], references: [id, lojaId], onDelete: Cascade)
-  produto Produto @relation(fields: [produtoId, lojaId], references: [id, lojaId], onDelete: Restrict)
-  alocacoesMala AlocacaoMala[]
-  recebimentosMiami RecebimentoMiami[]
-  recebimentoItens RecebimentoItem[]
+  id                      String             @id @default(cuid())
+  pedidoCompraId          String
+  lojaId                  String
+  produtoId               String
+  quantidade              Int
+  quantidadeRecebidaMiami Int                @default(0)
+  precoUnitario           Decimal            @db.Decimal(12, 2)
+  descontoItem            Decimal            @default(0) @db.Decimal(12, 2)
+  totalItem               Decimal            @db.Decimal(12, 2)
+  observacoes             String?
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+  loja                    Loja               @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  pedido                  PedidoCompra       @relation(fields: [pedidoCompraId, lojaId], references: [id, lojaId], onDelete: Cascade)
+  produto                 Produto            @relation(fields: [produtoId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  alocacoesMala           AlocacaoMala[]
+  recebimentosMiami       RecebimentoMiami[]
+  recebimentoItens        RecebimentoItem[]
+  custosRateados          CustoPedidoItem[]
+
   @@unique([pedidoCompraId, produtoId])
   @@unique([id, lojaId])
   @@index([lojaId, produtoId])
@@ -287,6 +297,7 @@ enum ViagemStatus {
   ARRIVED_BRAZIL
   CANCELLED
 }
+
 enum MalaStatus {
   PLANNING
   CLOSED
@@ -297,114 +308,120 @@ enum MalaStatus {
 }
 
 model Viajante {
-  id String @id @default(cuid())
-  lojaId String
-  nome String
-  email String?
-  telefone String?
-  documento String?
+  id          String   @id @default(cuid())
+  lojaId      String
+  nome        String
+  email       String?
+  telefone    String?
+  documento   String?
   observacoes String?
-  ativo Boolean @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  loja Loja @relation(fields:[lojaId],references:[id],onDelete:Restrict)
-  viagens Viagem[]
-  @@unique([id,lojaId])
-  @@index([lojaId,ativo])
+  ativo       Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  loja        Loja     @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  viagens     Viagem[]
+
+  @@unique([id, lojaId])
+  @@index([lojaId, ativo])
 }
 
 model Viagem {
-  id String @id @default(cuid())
-  lojaId String
-  viajanteId String
-  origem String
-  destino String
-  partidaEm DateTime
+  id                String        @id @default(cuid())
+  lojaId            String
+  viajanteId        String
+  origem            String
+  destino           String
+  partidaEm         DateTime
   chegadaPrevistaEm DateTime
-  chegadaRealEm DateTime?
-  status ViagemStatus @default(PLANNED)
-  periodoEnvio String @default("MANHA")
-  observacoes String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  loja Loja @relation(fields:[lojaId],references:[id],onDelete:Restrict)
-  viajante Viajante @relation(fields:[viajanteId,lojaId],references:[id,lojaId],onDelete:Restrict)
-  malas Mala[]
-  recebimentos Recebimento[]
-  @@unique([id,lojaId])
-  @@index([lojaId,status])
-  @@index([lojaId,partidaEm])
+  chegadaRealEm     DateTime?
+  status            ViagemStatus  @default(PLANNED)
+  periodoEnvio      String        @default("MANHA")
+  observacoes       String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  loja              Loja          @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  viajante          Viajante      @relation(fields: [viajanteId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  malas             Mala[]
+  recebimentos      Recebimento[]
+
+  @@unique([id, lojaId])
+  @@index([lojaId, status])
+  @@index([lojaId, partidaEm])
 }
 
 model Mala {
-  id String @id @default(cuid())
-  lojaId String
-  viagemId String
-  codigo String
-  limitePesoKg Decimal @default(23) @db.Decimal(8,3)
-  status MalaStatus @default(PLANNING)
-  observacoes String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  loja Loja @relation(fields:[lojaId],references:[id],onDelete:Restrict)
-  viagem Viagem @relation(fields:[viagemId,lojaId],references:[id,lojaId],onDelete:Restrict)
-  volumes VolumeLogistico[]
-  alocacoes AlocacaoMala[]
+  id           String            @id @default(cuid())
+  lojaId       String
+  viagemId     String
+  codigo       String
+  limitePesoKg Decimal           @default(23) @db.Decimal(8, 3)
+  status       MalaStatus        @default(PLANNING)
+  observacoes  String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  loja         Loja              @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  viagem       Viagem            @relation(fields: [viagemId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  volumes      VolumeLogistico[]
+  alocacoes    AlocacaoMala[]
   recebimentos Recebimento[]
-  @@unique([viagemId,codigo])
-  @@unique([id,lojaId])
-  @@index([lojaId,status])
+
+  @@unique([viagemId, codigo])
+  @@unique([id, lojaId])
+  @@index([lojaId, status])
 }
 
 model VolumeLogistico {
-  id String @id @default(cuid())
-  lojaId String
-  malaId String
-  codigo String
-  taraKg Decimal @default(0.5) @db.Decimal(8,3)
+  id          String         @id @default(cuid())
+  lojaId      String
+  malaId      String
+  codigo      String
+  taraKg      Decimal        @default(0.5) @db.Decimal(8, 3)
   observacoes String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  loja Loja @relation(fields:[lojaId],references:[id],onDelete:Restrict)
-  mala Mala @relation(fields:[malaId,lojaId],references:[id,lojaId],onDelete:Cascade)
-  alocacoes AlocacaoMala[]
-  @@unique([malaId,codigo])
-  @@unique([id,lojaId])
-  @@index([lojaId,malaId])
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  loja        Loja           @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  mala        Mala           @relation(fields: [malaId, lojaId], references: [id, lojaId], onDelete: Cascade)
+  alocacoes   AlocacaoMala[]
+
+  @@unique([malaId, codigo])
+  @@unique([id, lojaId])
+  @@index([lojaId, malaId])
 }
 
 model AlocacaoMala {
-  id String @id @default(cuid())
-  lojaId String
+  id                 String           @id @default(cuid())
+  lojaId             String
   pedidoCompraItemId String
-  malaId String
-  volumeLogisticoId String
-  quantidade Int
-  pesoConteudoKg Decimal @db.Decimal(10,3)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  loja Loja @relation(fields:[lojaId],references:[id],onDelete:Restrict)
-  item PedidoCompraItem @relation(fields:[pedidoCompraItemId,lojaId],references:[id,lojaId],onDelete:Restrict)
-  mala Mala @relation(fields:[malaId,lojaId],references:[id,lojaId],onDelete:Restrict)
-  volume VolumeLogistico @relation(fields:[volumeLogisticoId,lojaId],references:[id,lojaId],onDelete:Restrict)
-  @@unique([pedidoCompraItemId,malaId,volumeLogisticoId])
-  @@index([lojaId,malaId])
+  malaId             String
+  volumeLogisticoId  String
+  quantidade         Int
+  pesoConteudoKg     Decimal          @db.Decimal(10, 3)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  loja               Loja             @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  item               PedidoCompraItem @relation(fields: [pedidoCompraItemId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  mala               Mala             @relation(fields: [malaId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  volume             VolumeLogistico  @relation(fields: [volumeLogisticoId, lojaId], references: [id, lojaId], onDelete: Restrict)
+
+  @@unique([pedidoCompraItemId, malaId, volumeLogisticoId])
+  @@index([lojaId, malaId])
 }
 
 model RecebimentoMiami {
-  id String @id @default(cuid())
-  lojaId String
+  id                 String           @id @default(cuid())
+  lojaId             String
   pedidoCompraItemId String
   quantidadeRecebida Int
-  recebidoEm DateTime
-  confirmadoPorId String
-  observacao String?
-  atraso Boolean @default(false)
-  createdAt DateTime @default(now())
-  loja Loja @relation(fields:[lojaId],references:[id],onDelete:Restrict)
-  item PedidoCompraItem @relation(fields:[pedidoCompraItemId,lojaId],references:[id,lojaId],onDelete:Restrict)
-  confirmadoPor Usuario @relation(fields:[confirmadoPorId],references:[id],onDelete:Restrict)
-  @@index([lojaId,pedidoCompraItemId])
+  recebidoEm         DateTime
+  confirmadoPorId    String
+  observacao         String?
+  atraso             Boolean          @default(false)
+  createdAt          DateTime         @default(now())
+  loja               Loja             @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  item               PedidoCompraItem @relation(fields: [pedidoCompraItemId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  confirmadoPor      Usuario          @relation(fields: [confirmadoPorId], references: [id], onDelete: Restrict)
+
+  @@index([lojaId, pedidoCompraItemId])
 }
 
 enum RecebimentoStatus {
@@ -414,6 +431,7 @@ enum RecebimentoStatus {
   COMPLETED
   REJECTED
 }
+
 enum MovimentacaoEstoqueTipo {
   ENTRY
   RESERVE
@@ -424,6 +442,7 @@ enum MovimentacaoEstoqueTipo {
   RETURN_ENTRY
   RETURN_EXIT
 }
+
 enum MovimentacaoEstoqueMotivo {
   PURCHASE_RECEIPT
   SALE
@@ -436,81 +455,177 @@ enum MovimentacaoEstoqueMotivo {
 }
 
 model Recebimento {
-  id String @id @default(cuid())
-  lojaId String
-  viagemId String
-  malaId String
-  status RecebimentoStatus @default(PENDING)
-  iniciadoEm DateTime
-  concluidoEm DateTime?
+  id              String                @id @default(cuid())
+  lojaId          String
+  viagemId        String
+  malaId          String
+  status          RecebimentoStatus     @default(PENDING)
+  iniciadoEm      DateTime
+  concluidoEm     DateTime?
   confirmadoPorId String
-  observacoes String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  loja Loja @relation(fields:[lojaId],references:[id],onDelete:Restrict)
-  viagem Viagem @relation(fields:[viagemId,lojaId],references:[id,lojaId],onDelete:Restrict)
-  mala Mala @relation(fields:[malaId,lojaId],references:[id,lojaId],onDelete:Restrict)
-  confirmadoPor Usuario @relation(fields:[confirmadoPorId],references:[id],onDelete:Restrict)
-  itens RecebimentoItem[]
-  movimentacoes MovimentacaoEstoque[]
-  @@unique([id,lojaId])
-  @@index([lojaId,status])
+  observacoes     String?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  loja            Loja                  @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  viagem          Viagem                @relation(fields: [viagemId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  mala            Mala                  @relation(fields: [malaId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  confirmadoPor   Usuario               @relation(fields: [confirmadoPorId], references: [id], onDelete: Restrict)
+  itens           RecebimentoItem[]
+  movimentacoes   MovimentacaoEstoque[]
+
+  @@unique([id, lojaId])
+  @@index([lojaId, status])
 }
 
 model RecebimentoItem {
-  id String @id @default(cuid())
-  lojaId String
-  recebimentoId String
-  pedidoCompraItemId String
-  produtoId String
-  quantidadeEsperada Int
-  quantidadeRecebida Int @default(0)
-  quantidadeRejeitada Int @default(0)
-  observacoes String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  loja Loja @relation(fields:[lojaId],references:[id],onDelete:Restrict)
-  recebimento Recebimento @relation(fields:[recebimentoId,lojaId],references:[id,lojaId],onDelete:Cascade)
-  pedidoItem PedidoCompraItem @relation(fields:[pedidoCompraItemId,lojaId],references:[id,lojaId],onDelete:Restrict)
-  produto Produto @relation(fields:[produtoId,lojaId],references:[id,lojaId],onDelete:Restrict)
-  @@unique([recebimentoId,pedidoCompraItemId])
-  @@index([lojaId,produtoId])
+  id                  String           @id @default(cuid())
+  lojaId              String
+  recebimentoId       String
+  pedidoCompraItemId  String
+  produtoId           String
+  quantidadeEsperada  Int
+  quantidadeRecebida  Int              @default(0)
+  quantidadeRejeitada Int              @default(0)
+  observacoes         String?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  loja                Loja             @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  recebimento         Recebimento      @relation(fields: [recebimentoId, lojaId], references: [id, lojaId], onDelete: Cascade)
+  pedidoItem          PedidoCompraItem @relation(fields: [pedidoCompraItemId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  produto             Produto          @relation(fields: [produtoId, lojaId], references: [id, lojaId], onDelete: Restrict)
+
+  @@unique([recebimentoId, pedidoCompraItemId])
+  @@index([lojaId, produtoId])
 }
 
 model Estoque {
-  id String @id @default(cuid())
-  lojaId String
-  produtoId String
-  quantidadeFisica Int @default(0)
-  quantidadeReservada Int @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  loja Loja @relation(fields:[lojaId],references:[id],onDelete:Restrict)
-  produto Produto @relation(fields:[produtoId,lojaId],references:[id,lojaId],onDelete:Restrict)
-  movimentacoes MovimentacaoEstoque[]
-  @@unique([lojaId,produtoId])
-  @@unique([id,lojaId])
+  id                  String                @id @default(cuid())
+  lojaId              String
+  produtoId           String
+  quantidadeFisica    Int                   @default(0)
+  quantidadeReservada Int                   @default(0)
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  loja                Loja                  @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  produto             Produto               @relation(fields: [produtoId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  movimentacoes       MovimentacaoEstoque[]
+
+  @@unique([lojaId, produtoId])
+  @@unique([id, lojaId])
 }
 
 model MovimentacaoEstoque {
-  id String @id @default(cuid())
-  lojaId String
-  produtoId String
-  estoqueId String
-  recebimentoId String?
-  tipo MovimentacaoEstoqueTipo
-  motivo MovimentacaoEstoqueMotivo
-  quantidade Int
-  quantidadeAnterior Int
+  id                  String                    @id @default(cuid())
+  lojaId              String
+  produtoId           String
+  estoqueId           String
+  recebimentoId       String?
+  tipo                MovimentacaoEstoqueTipo
+  motivo              MovimentacaoEstoqueMotivo
+  quantidade          Int
+  quantidadeAnterior  Int
   quantidadePosterior Int
+  responsavelId       String
+  observacoes         String?
+  createdAt           DateTime                  @default(now())
+  loja                Loja                      @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  produto             Produto                   @relation(fields: [produtoId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  estoque             Estoque                   @relation(fields: [estoqueId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  recebimento         Recebimento?              @relation(fields: [recebimentoId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  responsavel         Usuario                   @relation(fields: [responsavelId], references: [id], onDelete: Restrict)
+
+  @@index([lojaId, produtoId, createdAt])
+  @@index([lojaId, tipo])
+}
+
+enum PagamentoStatus {
+  PENDING
+  PARTIAL
+  PAID
+  REFUNDED
+  CANCELLED
+}
+
+enum FormaPagamento {
+  CREDIT_CARD
+  PAYPAL
+  BANK_TRANSFER
+  CASH
+  OTHER
+}
+
+model CotacaoCambio {
+  id            String        @id @default(cuid())
+  lojaId        String
+  moedaOrigem   String
+  moedaDestino  String
+  valor         Decimal       @db.Decimal(18, 6)
+  cotadoEm      DateTime
   responsavelId String
-  observacoes String?
-  createdAt DateTime @default(now())
-  loja Loja @relation(fields:[lojaId],references:[id],onDelete:Restrict)
-  produto Produto @relation(fields:[produtoId,lojaId],references:[id,lojaId],onDelete:Restrict)
-  estoque Estoque @relation(fields:[estoqueId,lojaId],references:[id,lojaId],onDelete:Restrict)
-  recebimento Recebimento? @relation(fields:[recebimentoId,lojaId],references:[id,lojaId],onDelete:Restrict)
-  responsavel Usuario @relation(fields:[responsavelId],references:[id],onDelete:Restrict)
-  @@index([lojaId,produtoId,createdAt])
-  @@index([lojaId,tipo])
+  createdAt     DateTime      @default(now())
+  loja          Loja          @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  responsavel   Usuario       @relation(fields: [responsavelId], references: [id], onDelete: Restrict)
+  custos        CustoPedido[]
+
+  @@unique([id, lojaId])
+  @@index([lojaId, cotadoEm])
+}
+
+model Pagamento {
+  id             String          @id @default(cuid())
+  lojaId         String
+  pedidoCompraId String
+  formaPagamento FormaPagamento
+  moeda          String
+  valor          Decimal         @db.Decimal(12, 2)
+  status         PagamentoStatus
+  pagoEm         DateTime?
+  referencia     String?
+  observacoes    String?
+  estornoDeId    String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  loja           Loja            @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  pedido         PedidoCompra    @relation(fields: [pedidoCompraId, lojaId], references: [id, lojaId], onDelete: Restrict)
+
+  @@unique([id, lojaId])
+  @@index([lojaId, pedidoCompraId, status])
+}
+
+model CustoPedido {
+  id              String            @id @default(cuid())
+  lojaId          String
+  pedidoCompraId  String
+  cotacaoCambioId String?
+  iofPercentual   Decimal           @default(0) @db.Decimal(8, 6)
+  iofValor        Decimal           @default(0) @db.Decimal(12, 2)
+  taxas           Decimal           @default(0) @db.Decimal(12, 2)
+  custoAdicional  Decimal           @default(0) @db.Decimal(12, 2)
+  totalGlobal     Decimal           @default(0) @db.Decimal(12, 2)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  loja            Loja              @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  pedido          PedidoCompra      @relation(fields: [pedidoCompraId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  cotacaoCambio   CotacaoCambio?    @relation(fields: [cotacaoCambioId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  itens           CustoPedidoItem[]
+
+  @@unique([pedidoCompraId, lojaId])
+  @@unique([id, lojaId])
+  @@index([lojaId, pedidoCompraId])
+}
+
+model CustoPedidoItem {
+  id                 String           @id @default(cuid())
+  lojaId             String
+  custoPedidoId      String
+  pedidoCompraItemId String
+  custoRateado       Decimal          @db.Decimal(12, 2)
+  custoTotalUnitario Decimal          @db.Decimal(12, 2)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  custo              CustoPedido      @relation(fields: [custoPedidoId, lojaId], references: [id, lojaId], onDelete: Cascade)
+  pedidoItem         PedidoCompraItem @relation(fields: [pedidoCompraItemId, lojaId], references: [id, lojaId], onDelete: Restrict)
+
+  @@unique([custoPedidoId, pedidoCompraItemId])
+  @@index([lojaId, pedidoCompraItemId])
 }

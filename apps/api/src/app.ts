@@ -11,6 +11,7 @@ import { purchaseOrdersRouter } from "./modules/purchase-orders/purchase-orders.
 import { logisticsRouter } from "./modules/logistics/logistics.routes";
 import { receivingRouter } from "./modules/receiving/receiving.routes";
 import { inventoryRouter } from "./modules/inventory/inventory.routes";
+import { financeRouter } from "./modules/finance/finance.routes";
 
 export function createApp() {
   const app = express();
@@ -26,6 +27,7 @@ export function createApp() {
   app.use("/logistics", logisticsRouter);
   app.use("/receiving", receivingRouter);
   app.use("/inventory", inventoryRouter);
+  app.use("/finance", financeRouter);
   app.use(errorHandler);
   return app;
 }

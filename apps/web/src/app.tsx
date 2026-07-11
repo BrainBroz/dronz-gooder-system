@@ -53,6 +53,9 @@ export const inventoryQueryKeys = {
   receiving: (id: string | null) => ["receiving", id] as const,
   movements: (id: string | null) => ["inventory-movements", id] as const
 };
+export const financeQueryKeys = {
+  payments: (id: string | null) => ["finance-payments", id] as const
+};
 export const formatSalePrice = (value: string) =>
   Number(value) === 0 ? "A definir" : value;
 
@@ -1103,6 +1106,48 @@ function InventoryPage() {
   );
 }
 
+function FinancePage() {
+  const store = useAuthStore((s) => s.activeStoreId);
+  const payments = useQuery({
+    queryKey: financeQueryKeys.payments(store),
+    enabled: !!store,
+    queryFn: async () =>
+      (
+        await api.get("/finance/payments", {
+          headers: { ...authHeader(), "x-store-id": store }
+        })
+      ).data
+  });
+  return (
+    <Box p={3}>
+      <Typography variant="h4">Financeiro de Compras</Typography>
+      <Typography color="text.secondary">
+        Câmbio e PayPal são registros manuais.
+      </Typography>
+      {payments.isLoading && <Typography>Carregando...</Typography>}
+      {payments.isError && <Typography>Falha ao carregar dados</Typography>}
+      {payments.data?.map(
+        (p: {
+          id: string;
+          formaPagamento: string;
+          valor: string;
+          moeda: string;
+          status: string;
+        }) => (
+          <Card key={p.id}>
+            <CardContent>
+              <Typography>
+                {p.formaPagamento} · {p.moeda} {p.valor}
+              </Typography>
+              <Typography>{p.status}</Typography>
+            </CardContent>
+          </Card>
+        )
+      )}
+    </Box>
+  );
+}
+
 export function NotFoundPage() {
   return <div>404</div>;
 }
@@ -1179,6 +1224,16 @@ export function AppRoutes() {
               <AuthGate>
                 <Shell>
                   <InventoryPage />
+                </Shell>
+              </AuthGate>
+            }
+          />
+          <Route
+            path="/financeiro"
+            element={
+              <AuthGate>
+                <Shell>
+                  <FinancePage />
                 </Shell>
               </AuthGate>
             }

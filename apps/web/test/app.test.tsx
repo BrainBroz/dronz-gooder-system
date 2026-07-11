@@ -9,6 +9,7 @@ import {
   purchasingQueryKeys,
   logisticsQueryKeys,
   inventoryQueryKeys,
+  financeQueryKeys,
   queryClient
 } from "../src/app";
 
@@ -61,6 +62,11 @@ describe("web app", () => {
   it("isola caches de estoque por loja", () => {
     expect(inventoryQueryKeys.stock("d")).not.toEqual(
       inventoryQueryKeys.stock("g")
+    );
+  });
+  it("isola caches financeiros por loja", () => {
+    expect(financeQueryKeys.payments("d")).not.toEqual(
+      financeQueryKeys.payments("g")
     );
   });
 });
