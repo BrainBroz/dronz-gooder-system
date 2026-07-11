@@ -320,3 +320,35 @@ logisticsRouter.post(
     )
   )
 );
+logisticsRouter.post(
+  "/checkpoint-paraguai",
+  wrap((r) =>
+    s.confirmParaguai(
+      r.storeId!,
+      r.identity!.user.id,
+      parse(
+        z
+          .object({
+            viagemId: z.string(),
+            malaId: z.string(),
+            confirmadoEm: z.coerce.date(),
+            observacao: z.string().optional(),
+            tipoDivergencia: z
+              .enum([
+                "CORRETO",
+                "MALA_AUSENTE",
+                "VOLUME_AUSENTE",
+                "ITEM_NAO_LOCALIZADO",
+                "QUANTIDADE_DIVERGENTE",
+                "AVARIA",
+                "ITEM_EXTRA",
+                "CHECKPOINT_PARCIAL"
+              ])
+              .default("CORRETO")
+          })
+          .strict(),
+        r.body
+      ) as never
+    )
+  )
+);

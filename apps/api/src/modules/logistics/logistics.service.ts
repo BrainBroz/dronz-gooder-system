@@ -393,3 +393,39 @@ export async function deallocate(lojaId: string, alocacaoId: string) {
   if (a.mala.status !== "PLANNING") throw new AppError(409, "conflict");
   return prisma.alocacaoMala.delete({ where: { id: alocacaoId } });
 }
+
+export async function confirmParaguai(
+  lojaId: string,
+  userId: string,
+  d: {
+    viagemId: string;
+    malaId: string;
+    confirmadoEm: Date;
+    observacao?: string;
+    tipoDivergencia?: "CORRETO" | "MALA_AUSENTE" | "VOLUME_AUSENTE" | "ITEM_NAO_LOCALIZADO" | "QUANTIDADE_DIVERGENTE" | "AVARIA" | "ITEM_EXTRA" | "CHECKPOINT_PARCIAL";
+  }
+) {
+  return prisma.$transaction(async (tx) => {
+    const viagem = await tx.viagem.findFirst({
+      where: { id: d.viagemId, lojaId }
+    });
+    if (!viagem) throw new AppError(404, "not_found");
+    const mala = await tx.mala.findFirst({
+      where: { id: d.malaId, lojaId, viagemId: d.viagemId }
+    });
+    if (!mala) throw new AppError(404, "not_found");
+    const checkpoint = await tx.checkpointParaguai.create({
+      data: {
+        id: `cp-py-${Date.now()}`,
+        lojaId,
+        viagemId: d.viagemId,
+        malaId: d.malaId,
+        confirmadoPorId: userId,
+        confirmadoEm: d.confirmadoEm,
+        observacao: d.observacao,
+        tipoDivergencia: d.tipoDivergencia || "CORRETO"
+      }
+    });
+    return checkpoint;
+  });
+}
