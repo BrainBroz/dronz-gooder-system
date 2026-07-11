@@ -39,6 +39,7 @@ model Loja {
   pagamentos           Pagamento[]
   custosPedido         CustoPedido[]
   simulacoesViagem     SimulacaoViagem[]
+  atribuicoes          AtribuicaoItem[]
 }
 
 model Usuario {
@@ -62,6 +63,7 @@ model Usuario {
   movimentacoesEstoque    MovimentacaoEstoque[]
   cotacoesCambio          CotacaoCambio[]
   simulacoesViagemCriadas SimulacaoViagem[]
+  atribuicoes             AtribuicaoItem[]
 }
 
 model Perfil {
@@ -291,6 +293,7 @@ model PedidoCompraItem {
   recebimentosMiami       RecebimentoMiami[]
   recebimentoItens        RecebimentoItem[]
   custosRateados          CustoPedidoItem[]
+  atribuicoes             AtribuicaoItem[]
 
   @@unique([pedidoCompraId, produtoId])
   @@unique([id, lojaId])
@@ -862,4 +865,23 @@ model SimulacaoViagemParametro {
 
   @@unique([id, lojaId])
   @@unique([simulacaoViagemId, lojaId])
+}
+
+model AtribuicaoItem {
+  id                 String           @id @default(cuid())
+  pedidoCompraItemId String
+  lojaId             String
+  quantidade         Int
+  atribuidoPorId     String
+  atribuidoEm        DateTime         @default(now())
+  observacao         String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  pedidoCompraItem   PedidoCompraItem @relation(fields: [pedidoCompraItemId, lojaId], references: [id, lojaId], onDelete: Cascade)
+  loja               Loja             @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  atribuidoPor       Usuario          @relation(fields: [atribuidoPorId], references: [id], onDelete: Restrict)
+
+  @@unique([pedidoCompraItemId, lojaId])
+  @@index([lojaId, atribuidoEm])
 }

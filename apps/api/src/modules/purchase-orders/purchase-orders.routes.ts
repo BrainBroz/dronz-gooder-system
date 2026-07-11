@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { requireAuth, requireStore } from "../../middlewares/auth";
 import * as c from "./purchase-orders.controller";
+import * as tc from "./triagem.controller";
 
 export const purchaseOrdersRouter = Router();
 
@@ -16,3 +17,5 @@ purchaseOrdersRouter.delete("/:id", c.remove);
 purchaseOrdersRouter.post("/:id/items", c.addItem);
 purchaseOrdersRouter.patch("/:id/items/:itemId", c.updateItem);
 purchaseOrdersRouter.delete("/:id/items/:itemId", c.removeItem);
+purchaseOrdersRouter.post("/:id/items/:itemId/atribuir", tc.atribuirItem);
+purchaseOrdersRouter.get("/:id/atribuicoes", tc.listarAtribuicoes);
