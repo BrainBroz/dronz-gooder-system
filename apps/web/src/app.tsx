@@ -59,6 +59,10 @@ export const financeQueryKeys = {
 export const dashboardQueryKeys = {
   summary: (id: string | null) => ["dashboard", id] as const
 };
+export const reportQueryKeys = {
+  report: (id: string | null, type: string, from: string, to: string) =>
+    ["report", id, type, from, to] as const
+};
 export const formatSalePrice = (value: string) =>
   Number(value) === 0 ? "A definir" : value;
 
@@ -319,6 +323,20 @@ function Shell({ children }: { children: React.ReactNode }) {
                 onClick={() => setActiveStoreId(store.id)}
               >
                 {store.nome}
+              </Button>
+            ))}
+            {[
+              ["Operação", "/operacao"],
+              ["Produtos", "/produtos"],
+              ["Fornecedores", "/fornecedores"],
+              ["Pedidos", "/pedidos"],
+              ["Logística", "/logistica"],
+              ["Estoque", "/estoque"],
+              ["Financeiro", "/financeiro"],
+              ["Relatórios", "/relatorios"]
+            ].map(([label, path]) => (
+              <Button key={path} onClick={() => navigate(path)}>
+                {label}
               </Button>
             ))}
           </Stack>
@@ -964,9 +982,31 @@ function PurchaseOrdersPage() {
     </Box>
   );
 }
-function LogisticsPage() {
+export function LogisticsPage() {
   const store = useAuthStore((s) => s.activeStoreId),
     headers = { ...authHeader(), "x-store-id": store };
+  const client = useQueryClient();
+  const travelerForm = useForm<{ nome: string; email: string }>({
+    defaultValues: { nome: "", email: "" }
+  });
+  const tripForm = useForm<{
+    viajanteId: string;
+    origem: string;
+    destino: string;
+    partidaEm: string;
+    chegadaPrevistaEm: string;
+  }>({
+    defaultValues: {
+      viajanteId: "",
+      origem: "",
+      destino: "",
+      partidaEm: "",
+      chegadaPrevistaEm: ""
+    }
+  });
+  const bagForm = useForm<{ viagemId: string; codigo: string }>({
+    defaultValues: { viagemId: "", codigo: "" }
+  });
   const travelers = useQuery({
     queryKey: logisticsQueryKeys.travelers(store),
     enabled: !!store,
@@ -984,6 +1024,45 @@ function LogisticsPage() {
     queryFn: async () =>
       (await api.get("/logistics/suitcases", { headers })).data
   });
+  const createTraveler = useMutation({
+    mutationFn: (data: { nome: string; email: string }) =>
+      api.post(
+        "/logistics/travelers",
+        { nome: data.nome, email: data.email || undefined },
+        { headers }
+      ),
+    onSuccess: async () => {
+      travelerForm.reset();
+      await client.invalidateQueries({
+        queryKey: logisticsQueryKeys.travelers(store)
+      });
+    }
+  });
+  const createTrip = useMutation({
+    mutationFn: (data: {
+      viajanteId: string;
+      origem: string;
+      destino: string;
+      partidaEm: string;
+      chegadaPrevistaEm: string;
+    }) => api.post("/logistics/trips", data, { headers }),
+    onSuccess: async () => {
+      tripForm.reset();
+      await client.invalidateQueries({
+        queryKey: logisticsQueryKeys.trips(store)
+      });
+    }
+  });
+  const createBag = useMutation({
+    mutationFn: (data: { viagemId: string; codigo: string }) =>
+      api.post("/logistics/suitcases", data, { headers }),
+    onSuccess: async () => {
+      bagForm.reset();
+      await client.invalidateQueries({
+        queryKey: logisticsQueryKeys.suitcases(store)
+      });
+    }
+  });
   return (
     <Box p={3}>
       <Typography variant="h4">Logística Internacional</Typography>
@@ -992,6 +1071,25 @@ function LogisticsPage() {
       <Typography variant="h6" mt={2}>
         Viajantes
       </Typography>
+      <Stack
+        component="form"
+        direction={{ xs: "column", md: "row" }}
+        gap={1}
+        onSubmit={travelerForm.handleSubmit((v) => createTraveler.mutate(v))}
+      >
+        <TextField
+          label="Nome"
+          {...travelerForm.register("nome", { required: true })}
+        />
+        <TextField
+          label="E-mail"
+          type="email"
+          {...travelerForm.register("email")}
+        />
+        <Button type="submit" disabled={createTraveler.isPending}>
+          Adicionar viajante
+        </Button>
+      </Stack>
       {travelers.data?.map(
         (v: { id: string; nome: string; ativo: boolean }) => (
           <Card key={v.id}>
@@ -1005,6 +1103,49 @@ function LogisticsPage() {
       <Typography variant="h6" mt={2}>
         Viagens
       </Typography>
+      <Stack
+        component="form"
+        direction={{ xs: "column", md: "row" }}
+        gap={1}
+        onSubmit={tripForm.handleSubmit((v) => createTrip.mutate(v))}
+      >
+        <TextField
+          select
+          label="Viajante"
+          defaultValue=""
+          {...tripForm.register("viajanteId", { required: true })}
+        >
+          <MenuItem value="" disabled>
+            Selecione
+          </MenuItem>
+          {travelers.data?.map((v: { id: string; nome: string }) => (
+            <MenuItem key={v.id} value={v.id}>
+              {v.nome}
+            </MenuItem>
+          ))}
+        </TextField>
+        <TextField
+          label="Origem"
+          {...tripForm.register("origem", { required: true })}
+        />
+        <TextField
+          label="Destino"
+          {...tripForm.register("destino", { required: true })}
+        />
+        <TextField
+          type="datetime-local"
+          label="Partida"
+          InputLabelProps={{ shrink: true }}
+          {...tripForm.register("partidaEm", { required: true })}
+        />
+        <TextField
+          type="datetime-local"
+          label="Chegada prevista"
+          InputLabelProps={{ shrink: true }}
+          {...tripForm.register("chegadaPrevistaEm", { required: true })}
+        />
+        <Button type="submit">Criar viagem</Button>
+      </Stack>
       {trips.data?.map(
         (t: {
           id: string;
@@ -1025,6 +1166,38 @@ function LogisticsPage() {
       <Typography variant="h6" mt={2}>
         Malas e volumes
       </Typography>
+      <Stack
+        component="form"
+        direction={{ xs: "column", md: "row" }}
+        gap={1}
+        onSubmit={bagForm.handleSubmit((v) => createBag.mutate(v))}
+      >
+        <TextField
+          select
+          label="Viagem"
+          defaultValue=""
+          {...bagForm.register("viagemId", { required: true })}
+        >
+          <MenuItem value="" disabled>
+            Selecione
+          </MenuItem>
+          {trips.data?.map(
+            (t: { id: string; origem: string; destino: string }) => (
+              <MenuItem key={t.id} value={t.id}>
+                {t.origem} → {t.destino}
+              </MenuItem>
+            )
+          )}
+        </TextField>
+        <TextField
+          label="Código"
+          {...bagForm.register("codigo", { required: true })}
+        />
+        <Button type="submit">Criar mala</Button>
+      </Stack>
+      {(createTraveler.isError || createTrip.isError || createBag.isError) && (
+        <Typography color="error">Não foi possível salvar.</Typography>
+      )}
       {bags.data?.map(
         (b: {
           id: string;
@@ -1051,9 +1224,33 @@ function LogisticsPage() {
   );
 }
 
-function InventoryPage() {
+export function InventoryPage() {
   const store = useAuthStore((s) => s.activeStoreId);
   const headers = { ...authHeader(), "x-store-id": store };
+  const client = useQueryClient();
+  const movementForm = useForm<{
+    produtoId: string;
+    tipo:
+      | "RESERVE"
+      | "RELEASE_RESERVATION"
+      | "EXIT"
+      | "ADJUSTMENT_POSITIVE"
+      | "ADJUSTMENT_NEGATIVE"
+      | "RETURN_ENTRY"
+      | "RETURN_EXIT";
+    quantidade: number;
+    observacoes: string;
+  }>({
+    defaultValues: {
+      produtoId: "",
+      tipo: "RESERVE",
+      quantidade: 1,
+      observacoes: ""
+    }
+  });
+  const receiptForm = useForm<{ viagemId: string; malaId: string }>({
+    defaultValues: { viagemId: "", malaId: "" }
+  });
   const stock = useQuery({
     queryKey: inventoryQueryKeys.stock(store),
     enabled: !!store,
@@ -1064,6 +1261,83 @@ function InventoryPage() {
     enabled: !!store,
     queryFn: async () => (await api.get("/receiving", { headers })).data
   });
+  const trips = useQuery({
+    queryKey: logisticsQueryKeys.trips(store),
+    enabled: !!store,
+    queryFn: async () => (await api.get("/logistics/trips", { headers })).data
+  });
+  const bags = useQuery({
+    queryKey: logisticsQueryKeys.suitcases(store),
+    enabled: !!store,
+    queryFn: async () =>
+      (await api.get("/logistics/suitcases", { headers })).data
+  });
+  const refreshInventory = () =>
+    Promise.all([
+      client.invalidateQueries({ queryKey: inventoryQueryKeys.stock(store) }),
+      client.invalidateQueries({
+        queryKey: inventoryQueryKeys.receiving(store)
+      }),
+      client.invalidateQueries({
+        queryKey: inventoryQueryKeys.movements(store)
+      })
+    ]);
+  const move = useMutation({
+    mutationFn: (v: {
+      produtoId: string;
+      tipo: string;
+      quantidade: number;
+      observacoes: string;
+    }) =>
+      api.post(
+        "/inventory/movements",
+        {
+          ...v,
+          quantidade: Number(v.quantidade),
+          motivo:
+            v.tipo === "RESERVE"
+              ? "RESERVATION"
+              : v.tipo === "RELEASE_RESERVATION"
+                ? "RESERVATION_RELEASE"
+                : v.tipo === "EXIT"
+                  ? "SALE"
+                  : v.tipo.startsWith("RETURN")
+                    ? "RETURN"
+                    : "MANUAL_CORRECTION",
+          observacoes: v.observacoes || undefined
+        },
+        { headers }
+      ),
+    onSuccess: async () => {
+      movementForm.reset();
+      await refreshInventory();
+    }
+  });
+  const createReceipt = useMutation({
+    mutationFn: (v: { viagemId: string; malaId: string }) =>
+      api.post("/receiving", v, { headers }),
+    onSuccess: async () => {
+      receiptForm.reset();
+      await refreshInventory();
+    }
+  });
+  const confirmReceipt = useMutation({
+    mutationFn: ({
+      receiptId,
+      itemId,
+      quantity
+    }: {
+      receiptId: string;
+      itemId: string;
+      quantity: number;
+    }) =>
+      api.post(
+        `/receiving/${receiptId}/items/${itemId}/confirm`,
+        { quantidadeRecebida: quantity, quantidadeRejeitada: 0 },
+        { headers }
+      ),
+    onSuccess: refreshInventory
+  });
 
   return (
     <Box p={3}>
@@ -1073,6 +1347,63 @@ function InventoryPage() {
       <Typography variant="h6" mt={2}>
         Posição de estoque
       </Typography>
+      <Stack
+        component="form"
+        direction={{ xs: "column", md: "row" }}
+        gap={1}
+        onSubmit={movementForm.handleSubmit((v) => move.mutate(v))}
+      >
+        <TextField
+          select
+          label="Produto"
+          defaultValue=""
+          {...movementForm.register("produtoId", { required: true })}
+        >
+          <MenuItem value="" disabled>
+            Selecione
+          </MenuItem>
+          {stock.data?.map(
+            (x: { produtoId: string; produto: { nome: string } }) => (
+              <MenuItem key={x.produtoId} value={x.produtoId}>
+                {x.produto.nome}
+              </MenuItem>
+            )
+          )}
+        </TextField>
+        <TextField
+          select
+          label="Movimento"
+          defaultValue="RESERVE"
+          {...movementForm.register("tipo")}
+        >
+          {[
+            "RESERVE",
+            "RELEASE_RESERVATION",
+            "EXIT",
+            "ADJUSTMENT_POSITIVE",
+            "ADJUSTMENT_NEGATIVE",
+            "RETURN_ENTRY",
+            "RETURN_EXIT"
+          ].map((x) => (
+            <MenuItem key={x} value={x}>
+              {x}
+            </MenuItem>
+          ))}
+        </TextField>
+        <TextField
+          type="number"
+          label="Quantidade"
+          {...movementForm.register("quantidade", {
+            valueAsNumber: true,
+            min: 1
+          })}
+        />
+        <TextField
+          label="Observação"
+          {...movementForm.register("observacoes")}
+        />
+        <Button type="submit">Registrar movimento</Button>
+      </Stack>
       {stock.data?.map(
         (item: {
           id: string;
@@ -1114,22 +1445,153 @@ function InventoryPage() {
       <Typography variant="h6" mt={2}>
         Recebimentos
       </Typography>
+      <Stack
+        component="form"
+        direction={{ xs: "column", md: "row" }}
+        gap={1}
+        onSubmit={receiptForm.handleSubmit((v) => createReceipt.mutate(v))}
+      >
+        <TextField
+          select
+          label="Viagem chegada"
+          defaultValue=""
+          {...receiptForm.register("viagemId", { required: true })}
+        >
+          <MenuItem value="" disabled>
+            Selecione
+          </MenuItem>
+          {trips.data
+            ?.filter((t: { status: string }) => t.status === "ARRIVED_BRAZIL")
+            .map((t: { id: string; origem: string; destino: string }) => (
+              <MenuItem key={t.id} value={t.id}>
+                {t.origem} → {t.destino}
+              </MenuItem>
+            ))}
+        </TextField>
+        <TextField
+          select
+          label="Mala"
+          defaultValue=""
+          {...receiptForm.register("malaId", { required: true })}
+        >
+          <MenuItem value="" disabled>
+            Selecione
+          </MenuItem>
+          {bags.data
+            ?.filter((b: { status: string }) =>
+              ["ARRIVED_BRAZIL", "RECEIVED"].includes(b.status)
+            )
+            .map((b: { id: string; codigo: string }) => (
+              <MenuItem key={b.id} value={b.id}>
+                {b.codigo}
+              </MenuItem>
+            ))}
+        </TextField>
+        <Button type="submit">Iniciar recebimento</Button>
+      </Stack>
       {receiving.data?.map(
-        (item: { id: string; status: string; itens: unknown[] }) => (
+        (item: {
+          id: string;
+          status: string;
+          itens: {
+            id: string;
+            quantidadeEsperada: number;
+            quantidadeRecebida: number;
+            quantidadeRejeitada: number;
+            produto: { nome: string };
+          }[];
+        }) => (
           <Card key={item.id}>
             <CardContent>
               <Typography>{item.status}</Typography>
               <Typography>{item.itens.length} item(ns)</Typography>
+              {item.itens.map((received) => {
+                const remaining =
+                  received.quantidadeEsperada -
+                  received.quantidadeRecebida -
+                  received.quantidadeRejeitada;
+                return (
+                  <Stack
+                    key={received.id}
+                    direction="row"
+                    gap={1}
+                    alignItems="center"
+                  >
+                    <Typography>
+                      {received.produto.nome}: {received.quantidadeRecebida}/
+                      {received.quantidadeEsperada}
+                    </Typography>
+                    {remaining > 0 && (
+                      <Button
+                        onClick={() =>
+                          confirmReceipt.mutate({
+                            receiptId: item.id,
+                            itemId: received.id,
+                            quantity: remaining
+                          })
+                        }
+                      >
+                        Confirmar {remaining}
+                      </Button>
+                    )}
+                  </Stack>
+                );
+              })}
             </CardContent>
           </Card>
         )
+      )}
+      {(move.isError || createReceipt.isError || confirmReceipt.isError) && (
+        <Typography color="error">Operação não concluída.</Typography>
       )}
     </Box>
   );
 }
 
-function FinancePage() {
+export function FinancePage() {
   const store = useAuthStore((s) => s.activeStoreId);
+  const client = useQueryClient();
+  const exchangeForm = useForm<{
+    moedaOrigem: string;
+    moedaDestino: string;
+    valor: number;
+    cotadoEm: string;
+  }>({
+    defaultValues: {
+      moedaOrigem: "BRL",
+      moedaDestino: "USD",
+      valor: 0,
+      cotadoEm: ""
+    }
+  });
+  const paymentForm = useForm<{
+    pedidoCompraId: string;
+    formaPagamento:
+      "CREDIT_CARD" | "PAYPAL" | "BANK_TRANSFER" | "CASH" | "OTHER";
+    moeda: string;
+    valor: number;
+  }>({
+    defaultValues: {
+      pedidoCompraId: "",
+      formaPagamento: "OTHER",
+      moeda: "USD",
+      valor: 0
+    }
+  });
+  const costForm = useForm<{
+    pedidoCompraId: string;
+    iofPercentual: number;
+    taxas: number;
+    custoAdicional: number;
+  }>({
+    defaultValues: {
+      pedidoCompraId: "",
+      iofPercentual: 0,
+      taxas: 0,
+      custoAdicional: 0
+    }
+  });
+  const headers = { ...authHeader(), "x-store-id": store };
   const payments = useQuery({
     queryKey: financeQueryKeys.payments(store),
     enabled: !!store,
@@ -1140,12 +1602,212 @@ function FinancePage() {
         })
       ).data
   });
+  const orders = useQuery<PurchaseOrder[]>({
+    queryKey: purchasingQueryKeys.orders(store),
+    enabled: !!store,
+    queryFn: async () =>
+      (await api.get("/purchase-orders", { headers })).data.items
+  });
+  const exchange = useMutation({
+    mutationFn: (v: {
+      moedaOrigem: string;
+      moedaDestino: string;
+      valor: number;
+      cotadoEm: string;
+    }) =>
+      api.post(
+        "/finance/exchange-rates",
+        {
+          ...v,
+          valor: Number(v.valor),
+          cotadoEm: v.cotadoEm || new Date().toISOString()
+        },
+        { headers }
+      ),
+    onSuccess: () => exchangeForm.reset()
+  });
+  const payment = useMutation({
+    mutationFn: (v: {
+      pedidoCompraId: string;
+      formaPagamento: string;
+      moeda: string;
+      valor: number;
+    }) =>
+      api.post(
+        "/finance/payments",
+        { ...v, valor: Number(v.valor) },
+        { headers }
+      ),
+    onSuccess: async () => {
+      paymentForm.reset();
+      await client.invalidateQueries({
+        queryKey: financeQueryKeys.payments(store)
+      });
+    }
+  });
+  const costs = useMutation({
+    mutationFn: (v: {
+      pedidoCompraId: string;
+      iofPercentual: number;
+      taxas: number;
+      custoAdicional: number;
+    }) =>
+      api.put(
+        `/finance/orders/${v.pedidoCompraId}/costs`,
+        {
+          iofPercentual: Number(v.iofPercentual),
+          taxas: Number(v.taxas),
+          custoAdicional: Number(v.custoAdicional)
+        },
+        { headers }
+      )
+  });
   return (
     <Box p={3}>
       <Typography variant="h4">Financeiro de Compras</Typography>
       <Typography color="text.secondary">
         Câmbio e PayPal são registros manuais.
       </Typography>
+      <Stack
+        component="form"
+        direction={{ xs: "column", md: "row" }}
+        gap={1}
+        my={2}
+        onSubmit={exchangeForm.handleSubmit((v) => exchange.mutate(v))}
+      >
+        <TextField
+          label="Moeda origem"
+          {...exchangeForm.register("moedaOrigem", {
+            required: true,
+            minLength: 3,
+            maxLength: 3
+          })}
+        />
+        <TextField
+          label="Moeda destino"
+          {...exchangeForm.register("moedaDestino", {
+            required: true,
+            minLength: 3,
+            maxLength: 3
+          })}
+        />
+        <TextField
+          type="number"
+          inputProps={{ step: "0.000001" }}
+          label="Cotação"
+          {...exchangeForm.register("valor", {
+            valueAsNumber: true,
+            min: 0.000001
+          })}
+        />
+        <TextField
+          type="datetime-local"
+          label="Data"
+          InputLabelProps={{ shrink: true }}
+          {...exchangeForm.register("cotadoEm")}
+        />
+        <Button type="submit">Registrar câmbio</Button>
+      </Stack>
+      <Stack
+        component="form"
+        direction={{ xs: "column", md: "row" }}
+        gap={1}
+        my={2}
+        onSubmit={paymentForm.handleSubmit((v) => payment.mutate(v))}
+      >
+        <TextField
+          select
+          label="Pedido"
+          defaultValue=""
+          {...paymentForm.register("pedidoCompraId", { required: true })}
+        >
+          <MenuItem value="" disabled>
+            Selecione
+          </MenuItem>
+          {orders.data?.map((o) => (
+            <MenuItem key={o.id} value={o.id}>
+              {o.numeroPedido}
+            </MenuItem>
+          ))}
+        </TextField>
+        <TextField
+          select
+          label="Forma"
+          defaultValue="OTHER"
+          {...paymentForm.register("formaPagamento")}
+        >
+          {["CREDIT_CARD", "PAYPAL", "BANK_TRANSFER", "CASH", "OTHER"].map(
+            (x) => (
+              <MenuItem key={x} value={x}>
+                {x}
+              </MenuItem>
+            )
+          )}
+        </TextField>
+        <TextField
+          label="Moeda"
+          {...paymentForm.register("moeda", {
+            required: true,
+            minLength: 3,
+            maxLength: 3
+          })}
+        />
+        <TextField
+          type="number"
+          inputProps={{ step: "0.01" }}
+          label="Valor"
+          {...paymentForm.register("valor", { valueAsNumber: true, min: 0.01 })}
+        />
+        <Button type="submit">Registrar pagamento</Button>
+      </Stack>
+      <Stack
+        component="form"
+        direction={{ xs: "column", md: "row" }}
+        gap={1}
+        my={2}
+        onSubmit={costForm.handleSubmit((v) => costs.mutate(v))}
+      >
+        <TextField
+          select
+          label="Pedido para custos"
+          defaultValue=""
+          {...costForm.register("pedidoCompraId", { required: true })}
+        >
+          <MenuItem value="" disabled>
+            Selecione
+          </MenuItem>
+          {orders.data?.map((o) => (
+            <MenuItem key={o.id} value={o.id}>
+              {o.numeroPedido}
+            </MenuItem>
+          ))}
+        </TextField>
+        <TextField
+          type="number"
+          label="IOF %"
+          {...costForm.register("iofPercentual", {
+            valueAsNumber: true,
+            min: 0
+          })}
+        />
+        <TextField
+          type="number"
+          label="Taxas"
+          {...costForm.register("taxas", { valueAsNumber: true, min: 0 })}
+        />
+        <TextField
+          type="number"
+          label="Adicional"
+          {...costForm.register("custoAdicional", {
+            valueAsNumber: true,
+            min: 0
+          })}
+        />
+        <Button type="submit">Calcular custos</Button>
+      </Stack>
+      {(exchange.isError || payment.isError || costs.isError) && (
+        <Typography color="error">Não foi possível registrar.</Typography>
+      )}
       {payments.isLoading && <Typography>Carregando...</Typography>}
       {payments.isError && <Typography>Falha ao carregar dados</Typography>}
       {payments.data?.map(
@@ -1166,6 +1828,83 @@ function FinancePage() {
           </Card>
         )
       )}
+    </Box>
+  );
+}
+
+const reportTypes = [
+  ["purchase-orders", "Pedidos de Compra"],
+  ["purchase-items", "Itens Comprados"],
+  ["logistics", "Logística por Viagem"],
+  ["suitcase-weight", "Peso por Mala"],
+  ["receiving", "Recebimentos"],
+  ["inventory", "Posição de Estoque"],
+  ["movements", "Movimentações"],
+  ["costs", "Custos por Pedido"],
+  ["payments", "Pagamentos"],
+  ["markup", "Markup e Margem"]
+] as const;
+export function ReportsPage() {
+  const store = useAuthStore((s) => s.activeStoreId);
+  const [type, setType] = React.useState<string>("purchase-orders");
+  const [from, setFrom] = React.useState("");
+  const [to, setTo] = React.useState("");
+  const report = useQuery<unknown[]>({
+    queryKey: reportQueryKeys.report(store, type, from, to),
+    enabled: !!store,
+    queryFn: async () =>
+      (
+        await api.get(`/analytics/reports/${type}`, {
+          headers: { ...authHeader(), "x-store-id": store },
+          params: { from: from || undefined, to: to || undefined }
+        })
+      ).data
+  });
+  return (
+    <Box p={3}>
+      <Typography variant="h4">Relatórios</Typography>
+      <Stack direction={{ xs: "column", md: "row" }} gap={2} my={2}>
+        <TextField
+          select
+          label="Relatório"
+          value={type}
+          onChange={(e) => setType(e.target.value)}
+        >
+          {reportTypes.map(([value, label]) => (
+            <MenuItem key={value} value={value}>
+              {label}
+            </MenuItem>
+          ))}
+        </TextField>
+        <TextField
+          type="date"
+          label="De"
+          value={from}
+          onChange={(e) => setFrom(e.target.value)}
+          InputLabelProps={{ shrink: true }}
+        />
+        <TextField
+          type="date"
+          label="Até"
+          value={to}
+          onChange={(e) => setTo(e.target.value)}
+          InputLabelProps={{ shrink: true }}
+        />
+      </Stack>
+      {report.isLoading && <Typography>Carregando...</Typography>}
+      {report.isError && <Typography>Falha ao carregar relatório</Typography>}
+      {!report.isLoading && !report.data?.length && (
+        <Typography>Nenhum registro.</Typography>
+      )}
+      {report.data?.map((row, index) => (
+        <Card key={String((row as { id?: string }).id ?? index)}>
+          <CardContent>
+            <Typography component="pre" sx={{ whiteSpace: "pre-wrap" }}>
+              {JSON.stringify(row, null, 2)}
+            </Typography>
+          </CardContent>
+        </Card>
+      ))}
     </Box>
   );
 }
@@ -1256,6 +1995,39 @@ export function AppRoutes() {
               <AuthGate>
                 <Shell>
                   <FinancePage />
+                </Shell>
+              </AuthGate>
+            }
+          />
+          <Route
+            path="/relatorios"
+            element={
+              <AuthGate>
+                <Shell>
+                  <ReportsPage />
+                </Shell>
+              </AuthGate>
+            }
+          />
+          {(["/viajantes", "/viagens", "/malas"] as const).map((path) => (
+            <Route
+              key={path}
+              path={path}
+              element={
+                <AuthGate>
+                  <Shell>
+                    <LogisticsPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+          ))}
+          <Route
+            path="/recebimentos"
+            element={
+              <AuthGate>
+                <Shell>
+                  <InventoryPage />
                 </Shell>
               </AuthGate>
             }

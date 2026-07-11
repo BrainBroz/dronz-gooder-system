@@ -15,6 +15,7 @@
     "format": "prettier . --write",
     "db:generate": "npm run db:generate --workspace @dronz-gooder/api",
     "db:migrate": "npm run db:migrate --workspace @dronz-gooder/api",
+    "db:migrate:deploy": "npm run db:migrate:deploy --workspace @dronz-gooder/api",
     "db:seed": "npm run db:seed --workspace @dronz-gooder/api"
   },
   "devDependencies": {

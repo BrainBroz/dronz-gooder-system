@@ -31,5 +31,15 @@ analyticsRouter.get(
 );
 analyticsRouter.get(
   "/reports/:type",
-  run((r) => s.report(r.storeId!, String(r.params.type)))
+  run((r) => {
+    const filters = z
+      .object({
+        from: z.coerce.date().optional(),
+        to: z.coerce.date().optional(),
+        status: z.string().min(1).optional()
+      })
+      .strict()
+      .parse(r.query);
+    return s.report(r.storeId!, String(r.params.type), filters);
+  })
 );

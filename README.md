@@ -48,6 +48,7 @@ Status atual:
 - `npm run build`
 - `npm run db:generate`
 - `npm run db:migrate`
+- `npm run db:migrate:deploy`
 - `npm run db:seed`
 
 ## Itens não implementados ainda

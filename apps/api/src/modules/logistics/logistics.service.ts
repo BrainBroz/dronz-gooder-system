@@ -215,19 +215,17 @@ export async function confirmMiami(
       where: { id: i.id },
       data: { quantidadeRecebidaMiami: qty }
     });
-    const pending = await tx.pedidoCompraItem.count({
-      where: {
-        pedidoCompraId: i.pedidoCompraId,
-        OR: [{ quantidadeRecebidaMiami: { lt: 1 } }]
-      }
+    const orderItems = await tx.pedidoCompraItem.findMany({
+      where: { pedidoCompraId: i.pedidoCompraId },
+      select: { quantidade: true, quantidadeRecebidaMiami: true }
     });
+    const complete = orderItems.every(
+      (item) => item.quantidadeRecebidaMiami >= item.quantidade
+    );
     await tx.pedidoCompra.update({
       where: { id: i.pedidoCompraId },
       data: {
-        status:
-          qty === i.quantidade && pending === 0
-            ? "RECEIVED_MIAMI"
-            : "PARTIALLY_RECEIVED_MIAMI"
+        status: complete ? "RECEIVED_MIAMI" : "PARTIALLY_RECEIVED_MIAMI"
       }
     });
     return r;

@@ -2,7 +2,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { PrismaClient } from "@prisma/client";
 process.env.DATABASE_URL =
-  "postgresql://postgres:postgres@localhost:5432/dronz_gooder?schema=public";
+  process.env.DATABASE_TEST_URL ??
+  "postgresql://postgres:postgres@localhost:5432/dronz_gooder_test?schema=public";
 process.env.WEB_ORIGIN = "http://localhost:5173";
 process.env.JWT_ACCESS_SECRET = "change-me-access";
 process.env.JWT_REFRESH_SECRET = "change-me-refresh";
@@ -79,6 +80,10 @@ describe("international logistics", () => {
     const item = await prisma.pedidoCompraItem.findFirstOrThrow({
       where: { lojaId: d.id }
     });
+    await prisma.pedidoCompraItem.update({
+      where: { id: item.id },
+      data: { quantidade: 2 }
+    });
     const partial = await request(app)
       .post("/logistics/miami-confirmations")
       .set(h(t, d.id))
@@ -95,6 +100,25 @@ describe("international logistics", () => {
           where: { id: item.pedidoCompraId }
         })
       ).status
+    ).toBe("PARTIALLY_RECEIVED_MIAMI");
+    await request(app)
+      .post("/logistics/miami-confirmations")
+      .set(h(t, d.id))
+      .send({
+        pedidoCompraItemId: item.id,
+        quantidadeRecebida: 1,
+        recebidoEm: new Date().toISOString()
+      });
+    expect(
+      (
+        await prisma.pedidoCompra.findUniqueOrThrow({
+          where: { id: item.pedidoCompraId }
+        })
+      ).status
     ).toBe("RECEIVED_MIAMI");
+    await prisma.pedidoCompraItem.update({
+      where: { id: item.id },
+      data: { quantidade: item.quantidade }
+    });
   });
 });

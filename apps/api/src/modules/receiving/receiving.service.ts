@@ -78,11 +78,23 @@ export async function confirm(
       !item ||
       d.quantidadeRecebida < 0 ||
       d.quantidadeRejeitada < 0 ||
-      d.quantidadeRecebida + d.quantidadeRejeitada > item.quantidadeEsperada
+      item.quantidadeRecebida +
+        item.quantidadeRejeitada +
+        d.quantidadeRecebida +
+        d.quantidadeRejeitada >
+        item.quantidadeEsperada
     )
       throw new AppError(409, "conflict");
-    if (item.quantidadeRecebida > 0) throw new AppError(409, "duplicate_entry");
-    await tx.recebimentoItem.update({ where: { id: item.id }, data: d });
+    if (d.quantidadeRecebida + d.quantidadeRejeitada === 0)
+      throw new AppError(400, "bad_request");
+    await tx.recebimentoItem.update({
+      where: { id: item.id },
+      data: {
+        quantidadeRecebida: { increment: d.quantidadeRecebida },
+        quantidadeRejeitada: { increment: d.quantidadeRejeitada },
+        observacoes: d.observacoes
+      }
+    });
     if (d.quantidadeRecebida > 0) {
       const stock = await tx.estoque.upsert({
         where: { lojaId_produtoId: { lojaId, produtoId: item.produtoId } },
@@ -109,13 +121,19 @@ export async function confirm(
         }
       });
     }
-    const pending = await tx.recebimentoItem.count({
-      where: {
-        recebimentoId: id,
-        quantidadeRecebida: 0,
-        quantidadeRejeitada: 0
+    const items = await tx.recebimentoItem.findMany({
+      where: { recebimentoId: id },
+      select: {
+        quantidadeEsperada: true,
+        quantidadeRecebida: true,
+        quantidadeRejeitada: true
       }
     });
+    const pending = items.some(
+      (current) =>
+        current.quantidadeRecebida + current.quantidadeRejeitada <
+        current.quantidadeEsperada
+    );
     return tx.recebimento.update({
       where: { id },
       data: {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import React from "react";
 import { MemoryRouter } from "react-router-dom";
+import { QueryClientProvider } from "@tanstack/react-query";
 import {
   AppRoutes,
   catalogQueryKeys,
@@ -11,6 +12,11 @@ import {
   inventoryQueryKeys,
   financeQueryKeys,
   dashboardQueryKeys,
+  reportQueryKeys,
+  LogisticsPage,
+  InventoryPage,
+  FinancePage,
+  ReportsPage,
   queryClient
 } from "../src/app";
 
@@ -74,5 +80,26 @@ describe("web app", () => {
     expect(dashboardQueryKeys.summary("d")).not.toEqual(
       dashboardQueryKeys.summary("g")
     );
+  });
+  it("isola relatórios por loja e filtros", () => {
+    expect(reportQueryKeys.report("d", "inventory", "", "")).not.toEqual(
+      reportQueryKeys.report("g", "inventory", "", "")
+    );
+    expect(
+      reportQueryKeys.report("d", "inventory", "2026-01-01", "")
+    ).not.toEqual(reportQueryKeys.report("d", "inventory", "", ""));
+  });
+  it.each([
+    [LogisticsPage, "Adicionar viajante"],
+    [InventoryPage, "Registrar movimento"],
+    [FinancePage, "Registrar pagamento"],
+    [ReportsPage, "Relatórios"]
+  ])("renderiza fluxo operacional funcional", (Page, label) => {
+    const html = renderToStaticMarkup(
+      <QueryClientProvider client={queryClient}>
+        <Page />
+      </QueryClientProvider>
+    );
+    expect(html).toContain(label);
   });
 });

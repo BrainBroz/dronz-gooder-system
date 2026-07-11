@@ -7,11 +7,13 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsup src/server.ts --format esm --out-dir dist --dts",
-    "test": "vitest run",
+    "test": "npm run db:test:prepare && vitest run",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:test:prepare": "DATABASE_URL=${DATABASE_TEST_URL:-postgresql://postgres:postgres@localhost:5432/dronz_gooder_test?schema=public} prisma migrate deploy && DATABASE_URL=${DATABASE_TEST_URL:-postgresql://postgres:postgres@localhost:5432/dronz_gooder_test?schema=public} tsx prisma/seed.ts",
     "db:seed": "tsx prisma/seed.ts"
   },
   "dependencies": {

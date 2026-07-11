@@ -1,7 +1,8 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
 process.env.DATABASE_URL =
-  "postgresql://postgres:postgres@localhost:5432/dronz_gooder?schema=public";
+  process.env.DATABASE_TEST_URL ??
+  "postgresql://postgres:postgres@localhost:5432/dronz_gooder_test?schema=public";
 process.env.WEB_ORIGIN = "http://localhost:5173";
 process.env.JWT_ACCESS_SECRET = "change-me-access";
 process.env.JWT_REFRESH_SECRET = "change-me-refresh";
@@ -40,6 +41,45 @@ describe("analytics", () => {
     );
     expect(
       (await request(app).get("/analytics/reports/unknown").set(h(d.id))).status
+    ).toBe(400);
+    for (const type of [
+      "purchase-orders",
+      "purchase-items",
+      "logistics",
+      "suitcase-weight",
+      "receiving",
+      "inventory",
+      "movements",
+      "costs",
+      "payments",
+      "markup"
+    ]) {
+      const response = await request(app)
+        .get(`/analytics/reports/${type}`)
+        .set(h(d.id));
+      expect(response.status, type).toBe(200);
+      expect(
+        response.body.every((row: { lojaId: string }) => row.lojaId === d.id),
+        type
+      ).toBe(true);
+    }
+    const future = await request(app)
+      .get("/analytics/reports/purchase-orders?from=2099-01-01")
+      .set(h(d.id));
+    expect(future.body).toEqual([]);
+    expect(
+      (
+        await request(app)
+          .get("/analytics/reports/purchase-orders?status=ARBITRARY")
+          .set(h(d.id))
+      ).status
+    ).toBe(400);
+    expect(
+      (
+        await request(app)
+          .get("/analytics/reports/purchase-orders?from=invalid")
+          .set(h(d.id))
+      ).status
     ).toBe(400);
   });
 });

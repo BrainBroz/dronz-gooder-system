@@ -11,11 +11,13 @@
 
 1. Instale dependências com lockfile (`npm ci`).
 2. Configure as variáveis de ambiente sem copiar `.env` para a imagem.
-3. Execute `npx prisma migrate deploy --schema apps/api/prisma/schema.prisma`.
+3. Execute `npm run db:migrate:deploy`.
 4. Execute `npm run typecheck`, `npm run lint`, `npm run test` e `npm run build`.
 5. Inicie a API e valide `GET /health` atrás do proxy HTTPS.
 
 O seed cria dados administrativos e deve ser executado deliberadamente, somente com `SEED_ADMIN_*` definidos para o ambiente correto. Integrações externas, tracking, e-mail, QR Code, PDF e Excel não fazem parte desta versão.
+
+Os testes de integração exigem `DATABASE_TEST_URL` apontando para um PostgreSQL exclusivo de testes. A suíte aplica migrations e seed nesse banco antes da execução e nunca deve receber a URL do banco de desenvolvimento ou produção.
 
 ## Riscos conhecidos
 

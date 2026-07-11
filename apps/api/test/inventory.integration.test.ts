@@ -2,7 +2,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { PrismaClient } from "@prisma/client";
 process.env.DATABASE_URL =
-  "postgresql://postgres:postgres@localhost:5432/dronz_gooder?schema=public";
+  process.env.DATABASE_TEST_URL ??
+  "postgresql://postgres:postgres@localhost:5432/dronz_gooder_test?schema=public";
 process.env.WEB_ORIGIN = "http://localhost:5173";
 process.env.JWT_ACCESS_SECRET = "change-me-access";
 process.env.JWT_REFRESH_SECRET = "change-me-refresh";
@@ -77,22 +78,41 @@ describe("receiving and inventory", () => {
     const detail = (
       await request(app).get("/receiving").set(headers(token, dronz.id))
     ).body[0];
+    await prisma.recebimentoItem.update({
+      where: { id: detail.itens[0].id },
+      data: { quantidadeEsperada: 2 }
+    });
     const confirmed = await request(app)
       .post(`/receiving/${created.body.id}/items/${detail.itens[0].id}/confirm`)
       .set(headers(token, dronz.id))
       .send({ quantidadeRecebida: 1, quantidadeRejeitada: 0 });
-    expect(confirmed.body.status).toBe("COMPLETED");
+    expect(confirmed.body.status).toBe("PARTIALLY_COMPLETED");
+    const completed = await request(app)
+      .post(`/receiving/${created.body.id}/items/${detail.itens[0].id}/confirm`)
+      .set(headers(token, dronz.id))
+      .send({ quantidadeRecebida: 1, quantidadeRejeitada: 0 });
+    expect(completed.body.status).toBe("COMPLETED");
     const stock = (
       await request(app).get("/inventory").set(headers(token, dronz.id))
     ).body.find(
       (x: { produtoId: string }) => x.produtoId === detail.itens[0].produtoId
     );
-    expect(stock.quantidadeFisica).toBe(1);
+    expect(stock.quantidadeFisica).toBe(2);
     expect(
       await prisma.movimentacaoEstoque.count({
         where: { recebimentoId: created.body.id, tipo: "ENTRY" }
       })
-    ).toBe(1);
+    ).toBe(2);
+    expect(
+      (
+        await request(app)
+          .post(
+            `/receiving/${created.body.id}/items/${detail.itens[0].id}/confirm`
+          )
+          .set(headers(token, dronz.id))
+          .send({ quantidadeRecebida: 1, quantidadeRejeitada: 0 })
+      ).status
+    ).toBe(409);
   });
   it("reserva, libera, baixa e isola lojas", async () => {
     const { app, token, dronz, gooder } = await session();

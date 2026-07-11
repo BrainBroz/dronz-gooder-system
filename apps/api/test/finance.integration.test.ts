@@ -2,7 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
 import { PrismaClient } from "@prisma/client";
 process.env.DATABASE_URL =
-  "postgresql://postgres:postgres@localhost:5432/dronz_gooder?schema=public";
+  process.env.DATABASE_TEST_URL ??
+  "postgresql://postgres:postgres@localhost:5432/dronz_gooder_test?schema=public";
 process.env.WEB_ORIGIN = "http://localhost:5173";
 process.env.JWT_ACCESS_SECRET = "change-me-access";
 process.env.JWT_REFRESH_SECRET = "change-me-refresh";
@@ -87,15 +88,12 @@ describe("purchase finance", () => {
     expect(partial.body.status).toBe("PARTIAL");
     expect(
       (
-        await request(app)
-          .post("/finance/payments")
-          .set(h(d.id))
-          .send({
-            pedidoCompraId: order.id,
-            formaPagamento: "CASH",
-            moeda: "USD",
-            valor: 25
-          })
+        await request(app).post("/finance/payments").set(h(d.id)).send({
+          pedidoCompraId: order.id,
+          formaPagamento: "CASH",
+          moeda: "USD",
+          valor: 25
+        })
       ).status
     ).toBe(409);
     expect(
@@ -108,5 +106,13 @@ describe("purchase finance", () => {
       .set(h(d.id))
       .send({ valor: 5 });
     expect(refund.status).toBe(201);
+    expect(
+      (
+        await request(app)
+          .post(`/finance/payments/${partial.body.id}/refund`)
+          .set(h(d.id))
+          .send({ valor: 6 })
+      ).status
+    ).toBe(409);
   });
 });

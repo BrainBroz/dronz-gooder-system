@@ -82,7 +82,15 @@ export async function refund(lojaId: string, id: string, valor: number) {
     where: { id, lojaId, estornoDeId: null }
   });
   if (!original) throw new AppError(404, "not_found");
-  if (money(valor).greaterThan(original.valor))
+  const alreadyRefunded = await prisma.pagamento.aggregate({
+    where: { lojaId, estornoDeId: original.id },
+    _sum: { valor: true }
+  });
+  if (
+    money(valor)
+      .plus(alreadyRefunded._sum.valor ?? 0)
+      .greaterThan(original.valor)
+  )
     throw new AppError(409, "refund_exceeds_payment");
   return prisma.$transaction(async (tx) => {
     await tx.pagamento.update({ where: { id }, data: { status: "REFUNDED" } });
