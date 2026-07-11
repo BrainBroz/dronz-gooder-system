@@ -39,16 +39,19 @@ model Loja {
   movimentosPatrimoniais MovimentoPatrimonial[]
   lancamentosPatrimoniais LancamentoPatrimonial[]
   saldosLoteLocalizacao SaldoLoteLocalizacao[]
+  loteLineages         LoteLineage[]
+  localizacoesVinculadas LocalizacaoLoja[]
 }
 
 model Usuario {
-  id           String   @id @default(cuid())
-  name         String
-  email        String   @unique
-  passwordHash String
-  active       Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                   String   @id @default(cuid())
+  name                 String
+  email                String   @unique
+  passwordHash         String
+  active               Boolean  @default(true)
+  authorizationVersion Int      @default(0)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   lojas                   UsuarioLoja[]
   perfis                  UsuarioPerfil[]
@@ -59,6 +62,22 @@ model Usuario {
   movimentacoesEstoque    MovimentacaoEstoque[]
   cotacoesCambio          CotacaoCambio[]
   movimentosPatrimoniais  MovimentoPatrimonial[]
+  localizacoes            UsuarioLocalizacao[]
+}
+
+// Escopo físico de autorização (§11): restringe o usuário a localizações
+// específicas quando aplicável (ex.: operador do checkpoint Miami).
+model UsuarioLocalizacao {
+  id            String   @id @default(cuid())
+  usuarioId     String
+  localizacaoId String
+  createdAt     DateTime @default(now())
+
+  usuario     Usuario     @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  localizacao Localizacao @relation(fields: [localizacaoId], references: [id], onDelete: Cascade)
+
+  @@unique([usuarioId, localizacaoId])
+  @@index([localizacaoId])
 }
 
 model Perfil {
@@ -154,6 +173,31 @@ model AuditLog {
   @@index([entity])
   @@index([usuarioId])
   @@index([lojaId, createdAt])
+}
+
+// Idempotência transacional (§12): registro, efeito de domínio e resultado
+// SUCCEEDED persistem na MESMA transação quando o comando é síncrono.
+enum IdempotencyEstado {
+  PROCESSING
+  SUCCEEDED
+  FAILED_RETRYABLE
+  FAILED_FINAL
+}
+
+model IdempotencyRecord {
+  id             String            @id @default(cuid())
+  scope          String
+  key            String
+  requestHash    String
+  estado         IdempotencyEstado @default(PROCESSING)
+  responseStatus Int?
+  responseBody   Json?
+  resourceId     String?
+  createdAt      DateTime          @default(now())
+  expiresAt      DateTime
+
+  @@unique([scope, key])
+  @@index([expiresAt])
 }
 
 model Categoria {
@@ -737,9 +781,48 @@ model Localizacao {
   ownerLoja   Loja?                   @relation(fields: [ownerLojaId], references: [id], onDelete: Restrict)
   lancamentos LancamentoPatrimonial[]
   saldos      SaldoLoteLocalizacao[]
+  enderecos   Endereco[]
+  lojas       LocalizacaoLoja[]
+  usuarios    UsuarioLocalizacao[]
 
   @@index([tipo, ativo])
   @@index([ownerLojaId])
+}
+
+// Endereços são versionados (§8.2): alteração cria nova versão com
+// validoDe/validoAte; operações históricas guardam a versão vigente à época.
+model Endereco {
+  id            String    @id @default(cuid())
+  localizacaoId String
+  versao        Int
+  linha1        String
+  linha2        String?
+  cidade        String?
+  estado        String?
+  pais          String?
+  cep           String?
+  validoDe      DateTime  @default(now())
+  validoAte     DateTime?
+  createdAt     DateTime  @default(now())
+
+  localizacao Localizacao @relation(fields: [localizacaoId], references: [id], onDelete: Restrict)
+
+  @@unique([localizacaoId, versao])
+  @@index([localizacaoId, validoAte])
+}
+
+// Vínculo obrigatório para uso comercial e autorização de local compartilhado (§4.2).
+model LocalizacaoLoja {
+  id            String   @id @default(cuid())
+  localizacaoId String
+  lojaId        String
+  createdAt     DateTime @default(now())
+
+  localizacao Localizacao @relation(fields: [localizacaoId], references: [id], onDelete: Cascade)
+  loja        Loja        @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+
+  @@unique([localizacaoId, lojaId])
+  @@index([lojaId])
 }
 
 model Lote {
@@ -772,8 +855,11 @@ model Lote {
   closedByMovimento MovimentoPatrimonial?   @relation("LoteClosedBy", fields: [closedByMovimentoId, lojaId], references: [id, lojaId], onDelete: Restrict)
   lancamentos       LancamentoPatrimonial[]
   saldos            SaldoLoteLocalizacao[]
+  lineageComoPai    LoteLineage[]           @relation("LineagePai")
+  lineageComoFilho  LoteLineage[]           @relation("LineageFilho")
 
   @@unique([id, lojaId])
+  @@unique([id, lojaId, produtoId])
   @@unique([legacyEntity, legacyId, migrationVersion])
   @@index([lojaId, produtoId])
   @@index([lojaId, lifecycleStatus])
@@ -795,6 +881,7 @@ model MovimentoPatrimonial {
   compensadoPor     MovimentoPatrimonial[]  @relation("MovimentoCompensacao")
   lancamentos       LancamentoPatrimonial[]
   lotesFechados     Lote[]                  @relation("LoteClosedBy")
+  lineages          LoteLineage[]
 
   @@unique([id, lojaId])
   @@index([lojaId, createdAt])
@@ -843,4 +930,24 @@ model SaldoLoteLocalizacao {
   @@unique([lojaId, loteId, conta, localizacaoId])
   @@index([lojaId, produtoId, conta])
   @@index([lojaId, localizacaoId, conta])
+}
+
+// Lineage explícito de split/merge (§5.4, §5.5): pai → filho, sempre ligado ao
+// movimento que fechou o pai. A história nunca é apagada.
+model LoteLineage {
+  id           String   @id @default(cuid())
+  lojaId       String
+  parentLoteId String
+  childLoteId  String
+  movimentoId  String
+  createdAt    DateTime @default(now())
+
+  loja      Loja                 @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  parent    Lote                 @relation("LineagePai", fields: [parentLoteId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  child     Lote                 @relation("LineageFilho", fields: [childLoteId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  movimento MovimentoPatrimonial @relation(fields: [movimentoId, lojaId], references: [id, lojaId], onDelete: Restrict)
+
+  @@unique([parentLoteId, childLoteId, movimentoId])
+  @@index([lojaId, parentLoteId])
+  @@index([lojaId, childLoteId])
 }
