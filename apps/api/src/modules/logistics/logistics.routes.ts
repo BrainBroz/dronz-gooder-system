@@ -49,6 +49,31 @@ logisticsRouter.post(
     )
   )
 );
+logisticsRouter.patch(
+  "/travelers/:id",
+  wrap((r) =>
+    s.updateTraveler(
+      r.storeId!,
+      String(r.params.id),
+      parse(
+        z
+          .object({
+            nome: z.string().min(1).optional(),
+            email: z.string().email().optional(),
+            telefone: z.string().optional(),
+            observacoes: z.string().optional(),
+            ativo: z.boolean().optional()
+          })
+          .strict(),
+        r.body
+      ) as never
+    )
+  )
+);
+logisticsRouter.delete(
+  "/travelers/:id",
+  wrap((r) => s.deleteTraveler(r.storeId!, String(r.params.id)))
+);
 logisticsRouter.get(
   "/trips",
   wrap((r) => s.trips(r.storeId!))
@@ -66,6 +91,27 @@ logisticsRouter.post(
             destino: z.string(),
             partidaEm: z.coerce.date(),
             chegadaPrevistaEm: z.coerce.date()
+          })
+          .strict(),
+        r.body
+      ) as never
+    )
+  )
+);
+logisticsRouter.patch(
+  "/trips/:id",
+  wrap((r) =>
+    s.updateTrip(
+      r.storeId!,
+      String(r.params.id),
+      parse(
+        z
+          .object({
+            origem: z.string().optional(),
+            destino: z.string().optional(),
+            partidaEm: z.coerce.date().optional(),
+            chegadaPrevistaEm: z.coerce.date().optional(),
+            observacoes: z.string().optional()
           })
           .strict(),
         r.body
@@ -97,6 +143,10 @@ logisticsRouter.patch(
     )
   )
 );
+logisticsRouter.delete(
+  "/trips/:id",
+  wrap((r) => s.deleteTrip(r.storeId!, String(r.params.id)))
+);
 logisticsRouter.get(
   "/suitcases",
   wrap((r) => s.suitcases(r.storeId!))
@@ -119,6 +169,29 @@ logisticsRouter.post(
     )
   )
 );
+logisticsRouter.patch(
+  "/suitcases/:id",
+  wrap((r) =>
+    s.updateSuitcase(
+      r.storeId!,
+      String(r.params.id),
+      parse(
+        z
+          .object({
+            codigo: z.string().optional(),
+            limitePesoKg: z.number().positive().max(23).optional(),
+            observacoes: z.string().optional()
+          })
+          .strict(),
+        r.body
+      ) as never
+    )
+  )
+);
+logisticsRouter.delete(
+  "/suitcases/:id",
+  wrap((r) => s.deleteSuitcase(r.storeId!, String(r.params.id)))
+);
 logisticsRouter.post(
   "/suitcases/:id/volumes",
   wrap((r) =>
@@ -134,6 +207,35 @@ logisticsRouter.post(
           .strict(),
         r.body
       ) as never
+    )
+  )
+);
+logisticsRouter.patch(
+  "/suitcases/:id/volumes/:volId",
+  wrap((r) =>
+    s.updateVolume(
+      r.storeId!,
+      String(r.params.id),
+      String(r.params.volId),
+      parse(
+        z
+          .object({
+            codigo: z.string().optional(),
+            taraKg: z.number().min(0).optional()
+          })
+          .strict(),
+        r.body
+      ) as never
+    )
+  )
+);
+logisticsRouter.delete(
+  "/suitcases/:id/volumes/:volId",
+  wrap((r) =>
+    s.deleteVolume(
+      r.storeId!,
+      String(r.params.id),
+      String(r.params.volId)
     )
   )
 );
@@ -183,6 +285,10 @@ logisticsRouter.post(
       ) as never
     )
   )
+);
+logisticsRouter.delete(
+  "/allocations/:id",
+  wrap((r) => s.deallocate(r.storeId!, String(r.params.id)))
 );
 logisticsRouter.post(
   "/miami-confirmations",

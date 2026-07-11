@@ -241,3 +241,155 @@ export async function confirmMiami(
     return r;
   });
 }
+
+export async function updateTraveler(
+  lojaId: string,
+  id: string,
+  d: {
+    nome?: string;
+    email?: string;
+    telefone?: string;
+    observacoes?: string;
+    ativo?: boolean;
+  }
+) {
+  const t = await prisma.viajante.findFirst({
+    where: { id, lojaId }
+  });
+  if (!t) throw new AppError(404, "not_found");
+  return prisma.viajante.update({
+    where: { id },
+    data: d
+  });
+}
+
+export async function deleteTraveler(lojaId: string, id: string) {
+  const t = await prisma.viajante.findFirst({
+    where: { id, lojaId }
+  });
+  if (!t) throw new AppError(404, "not_found");
+  const hasTrips = await prisma.viagem.findFirst({
+    where: { viajanteId: id, lojaId }
+  });
+  if (hasTrips) throw new AppError(409, "conflict");
+  return prisma.viajante.delete({ where: { id } });
+}
+
+export async function updateTrip(
+  lojaId: string,
+  id: string,
+  d: {
+    origem?: string;
+    destino?: string;
+    partidaEm?: Date;
+    chegadaPrevistaEm?: Date;
+    observacoes?: string;
+  }
+) {
+  const t = await prisma.viagem.findFirst({
+    where: { id, lojaId }
+  });
+  if (!t) throw new AppError(404, "not_found");
+  if (t.status !== "PLANNED" && Object.keys(d).length > 0)
+    throw new AppError(409, "conflict");
+  return prisma.viagem.update({
+    where: { id },
+    data: d,
+    include: { viajante: { select: { id: true, nome: true, ativo: true } }, malas: true }
+  });
+}
+
+export async function deleteTrip(lojaId: string, id: string) {
+  const t = await prisma.viagem.findFirst({
+    where: { id, lojaId }
+  });
+  if (!t) throw new AppError(404, "not_found");
+  if (t.status !== "PLANNED") throw new AppError(409, "conflict");
+  return prisma.viagem.delete({ where: { id } });
+}
+
+export async function updateSuitcase(
+  lojaId: string,
+  id: string,
+  d: {
+    codigo?: string;
+    limitePesoKg?: number;
+    observacoes?: string;
+  }
+) {
+  const m = await prisma.mala.findFirst({
+    where: { id, lojaId }
+  });
+  if (!m) throw new AppError(404, "not_found");
+  if (m.status !== "PLANNING") throw new AppError(409, "conflict");
+  return prisma.mala.update({
+    where: { id },
+    data: d,
+    include: { volumes: true, alocacoes: { include: { item: { include: { produto: true } } } } }
+  });
+}
+
+export async function deleteSuitcase(lojaId: string, id: string) {
+  const m = await prisma.mala.findFirst({
+    where: { id, lojaId },
+    include: { alocacoes: true }
+  });
+  if (!m) throw new AppError(404, "not_found");
+  if (m.status !== "PLANNING") throw new AppError(409, "conflict");
+  if (m.alocacoes.length > 0) throw new AppError(409, "conflict");
+  return prisma.$transaction(async (tx) => {
+    await tx.volumeLogistico.deleteMany({ where: { malaId: id, lojaId } });
+    return tx.mala.delete({ where: { id } });
+  });
+}
+
+export async function updateVolume(
+  lojaId: string,
+  malaId: string,
+  volumeId: string,
+  d: {
+    codigo?: string;
+    taraKg?: number;
+  }
+) {
+  const m = await prisma.mala.findFirst({
+    where: { id: malaId, lojaId }
+  });
+  if (!m) throw new AppError(404, "not_found");
+  if (m.status !== "PLANNING") throw new AppError(409, "conflict");
+  const v = await prisma.volumeLogistico.findFirst({
+    where: { id: volumeId, malaId, lojaId }
+  });
+  if (!v) throw new AppError(404, "not_found");
+  return prisma.volumeLogistico.update({
+    where: { id: volumeId },
+    data: d
+  });
+}
+
+export async function deleteVolume(
+  lojaId: string,
+  malaId: string,
+  volumeId: string
+) {
+  const m = await prisma.mala.findFirst({
+    where: { id: malaId, lojaId }
+  });
+  if (!m) throw new AppError(404, "not_found");
+  if (m.status !== "PLANNING") throw new AppError(409, "conflict");
+  const v = await prisma.volumeLogistico.findFirst({
+    where: { id: volumeId, malaId, lojaId }
+  });
+  if (!v) throw new AppError(404, "not_found");
+  return prisma.volumeLogistico.delete({ where: { id: volumeId } });
+}
+
+export async function deallocate(lojaId: string, alocacaoId: string) {
+  const a = await prisma.alocacaoMala.findFirst({
+    where: { id: alocacaoId, lojaId },
+    include: { mala: true }
+  });
+  if (!a) throw new AppError(404, "not_found");
+  if (a.mala.status !== "PLANNING") throw new AppError(409, "conflict");
+  return prisma.alocacaoMala.delete({ where: { id: alocacaoId } });
+}
