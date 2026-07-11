@@ -5,10 +5,6 @@ export const loginSchema = z.object({
   password: z.string().min(1)
 });
 
-export const refreshSchema = z.object({
-  refreshToken: z.string().min(1)
-});
-
 export const healthResponseSchema = z.object({
   status: z.literal("ok")
 });
@@ -26,6 +22,5 @@ export const authenticatedUserSchema = z.object({
 });
 
 export type LoginInput = z.infer<typeof loginSchema>;
-export type RefreshInput = z.infer<typeof refreshSchema>;
 export type HealthResponse = z.infer<typeof healthResponseSchema>;
 export type AuthenticatedUser = z.infer<typeof authenticatedUserSchema>;
