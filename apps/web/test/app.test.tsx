@@ -21,6 +21,15 @@ import {
 } from "../src/app";
 
 describe("web app", () => {
+  it("redireciona a raiz para o fluxo autenticado", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/"]}>
+        <AppRoutes />
+      </MemoryRouter>
+    );
+    expect(html).not.toContain("404");
+  });
+
   it("renders the login route shell", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter initialEntries={["/login"]}>

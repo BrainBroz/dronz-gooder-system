@@ -1918,6 +1918,7 @@ export function AppRoutes() {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider theme={theme}>
         <Routes>
+          <Route path="/" element={<Navigate to="/operacao" replace />} />
           <Route path="/login" element={<LoginPage />} />
           <Route
             path="/operacao"
