@@ -429,3 +429,39 @@ export async function confirmParaguai(
     return checkpoint;
   });
 }
+
+export async function confirmBrasil(
+  lojaId: string,
+  userId: string,
+  d: {
+    viagemId: string;
+    malaId: string;
+    confirmadoEm: Date;
+    observacao?: string;
+    tipoDivergencia?: "CORRETO" | "MALA_AUSENTE" | "ITEM_NAO_LOCALIZADO" | "QUANTIDADE_DIVERGENTE" | "AVARIA" | "ITEM_EXTRA" | "REGISTRO_ADUANEIRO_DIVERGENTE" | "LACRE_ROMPIDO";
+  }
+) {
+  return prisma.$transaction(async (tx) => {
+    const viagem = await tx.viagem.findFirst({
+      where: { id: d.viagemId, lojaId, status: "ARRIVED_BRAZIL" }
+    });
+    if (!viagem) throw new AppError(404, "not_found");
+    const mala = await tx.mala.findFirst({
+      where: { id: d.malaId, lojaId, viagemId: d.viagemId }
+    });
+    if (!mala) throw new AppError(404, "not_found");
+    const checkpoint = await tx.checkpointBrasil.create({
+      data: {
+        id: `cp-br-${Date.now()}`,
+        lojaId,
+        viagemId: d.viagemId,
+        malaId: d.malaId,
+        confirmadoPorId: userId,
+        confirmadoEm: d.confirmadoEm,
+        observacao: d.observacao,
+        tipoDivergencia: d.tipoDivergencia || "CORRETO"
+      }
+    });
+    return checkpoint;
+  });
+}

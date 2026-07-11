@@ -352,3 +352,35 @@ logisticsRouter.post(
     )
   )
 );
+logisticsRouter.post(
+  "/checkpoint-brasil",
+  wrap((r) =>
+    s.confirmBrasil(
+      r.storeId!,
+      r.identity!.user.id,
+      parse(
+        z
+          .object({
+            viagemId: z.string(),
+            malaId: z.string(),
+            confirmadoEm: z.coerce.date(),
+            observacao: z.string().optional(),
+            tipoDivergencia: z
+              .enum([
+                "CORRETO",
+                "MALA_AUSENTE",
+                "ITEM_NAO_LOCALIZADO",
+                "QUANTIDADE_DIVERGENTE",
+                "AVARIA",
+                "ITEM_EXTRA",
+                "REGISTRO_ADUANEIRO_DIVERGENTE",
+                "LACRE_ROMPIDO"
+              ])
+              .default("CORRETO")
+          })
+          .strict(),
+        r.body
+      ) as never
+    )
+  )
+);

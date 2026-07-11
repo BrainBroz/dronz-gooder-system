@@ -28,6 +28,7 @@ model Loja {
   alocacoesMala        AlocacaoMala[]
   recebimentosMiami    RecebimentoMiami[]
   checkpointsParaguai  CheckpointParaguai[]
+  checkpointsBrasil    CheckpointBrasil[]
   recebimentos         Recebimento[]
   recebimentoItens     RecebimentoItem[]
   estoques             Estoque[]
@@ -54,6 +55,7 @@ model Usuario {
   auditLogs               AuditLog[]
   recebimentosMiami       RecebimentoMiami[]
   checkpointsParaguai     CheckpointParaguai[]
+  checkpointsBrasil       CheckpointBrasil[]
   recebimentosConfirmados Recebimento[]
   movimentacoesEstoque    MovimentacaoEstoque[]
   cotacoesCambio          CotacaoCambio[]
@@ -348,6 +350,7 @@ model Viagem {
   viajante          Viajante      @relation(fields: [viajanteId, lojaId], references: [id, lojaId], onDelete: Restrict)
   malas             Mala[]
   checkpointsParaguai CheckpointParaguai[]
+  checkpointsBrasil CheckpointBrasil[]
   recebimentos      Recebimento[]
 
   @@unique([id, lojaId])
@@ -370,6 +373,7 @@ model Mala {
   volumes      VolumeLogistico[]
   alocacoes    AlocacaoMala[]
   checkpointsParaguai CheckpointParaguai[]
+  checkpointsBrasil CheckpointBrasil[]
   recebimentos Recebimento[]
 
   @@unique([viagemId, codigo])
@@ -455,6 +459,28 @@ model CheckpointParaguai {
   @@index([lojaId, tipoDivergencia])
 }
 
+model CheckpointBrasil {
+  id                 String                    @id @default(cuid())
+  lojaId             String
+  viagemId           String
+  malaId             String
+  confirmadoPorId    String
+  confirmadoEm       DateTime
+  observacao         String?
+  tipoDivergencia    TipoDivergenciaBrasil     @default(CORRETO)
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+
+  loja               Loja                      @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  viagem             Viagem                    @relation(fields: [viagemId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  mala               Mala                      @relation(fields: [malaId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  confirmadoPor      Usuario                   @relation(fields: [confirmadoPorId], references: [id], onDelete: Restrict)
+
+  @@index([lojaId, viagemId])
+  @@index([lojaId, malaId])
+  @@index([lojaId, tipoDivergencia])
+}
+
 enum RecebimentoStatus {
   PENDING
   IN_PROGRESS
@@ -489,6 +515,17 @@ enum TipoDivergenciaParaguai {
   AVARIA
   ITEM_EXTRA
   CHECKPOINT_PARCIAL
+}
+
+enum TipoDivergenciaBrasil {
+  CORRETO
+  MALA_AUSENTE
+  ITEM_NAO_LOCALIZADO
+  QUANTIDADE_DIVERGENTE
+  AVARIA
+  ITEM_EXTRA
+  REGISTRO_ADUANEIRO_DIVERGENTE
+  LACRE_ROMPIDO
 }
 
 enum DespesaCategoria {
