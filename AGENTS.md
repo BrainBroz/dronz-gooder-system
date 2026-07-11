@@ -45,6 +45,19 @@ A fundação do monorepo, a autenticação cookie-only, Categorias e Produtos es
 - TanStack Query é o padrão para server state no frontend, sempre com `lojaId` nas query keys de dados comerciais.
 - Zustand permanece restrito à identidade autenticada, loja ativa e estado global legítimo de interface.
 
+## Contratos normativos operacionais
+
+`docs/domain-contracts.md`, aprovado em 2026-07-11, é a fonte normativa para Fornecedores, Pedidos de Compra, Logística Internacional, Recebimento, Estoque, Financeiro, Dashboard e Relatórios. Ele define campos mínimos, enums, transições, fórmulas, timezones, cancelamento, exclusão, isolamento e autorização.
+
+- Valores monetários usam `Decimal`; datas são persistidas em UTC.
+- O backend recalcula totais e valida todo vínculo de `lojaId`.
+- Estoque real só nasce após chegada confirmada ao Brasil.
+- Mala tem limite padrão de 23 kg; tara padrão é 0,5 kg por volume/caixa.
+- Miami usa `America/New_York`; exibição no Brasil usa `America/Sao_Paulo`.
+- Câmbio e pagamentos são manuais neste ciclo; PAYPAL não representa integração externa.
+- Markup mínimo permanece 25%; venda zero é “A definir”.
+- `calcSimulacao` permanece protegida.
+
 ## Rotina
 
 - manter TypeScript strict;
