@@ -143,3 +143,50 @@ export async function confirm(
     });
   });
 }
+
+export async function entradaDefinitiva(
+  lojaId: string,
+  userId: string,
+  d: {
+    viagemId: string;
+    malaId: string;
+    confirmadoEm: Date;
+    observacao?: string;
+  }
+) {
+  return prisma.$transaction(async (tx) => {
+    const viagem = await tx.viagem.findFirst({
+      where: { id: d.viagemId, lojaId, status: "ARRIVED_BRAZIL" }
+    });
+    if (!viagem) throw new AppError(404, "not_found");
+    const mala = await tx.mala.findFirst({
+      where: { id: d.malaId, lojaId, viagemId: d.viagemId }
+    });
+    if (!mala) throw new AppError(404, "not_found");
+    const checkpointMiami = await tx.recebimentoMiami.findFirst({
+      where: { lojaId }
+    });
+    if (!checkpointMiami) throw new AppError(409, "missing_checkpoint_miami");
+    const checkpointParaguai = await tx.checkpointParaguai.findFirst({
+      where: { lojaId, viagemId: d.viagemId, malaId: d.malaId }
+    });
+    if (!checkpointParaguai) throw new AppError(409, "missing_checkpoint_paraguai");
+    const checkpointBrasil = await tx.checkpointBrasil.findFirst({
+      where: { lojaId, viagemId: d.viagemId, malaId: d.malaId }
+    });
+    if (!checkpointBrasil) throw new AppError(409, "missing_checkpoint_brasil");
+    const entrada = await tx.estoqueEntrada.create({
+      data: {
+        id: `ee-${Date.now()}`,
+        lojaId,
+        viagemId: d.viagemId,
+        malaId: d.malaId,
+        confirmadoPorId: userId,
+        confirmadoEm: d.confirmadoEm,
+        observacao: d.observacao,
+        status: "COMPLETED"
+      }
+    });
+    return entrada;
+  });
+}

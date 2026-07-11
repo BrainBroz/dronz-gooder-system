@@ -58,3 +58,19 @@ receivingRouter.post(
     );
   })
 );
+receivingRouter.post(
+  "/entrada-definitiva",
+  w((r) => {
+    const p = z
+      .object({
+        viagemId: z.string(),
+        malaId: z.string(),
+        confirmadoEm: z.coerce.date(),
+        observacao: z.string().optional()
+      })
+      .strict()
+      .safeParse(r.body);
+    if (!p.success) throw new AppError(400, "bad_request");
+    return s.entradaDefinitiva(r.storeId!, r.identity!.user.id, p.data);
+  })
+);

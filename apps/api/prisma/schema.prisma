@@ -32,6 +32,7 @@ model Loja {
   recebimentos         Recebimento[]
   recebimentoItens     RecebimentoItem[]
   estoques             Estoque[]
+  estoquesEntradas     EstoqueEntrada[]
   movimentacoesEstoque MovimentacaoEstoque[]
   cotacoesCambio       CotacaoCambio[]
   despesas             Despesa[]
@@ -56,6 +57,7 @@ model Usuario {
   recebimentosMiami       RecebimentoMiami[]
   checkpointsParaguai     CheckpointParaguai[]
   checkpointsBrasil       CheckpointBrasil[]
+  estoquesEntradas        EstoqueEntrada[]
   recebimentosConfirmados Recebimento[]
   movimentacoesEstoque    MovimentacaoEstoque[]
   cotacoesCambio          CotacaoCambio[]
@@ -351,6 +353,7 @@ model Viagem {
   malas             Mala[]
   checkpointsParaguai CheckpointParaguai[]
   checkpointsBrasil CheckpointBrasil[]
+  estoquesEntradas  EstoqueEntrada[]
   recebimentos      Recebimento[]
 
   @@unique([id, lojaId])
@@ -374,6 +377,7 @@ model Mala {
   alocacoes    AlocacaoMala[]
   checkpointsParaguai CheckpointParaguai[]
   checkpointsBrasil CheckpointBrasil[]
+  estoquesEntradas EstoqueEntrada[]
   recebimentos Recebimento[]
 
   @@unique([viagemId, codigo])
@@ -485,6 +489,13 @@ enum RecebimentoStatus {
   PENDING
   IN_PROGRESS
   PARTIALLY_COMPLETED
+  COMPLETED
+  REJECTED
+}
+
+enum EstoqueEntradaStatus {
+  PENDING
+  PROCESSING
   COMPLETED
   REJECTED
 }
@@ -615,6 +626,28 @@ model Estoque {
 
   @@unique([lojaId, produtoId])
   @@unique([id, lojaId])
+}
+
+model EstoqueEntrada {
+  id                 String                   @id @default(cuid())
+  lojaId             String
+  viagemId           String
+  malaId             String
+  confirmadoPorId    String
+  confirmadoEm       DateTime
+  status             EstoqueEntradaStatus     @default(PENDING)
+  observacao         String?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  loja               Loja                     @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  viagem             Viagem                   @relation(fields: [viagemId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  mala               Mala                     @relation(fields: [malaId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  confirmadoPor      Usuario                  @relation(fields: [confirmadoPorId], references: [id], onDelete: Restrict)
+
+  @@index([lojaId, viagemId])
+  @@index([lojaId, malaId])
+  @@index([lojaId, status])
 }
 
 model MovimentacaoEstoque {
