@@ -34,7 +34,7 @@ Construir um sistema operacional para Dronz e Gooder com separação rigorosa en
 
 ## Estado da fundação
 
-A fundação do monorepo, a autenticação cookie-only, Categorias e Produtos estão implementados e validados. Compras, pedidos, fornecedores, tracking, estoque, remessas, viajantes, logística, financeiro, PayPal, e-mail, QR Code e dashboard ainda não foram implementados.
+A fundação, autenticação cookie-only, Categorias, Produtos, Fornecedores, Pedidos de Compra, logística internacional, recebimento, estoque, financeiro manual, dashboard e relatórios estão implementados e validados. Tracking automático, integrações PayPal/bancárias, e-mail e QR Code permanecem fora do escopo atual.
 
 ## Padrões arquiteturais vigentes
 

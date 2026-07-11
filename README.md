@@ -6,8 +6,9 @@ Status atual:
 
 - fundação do monorepo criada;
 - stack definida sem Next.js, Tailwind, Supabase ou Firebase;
-- API e web ainda estão em fase inicial;
-- módulos de negócio futuros ainda não foram implementados.
+- autenticação com refresh token exclusivamente em cookie HttpOnly;
+- catálogo, compras, logística, recebimento, estoque, financeiro manual, dashboard e relatórios isolados por loja;
+- migrations e testes de integração usam PostgreSQL real.
 
 ## Stack
 
@@ -45,14 +46,17 @@ Status atual:
 - `npm run lint`
 - `npm run test`
 - `npm run build`
+- `npm run db:generate`
+- `npm run db:migrate`
+- `npm run db:seed`
 
 ## Itens não implementados ainda
 
-- compras
-- tracking
-- estoque
-- remessas
-- viajantes
-- financeiros
-- integrações
+- tracking e integrações automáticas;
+- PayPal, bancos e cartões como integrações (PAYPAL atual é classificação manual);
+- e-mail e QR Code;
+- exportações PDF e Excel.
 
+## Produção
+
+Consulte `docs/PRODUCTION_READINESS.md`. Defina origens e segredos reais fora do repositório, aplique migrations antes de iniciar a API e use HTTPS para que o cookie de refresh receba `Secure`.
