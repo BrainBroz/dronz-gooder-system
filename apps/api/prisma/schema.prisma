@@ -1,0 +1,127 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Loja {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  nome      String
+  ativa     Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  usuarios  UsuarioLoja[]
+}
+
+model Usuario {
+  id           String         @id @default(cuid())
+  name         String
+  email        String         @unique
+  passwordHash String
+  active       Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  lojas         UsuarioLoja[]
+  perfis        UsuarioPerfil[]
+  refreshTokens RefreshToken[]
+  auditLogs     AuditLog[]
+}
+
+model Perfil {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  usuarios   UsuarioPerfil[]
+  permissoes PerfilPermissao[]
+}
+
+model Permissao {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  perfis PerfilPermissao[]
+}
+
+model UsuarioLoja {
+  id        String   @id @default(cuid())
+  usuarioId String
+  lojaId    String
+  createdAt DateTime @default(now())
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  loja    Loja    @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+
+  @@unique([usuarioId, lojaId])
+  @@index([lojaId])
+}
+
+model UsuarioPerfil {
+  id        String   @id @default(cuid())
+  usuarioId String
+  perfilId  String
+  createdAt DateTime @default(now())
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  perfil  Perfil  @relation(fields: [perfilId], references: [id], onDelete: Cascade)
+
+  @@unique([usuarioId, perfilId])
+  @@index([perfilId])
+}
+
+model PerfilPermissao {
+  id          String   @id @default(cuid())
+  perfilId    String
+  permissaoId String
+  createdAt   DateTime @default(now())
+
+  perfil    Perfil     @relation(fields: [perfilId], references: [id], onDelete: Cascade)
+  permissao Permissao  @relation(fields: [permissaoId], references: [id], onDelete: Cascade)
+
+  @@unique([perfilId, permissaoId])
+  @@index([permissaoId])
+}
+
+model RefreshToken {
+  id              String   @id @default(cuid())
+  tokenHash       String   @unique
+  usuarioId       String
+  expiresAt       DateTime
+  revokedAt       DateTime?
+  replacedById    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([usuarioId])
+  @@index([revokedAt])
+  @@index([expiresAt])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  usuarioId  String?
+  action     String
+  entity     String
+  entityId   String?
+  data       Json?
+  createdAt  DateTime @default(now())
+
+  usuario Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+
+  @@index([action])
+  @@index([entity])
+  @@index([usuarioId])
+}
