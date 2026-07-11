@@ -196,7 +196,17 @@ logisticsRouter.post(
             pedidoCompraItemId: z.string(),
             quantidadeRecebida: z.number().int().positive(),
             recebidoEm: z.coerce.date(),
-            observacao: z.string().optional()
+            observacao: z.string().optional(),
+            tipoDivergencia: z
+              .enum([
+                "CORRETO",
+                "FALTANTE",
+                "QUANTIDADE_DIVERGENTE",
+                "DANIFICADO",
+                "DESCONHECIDO",
+                "TRACKING_NAO_LOCALIZADO"
+              ])
+              .default("CORRETO")
           })
           .strict(),
         r.body

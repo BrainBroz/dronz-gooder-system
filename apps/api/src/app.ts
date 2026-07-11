@@ -13,6 +13,7 @@ import { receivingRouter } from "./modules/receiving/receiving.routes";
 import { inventoryRouter } from "./modules/inventory/inventory.routes";
 import { financeRouter } from "./modules/finance/finance.routes";
 import { analyticsRouter } from "./modules/analytics/analytics.routes";
+import { simulationRouter } from "./modules/simulation/simulation.routes";
 
 export function createApp() {
   const app = express();
@@ -30,6 +31,7 @@ export function createApp() {
   app.use("/inventory", inventoryRouter);
   app.use("/finance", financeRouter);
   app.use("/analytics", analyticsRouter);
+  app.use("/simulations", simulationRouter);
   app.use(errorHandler);
   return app;
 }

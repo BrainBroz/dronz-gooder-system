@@ -411,20 +411,22 @@ model AlocacaoMala {
 }
 
 model RecebimentoMiami {
-  id                 String           @id @default(cuid())
+  id                 String                  @id @default(cuid())
   lojaId             String
   pedidoCompraItemId String
   quantidadeRecebida Int
   recebidoEm         DateTime
   confirmadoPorId    String
   observacao         String?
-  atraso             Boolean          @default(false)
-  createdAt          DateTime         @default(now())
-  loja               Loja             @relation(fields: [lojaId], references: [id], onDelete: Restrict)
-  item               PedidoCompraItem @relation(fields: [pedidoCompraItemId, lojaId], references: [id, lojaId], onDelete: Restrict)
-  confirmadoPor      Usuario          @relation(fields: [confirmadoPorId], references: [id], onDelete: Restrict)
+  atraso             Boolean                 @default(false)
+  tipoDivergencia    TipoDivergenciaMiami    @default(CORRETO)
+  createdAt          DateTime                @default(now())
+  loja               Loja                    @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  item               PedidoCompraItem        @relation(fields: [pedidoCompraItemId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  confirmadoPor      Usuario                 @relation(fields: [confirmadoPorId], references: [id], onDelete: Restrict)
 
   @@index([lojaId, pedidoCompraItemId])
+  @@index([lojaId, tipoDivergencia])
 }
 
 enum RecebimentoStatus {
@@ -441,6 +443,15 @@ enum CondicaoProduto {
   USED
   USED_NO_CABLES
   OPEN_BOX
+}
+
+enum TipoDivergenciaMiami {
+  CORRETO
+  FALTANTE
+  QUANTIDADE_DIVERGENTE
+  DANIFICADO
+  DESCONHECIDO
+  TRACKING_NAO_LOCALIZADO
 }
 
 enum DespesaCategoria {

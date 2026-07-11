@@ -193,6 +193,7 @@ export async function confirmMiami(
     quantidadeRecebida: number;
     recebidoEm: Date;
     observacao?: string;
+    tipoDivergencia?: "CORRETO" | "FALTANTE" | "QUANTIDADE_DIVERGENTE" | "DANIFICADO" | "DESCONHECIDO" | "TRACKING_NAO_LOCALIZADO";
   }
 ) {
   return prisma.$transaction(async (tx) => {
@@ -208,7 +209,16 @@ export async function confirmMiami(
       throw new AppError(409, "conflict");
     const atraso = Date.now() - d.recebidoEm.getTime() > 86400000;
     const r = await tx.recebimentoMiami.create({
-      data: { ...d, lojaId, confirmadoPorId: userId, atraso }
+      data: {
+        pedidoCompraItemId: d.pedidoCompraItemId,
+        quantidadeRecebida: d.quantidadeRecebida,
+        recebidoEm: d.recebidoEm,
+        observacao: d.observacao,
+        tipoDivergencia: d.tipoDivergencia || "CORRETO",
+        lojaId,
+        confirmadoPorId: userId,
+        atraso
+      }
     });
     const qty = i.quantidadeRecebidaMiami + d.quantidadeRecebida;
     await tx.pedidoCompraItem.update({

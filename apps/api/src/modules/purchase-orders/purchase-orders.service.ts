@@ -187,6 +187,21 @@ export async function removeItem(lojaId: string, id: string, itemId: string) {
     return recalc(tx, id);
   });
 }
+export async function searchByNumero(lojaId: string, numero: string) {
+  return prisma.pedidoCompra.findMany({
+    where: {
+      lojaId,
+      numeroPedido: { contains: numero, mode: "insensitive" }
+    },
+    include: {
+      fornecedor: true,
+      itens: { include: { produto: true } }
+    },
+    orderBy: { dataCompra: "desc" },
+    take: 20
+  });
+}
+
 export async function remove(lojaId: string, id: string) {
   const o = await get(lojaId, id);
   if (o.status !== "DRAFT") throw new AppError(409, "conflict");

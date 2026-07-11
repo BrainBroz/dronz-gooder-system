@@ -115,6 +115,20 @@ export async function removeItem(
     n(e);
   }
 }
+export async function searchByNumero(
+  r: AuthenticatedRequest,
+  x: Response,
+  n: NextFunction
+) {
+  const numero = String(r.query.numero || "");
+  if (!numero.trim()) return bad(x);
+  try {
+    x.json(await s.searchByNumero(st(r), numero));
+  } catch (e) {
+    n(e);
+  }
+}
+
 export async function remove(
   r: AuthenticatedRequest,
   x: Response,

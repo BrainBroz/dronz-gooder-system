@@ -29,7 +29,7 @@ financeRouter.post(
       .object({
         moedaOrigem: z.string().length(3),
         moedaDestino: z.string().length(3),
-        valor: z.number().positive(),
+        valorMercado: z.number().positive(),
         cotadoEm: z.coerce.date()
       })
       .strict()

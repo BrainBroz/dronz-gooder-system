@@ -26,19 +26,26 @@ export async function createExchange(
   data: {
     moedaOrigem: string;
     moedaDestino: string;
-    valor: number;
+    valorMercado: number;
     cotadoEm: Date;
   }
 ) {
+  const valorMercado = new Prisma.Decimal(data.valorMercado).toDecimalPlaces(
+    6,
+    Prisma.Decimal.ROUND_HALF_UP
+  );
+  const margem = new Prisma.Decimal("0.20");
+  const valor = valorMercado.plus(margem);
   return prisma.cotacaoCambio.create({
     data: {
       lojaId,
       responsavelId: userId,
-      ...data,
-      valor: new Prisma.Decimal(data.valor).toDecimalPlaces(
-        6,
-        Prisma.Decimal.ROUND_HALF_UP
-      )
+      moedaOrigem: data.moedaOrigem,
+      moedaDestino: data.moedaDestino,
+      cotadoEm: data.cotadoEm,
+      valorMercado,
+      margem,
+      valor
     }
   });
 }
