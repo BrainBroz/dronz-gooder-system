@@ -38,7 +38,7 @@ export function toMiamiView(obj: any): any {
   const result: any = {};
   for (const [key, value] of Object.entries(obj)) {
     const keyLower = key.toLowerCase();
-    const isMonetar y = MONETARY_PATTERNS.some((pattern) =>
+    const isMonetary = MONETARY_PATTERNS.some((pattern) =>
       keyLower.includes(pattern)
     );
 
