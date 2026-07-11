@@ -159,34 +159,99 @@ export async function entradaDefinitiva(
       where: { id: d.viagemId, lojaId, status: "ARRIVED_BRAZIL" }
     });
     if (!viagem) throw new AppError(404, "not_found");
+
     const mala = await tx.mala.findFirst({
       where: { id: d.malaId, lojaId, viagemId: d.viagemId }
     });
     if (!mala) throw new AppError(404, "not_found");
+
     const checkpointMiami = await tx.recebimentoMiami.findFirst({
       where: { lojaId }
     });
     if (!checkpointMiami) throw new AppError(409, "missing_checkpoint_miami");
+
     const checkpointParaguai = await tx.checkpointParaguai.findFirst({
       where: { lojaId, viagemId: d.viagemId, malaId: d.malaId }
     });
     if (!checkpointParaguai) throw new AppError(409, "missing_checkpoint_paraguai");
+
     const checkpointBrasil = await tx.checkpointBrasil.findFirst({
       where: { lojaId, viagemId: d.viagemId, malaId: d.malaId }
     });
     if (!checkpointBrasil) throw new AppError(409, "missing_checkpoint_brasil");
+
+    const itens = await tx.recebimentoItem.findMany({
+      where: {
+        recebimento: {
+          lojaId,
+          malaId: d.malaId
+        }
+      }
+    });
+
+    if (itens.length === 0) throw new AppError(409, "no_items");
+
+    const temDivergencia = itens.some((i) => i.quantidadeRejeitada > 0);
+    if (temDivergencia) throw new AppError(409, "items_with_divergence");
+
+    const entradaExistente = await tx.estoqueEntrada.findFirst({
+      where: { lojaId, viagemId: d.viagemId, malaId: d.malaId }
+    });
+
+    if (entradaExistente) {
+      if (entradaExistente.status === "COMPLETED") {
+        return entradaExistente;
+      }
+      throw new AppError(409, "entrada_already_processing");
+    }
+
     const entrada = await tx.estoqueEntrada.create({
       data: {
-        id: `ee-${Date.now()}`,
         lojaId,
         viagemId: d.viagemId,
         malaId: d.malaId,
         confirmadoPorId: userId,
         confirmadoEm: d.confirmadoEm,
         observacao: d.observacao,
-        status: "COMPLETED"
+        status: "PENDING"
       }
     });
-    return entrada;
+
+    for (const item of itens) {
+      if (item.quantidadeRecebida > 0) {
+        const stock = await tx.estoque.upsert({
+          where: { lojaId_produtoId: { lojaId, produtoId: item.produtoId } },
+          update: { quantidadeFisica: { increment: item.quantidadeRecebida } },
+          create: {
+            lojaId,
+            produtoId: item.produtoId,
+            quantidadeFisica: item.quantidadeRecebida
+          }
+        });
+
+        await tx.movimentacaoEstoque.create({
+          data: {
+            lojaId,
+            produtoId: item.produtoId,
+            estoqueId: stock.id,
+            recebimentoId: item.recebimentoId,
+            tipo: "ENTRY",
+            motivo: "PURCHASE_RECEIPT",
+            quantidade: item.quantidadeRecebida,
+            quantidadeAnterior: stock.quantidadeFisica - item.quantidadeRecebida,
+            quantidadePosterior: stock.quantidadeFisica,
+            responsavelId: userId,
+            observacoes: `Entrada definitiva de ${item.quantidadeRecebida} unidades`
+          }
+        });
+      }
+    }
+
+    const entradaAtualizada = await tx.estoqueEntrada.update({
+      where: { id: entrada.id },
+      data: { status: "COMPLETED" }
+    });
+
+    return entradaAtualizada;
   });
 }

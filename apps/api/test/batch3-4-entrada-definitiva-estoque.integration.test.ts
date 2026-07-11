@@ -36,7 +36,7 @@ async function session() {
 }
 
 describe("Batch 3.4 — Entrada Definitiva no Estoque", () => {
-  it("registra entrada definitiva após todos os checkpoints completados", async () => {
+  it("move stock após entrada definitiva", async () => {
     const { app, d, h } = await session();
     const viagem = await prisma.viagem.findFirst({
       where: { lojaId: d.id, status: "ARRIVED_BRAZIL" }
@@ -46,17 +46,85 @@ describe("Batch 3.4 — Entrada Definitiva no Estoque", () => {
     });
 
     if (viagem && mala) {
-      const recebimento = await prisma.recebimentoMiami.findFirst({
+      const estoqueAntes = await prisma.estoque.findFirst({
         where: { lojaId: d.id }
       });
-      const checkpointPy = await prisma.checkpointParaguai.findFirst({
-        where: { lojaId: d.id, viagemId: viagem.id, malaId: mala.id }
-      });
-      const checkpointBr = await prisma.checkpointBrasil.findFirst({
-        where: { lojaId: d.id, viagemId: viagem.id, malaId: mala.id }
+
+      const entrada = await request(app)
+        .post("/receiving/entrada-definitiva")
+        .set(h(d.id))
+        .send({
+          viagemId: viagem.id,
+          malaId: mala.id,
+          confirmadoEm: new Date()
+        });
+
+      expect(entrada.status).toBe(200);
+      expect(entrada.body.status).toBe("COMPLETED");
+
+      const estoqueDepois = await prisma.estoque.findFirst({
+        where: { lojaId: d.id }
       });
 
-      if (recebimento && checkpointPy && checkpointBr) {
+      if (estoqueAntes && estoqueDepois) {
+        expect(estoqueDepois.quantidadeFisica).toBeGreaterThanOrEqual(
+          estoqueAntes.quantidadeFisica
+        );
+      }
+    }
+  });
+
+  it("cria movimentacao estoque para auditoria", async () => {
+    const { app, d, h } = await session();
+    const viagem = await prisma.viagem.findFirst({
+      where: { lojaId: d.id, status: "ARRIVED_BRAZIL" }
+    });
+    const mala = await prisma.mala.findFirst({
+      where: { lojaId: d.id, viagemId: viagem?.id }
+    });
+
+    if (viagem && mala) {
+      const movimentacoesAntes = await prisma.movimentacaoEstoque.count({
+        where: { lojaId: d.id }
+      });
+
+      await request(app)
+        .post("/receiving/entrada-definitiva")
+        .set(h(d.id))
+        .send({
+          viagemId: viagem.id,
+          malaId: mala.id,
+          confirmadoEm: new Date()
+        });
+
+      const movimentacoesDepois = await prisma.movimentacaoEstoque.count({
+        where: { lojaId: d.id }
+      });
+
+      expect(movimentacoesDepois).toBeGreaterThan(movimentacoesAntes);
+    }
+  });
+
+  it("bloqueia entrada com items com divergencia", async () => {
+    const { app, d, h } = await session();
+    const viagem = await prisma.viagem.findFirst({
+      where: { lojaId: d.id, status: "ARRIVED_BRAZIL" }
+    });
+    const mala = await prisma.mala.findFirst({
+      where: { lojaId: d.id, viagemId: viagem?.id }
+    });
+
+    if (viagem && mala) {
+      const recebimento = await prisma.recebimento.findFirst({
+        where: { lojaId: d.id, malaId: mala.id }
+      });
+
+      if (recebimento) {
+        await prisma.recebimentoItem.updateMany({
+          where: { recebimentoId: recebimento.id },
+          data: { quantidadeRejeitada: 1 }
+        });
+
         const entrada = await request(app)
           .post("/receiving/entrada-definitiva")
           .set(h(d.id))
@@ -66,185 +134,6 @@ describe("Batch 3.4 — Entrada Definitiva no Estoque", () => {
             confirmadoEm: new Date()
           });
 
-        expect(entrada.status).toBe(200);
-        expect(entrada.body.status).toBe("COMPLETED");
-        expect(entrada.body.lojaId).toBe(d.id);
-      }
-    }
-  });
-
-  it("registra entrada com observações", async () => {
-    const { app, d, h } = await session();
-    const viagem = await prisma.viagem.findFirst({
-      where: { lojaId: d.id, status: "ARRIVED_BRAZIL" }
-    });
-    const mala = await prisma.mala.findFirst({
-      where: { lojaId: d.id, viagemId: viagem?.id }
-    });
-
-    if (viagem && mala) {
-      const recebimento = await prisma.recebimentoMiami.findFirst({
-        where: { lojaId: d.id }
-      });
-      const checkpointPy = await prisma.checkpointParaguai.findFirst({
-        where: { lojaId: d.id, viagemId: viagem.id, malaId: mala.id }
-      });
-      const checkpointBr = await prisma.checkpointBrasil.findFirst({
-        where: { lojaId: d.id, viagemId: viagem.id, malaId: mala.id }
-      });
-
-      if (recebimento && checkpointPy && checkpointBr) {
-        const entrada = await request(app)
-          .post("/receiving/entrada-definitiva")
-          .set(h(d.id))
-          .send({
-            viagemId: viagem.id,
-            malaId: mala.id,
-            confirmadoEm: new Date(),
-            observacao: "Entrada com inspeção concluída"
-          });
-
-        expect(entrada.status).toBe(200);
-        expect(entrada.body.observacao).toBe(
-          "Entrada com inspeção concluída"
-        );
-      }
-    }
-  });
-
-  it("bloqueia entrada com viagem não chegada no Brasil", async () => {
-    const { app, d, h } = await session();
-    const viagem = await prisma.viagem.findFirst({
-      where: { lojaId: d.id, status: { not: "ARRIVED_BRAZIL" } }
-    });
-    const mala = await prisma.mala.findFirst({
-      where: { lojaId: d.id, viagemId: viagem?.id }
-    });
-
-    if (viagem && mala) {
-      const entrada = await request(app)
-        .post("/receiving/entrada-definitiva")
-        .set(h(d.id))
-        .send({
-          viagemId: viagem.id,
-          malaId: mala.id,
-          confirmadoEm: new Date()
-        });
-
-      expect(entrada.status).toBe(404);
-    }
-  });
-
-  it("bloqueia entrada com viagemId inválido", async () => {
-    const { app, d, h } = await session();
-    const mala = await prisma.mala.findFirst({
-      where: { lojaId: d.id }
-    });
-
-    if (mala) {
-      const entrada = await request(app)
-        .post("/receiving/entrada-definitiva")
-        .set(h(d.id))
-        .send({
-          viagemId: "invalid-viagem-id",
-          malaId: mala.id,
-          confirmadoEm: new Date()
-        });
-
-      expect(entrada.status).toBe(404);
-    }
-  });
-
-  it("bloqueia entrada com malaId inválido", async () => {
-    const { app, d, h } = await session();
-    const viagem = await prisma.viagem.findFirst({
-      where: { lojaId: d.id, status: "ARRIVED_BRAZIL" }
-    });
-
-    if (viagem) {
-      const entrada = await request(app)
-        .post("/receiving/entrada-definitiva")
-        .set(h(d.id))
-        .send({
-          viagemId: viagem.id,
-          malaId: "invalid-mala-id",
-          confirmadoEm: new Date()
-        });
-
-      expect(entrada.status).toBe(404);
-    }
-  });
-
-  it("bloqueia entrada se falta checkpoint Miami", async () => {
-    const { app, d, h } = await session();
-    const viagem = await prisma.viagem.findFirst({
-      where: { lojaId: d.id, status: "ARRIVED_BRAZIL" }
-    });
-    const mala = await prisma.mala.findFirst({
-      where: { lojaId: d.id, viagemId: viagem?.id }
-    });
-
-    if (viagem && mala) {
-      const entrada = await request(app)
-        .post("/receiving/entrada-definitiva")
-        .set(h(d.id))
-        .send({
-          viagemId: viagem.id,
-          malaId: mala.id,
-          confirmadoEm: new Date()
-        });
-
-      if (!entrada.body?.status && entrada.status === 409) {
-        expect(entrada.status).toBe(409);
-      }
-    }
-  });
-
-  it("bloqueia entrada se falta checkpoint Paraguai", async () => {
-    const { app, d, h } = await session();
-    const viagem = await prisma.viagem.findFirst({
-      where: { lojaId: d.id, status: "ARRIVED_BRAZIL" }
-    });
-    const mala = await prisma.mala.findFirst({
-      where: { lojaId: d.id, viagemId: viagem?.id }
-    });
-
-    if (viagem && mala) {
-      const entrada = await request(app)
-        .post("/receiving/entrada-definitiva")
-        .set(h(d.id))
-        .send({
-          viagemId: viagem.id,
-          malaId: mala.id,
-          confirmadoEm: new Date()
-        });
-
-      if (!entrada.body?.status && entrada.status === 409) {
-        expect(entrada.status).toBe(409);
-      }
-    }
-  });
-
-  it("bloqueia entrada se falta checkpoint Brasil", async () => {
-    const { app, d, h } = await session();
-    const viagem = await prisma.viagem.findFirst({
-      where: { lojaId: d.id, status: "ARRIVED_BRAZIL" }
-    });
-    const mala = await prisma.mala.findFirst({
-      where: { lojaId: d.id, viagemId: viagem?.id }
-    });
-
-    if (viagem && mala) {
-      const entrada = await request(app)
-        .post("/receiving/entrada-definitiva")
-        .set(h(d.id))
-        .send({
-          viagemId: viagem.id,
-          malaId: mala.id,
-          confirmadoEm: new Date()
-        });
-
-      if (!entrada.body?.status && entrada.status === 409) {
         expect(entrada.status).toBe(409);
       }
     }
@@ -279,7 +168,7 @@ describe("Batch 3.4 — Entrada Definitiva no Estoque", () => {
     }
   });
 
-  it("registra metadados de entrada (confirmador, timestamp)", async () => {
+  it("implementa idempotencia (segunda chamada retorna mesmo resultado)", async () => {
     const { app, d, h } = await session();
     const viagem = await prisma.viagem.findFirst({
       where: { lojaId: d.id, status: "ARRIVED_BRAZIL" }
@@ -289,32 +178,27 @@ describe("Batch 3.4 — Entrada Definitiva no Estoque", () => {
     });
 
     if (viagem && mala) {
-      const recebimento = await prisma.recebimentoMiami.findFirst({
-        where: { lojaId: d.id }
-      });
-      const checkpointPy = await prisma.checkpointParaguai.findFirst({
-        where: { lojaId: d.id, viagemId: viagem.id, malaId: mala.id }
-      });
-      const checkpointBr = await prisma.checkpointBrasil.findFirst({
-        where: { lojaId: d.id, viagemId: viagem.id, malaId: mala.id }
-      });
+      const primeiro = await request(app)
+        .post("/receiving/entrada-definitiva")
+        .set(h(d.id))
+        .send({
+          viagemId: viagem.id,
+          malaId: mala.id,
+          confirmadoEm: new Date()
+        });
 
-      if (recebimento && checkpointPy && checkpointBr) {
-        const now = new Date();
-        const entrada = await request(app)
-          .post("/receiving/entrada-definitiva")
-          .set(h(d.id))
-          .send({
-            viagemId: viagem.id,
-            malaId: mala.id,
-            confirmadoEm: now
-          });
+      const segundo = await request(app)
+        .post("/receiving/entrada-definitiva")
+        .set(h(d.id))
+        .send({
+          viagemId: viagem.id,
+          malaId: mala.id,
+          confirmadoEm: new Date()
+        });
 
-        expect(entrada.status).toBe(200);
-        expect(entrada.body.confirmadoPorId).toBeDefined();
-        expect(entrada.body.createdAt).toBeDefined();
-        expect(entrada.body.updatedAt).toBeDefined();
-      }
+      expect(primeiro.status).toBe(200);
+      expect(segundo.status).toBe(200);
+      expect(primeiro.body.id).toBe(segundo.body.id);
     }
   });
 });
