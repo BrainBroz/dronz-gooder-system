@@ -1,0 +1,61 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Loja {
+  id   String @id @default(cuid())
+  code String @unique
+}
+
+model Usuario {
+  id       String @id @default(cuid())
+  name     String
+  email    String @unique
+  password String
+  active   Boolean @default(true)
+}
+
+model Perfil {
+  id   String @id @default(cuid())
+  code String @unique
+}
+
+model Permissao {
+  id   String @id @default(cuid())
+  code String @unique
+}
+
+model UsuarioLoja {
+  id        String @id @default(cuid())
+  usuarioId String
+  lojaId    String
+}
+
+model UsuarioPerfil {
+  id        String @id @default(cuid())
+  usuarioId String
+  perfilId  String
+}
+
+model PerfilPermissao {
+  id          String @id @default(cuid())
+  perfilId    String
+  permissaoId String
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  tokenHash String
+  revokedAt DateTime?
+}
+
+model AuditLog {
+  id      String @id @default(cuid())
+  action  String
+  subject String?
+}

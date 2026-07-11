@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "@dronz-gooder/domain": ["packages/domain/src"],
+      "@dronz-gooder/schemas": ["packages/schemas/src"],
+      "@dronz-gooder/shared": ["packages/shared/src"]
+    }
+  }
+}
