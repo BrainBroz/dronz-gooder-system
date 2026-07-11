@@ -8,6 +8,7 @@ import {
   formatSalePrice,
   purchasingQueryKeys,
   logisticsQueryKeys,
+  inventoryQueryKeys,
   queryClient
 } from "../src/app";
 
@@ -55,6 +56,11 @@ describe("web app", () => {
   it("isola caches logísticos por loja", () => {
     expect(logisticsQueryKeys.suitcases("d")).not.toEqual(
       logisticsQueryKeys.suitcases("g")
+    );
+  });
+  it("isola caches de estoque por loja", () => {
+    expect(inventoryQueryKeys.stock("d")).not.toEqual(
+      inventoryQueryKeys.stock("g")
     );
   });
 });

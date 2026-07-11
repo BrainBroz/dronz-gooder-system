@@ -345,6 +345,23 @@ async function main() {
       }
     });
   }
+  await Promise.all(
+    products.map((product, index) =>
+      prisma.estoque.upsert({
+        where: {
+          lojaId_produtoId: {
+            lojaId: index === 0 ? dronz.id : gooder.id,
+            produtoId: product.id
+          }
+        },
+        update: {},
+        create: {
+          lojaId: index === 0 ? dronz.id : gooder.id,
+          produtoId: product.id
+        }
+      })
+    )
+  );
 }
 
 main().finally(async () => {

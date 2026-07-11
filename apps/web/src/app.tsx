@@ -48,6 +48,11 @@ export const logisticsQueryKeys = {
   trips: (id: string | null) => ["trips", id] as const,
   suitcases: (id: string | null) => ["suitcases", id] as const
 };
+export const inventoryQueryKeys = {
+  stock: (id: string | null) => ["inventory", id] as const,
+  receiving: (id: string | null) => ["receiving", id] as const,
+  movements: (id: string | null) => ["inventory-movements", id] as const
+};
 export const formatSalePrice = (value: string) =>
   Number(value) === 0 ? "A definir" : value;
 
@@ -1021,6 +1026,83 @@ function LogisticsPage() {
   );
 }
 
+function InventoryPage() {
+  const store = useAuthStore((s) => s.activeStoreId);
+  const headers = { ...authHeader(), "x-store-id": store };
+  const stock = useQuery({
+    queryKey: inventoryQueryKeys.stock(store),
+    enabled: !!store,
+    queryFn: async () => (await api.get("/inventory", { headers })).data
+  });
+  const receiving = useQuery({
+    queryKey: inventoryQueryKeys.receiving(store),
+    enabled: !!store,
+    queryFn: async () => (await api.get("/receiving", { headers })).data
+  });
+
+  return (
+    <Box p={3}>
+      <Typography variant="h4">Estoque e Recebimentos</Typography>
+      {stock.isLoading && <Typography>Carregando...</Typography>}
+      {stock.isError && <Typography>Falha ao carregar dados</Typography>}
+      <Typography variant="h6" mt={2}>
+        Posição de estoque
+      </Typography>
+      {stock.data?.map(
+        (item: {
+          id: string;
+          quantidadeFisica: number;
+          quantidadeReservada: number;
+          produto: { nome: string; precoVenda: string; ativo: boolean };
+        }) => {
+          const disponivel = item.quantidadeFisica - item.quantidadeReservada;
+          const semEstoque = disponivel === 0;
+          return (
+            <Card
+              key={item.id}
+              sx={{
+                opacity: semEstoque ? 0.38 : item.produto.ativo ? 1 : 0.65,
+                filter: semEstoque ? "grayscale(1)" : "none"
+              }}
+            >
+              <CardContent>
+                <Typography>{item.produto.nome}</Typography>
+                <Typography>
+                  Físico {item.quantidadeFisica} · Reservado{" "}
+                  {item.quantidadeReservada} · Disponível {disponivel}
+                </Typography>
+                <Typography>
+                  {formatSalePrice(item.produto.precoVenda)}
+                </Typography>
+                <Typography>
+                  {semEstoque
+                    ? "Sem estoque"
+                    : item.produto.ativo
+                      ? "Ativo"
+                      : "Produto inativo"}
+                </Typography>
+              </CardContent>
+            </Card>
+          );
+        }
+      )}
+      <Typography variant="h6" mt={2}>
+        Recebimentos
+      </Typography>
+      {receiving.data?.map(
+        (item: { id: string; status: string; itens: unknown[] }) => (
+          <Card key={item.id}>
+            <CardContent>
+              <Typography>{item.status}</Typography>
+              <Typography>{item.itens.length} item(ns)</Typography>
+            </CardContent>
+          </Card>
+        )
+      )}
+    </Box>
+  );
+}
+
 export function NotFoundPage() {
   return <div>404</div>;
 }
@@ -1087,6 +1169,16 @@ export function AppRoutes() {
               <AuthGate>
                 <Shell>
                   <LogisticsPage />
+                </Shell>
+              </AuthGate>
+            }
+          />
+          <Route
+            path="/estoque"
+            element={
+              <AuthGate>
+                <Shell>
+                  <InventoryPage />
                 </Shell>
               </AuthGate>
             }

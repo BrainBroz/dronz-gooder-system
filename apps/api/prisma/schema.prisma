@@ -27,6 +27,10 @@ model Loja {
   volumesLogisticos VolumeLogistico[]
   alocacoesMala AlocacaoMala[]
   recebimentosMiami RecebimentoMiami[]
+  recebimentos Recebimento[]
+  recebimentoItens RecebimentoItem[]
+  estoques Estoque[]
+  movimentacoesEstoque MovimentacaoEstoque[]
 }
 
 model Usuario {
@@ -43,6 +47,8 @@ model Usuario {
   refreshTokens RefreshToken[]
   auditLogs     AuditLog[]
   recebimentosMiami RecebimentoMiami[]
+  recebimentosConfirmados Recebimento[]
+  movimentacoesEstoque MovimentacaoEstoque[]
 }
 
 model Perfil {
@@ -176,6 +182,9 @@ model Produto {
   loja      Loja      @relation(fields: [lojaId], references: [id], onDelete: Cascade)
   categoria Categoria @relation(fields: [categoriaId, lojaId], references: [id, lojaId], onDelete: Restrict)
   pedidoCompraItens PedidoCompraItem[]
+  estoques Estoque[]
+  recebimentoItens RecebimentoItem[]
+  movimentacoesEstoque MovimentacaoEstoque[]
 
   @@index([lojaId])
   @@index([lojaId, categoriaId])
@@ -263,6 +272,7 @@ model PedidoCompraItem {
   produto Produto @relation(fields: [produtoId, lojaId], references: [id, lojaId], onDelete: Restrict)
   alocacoesMala AlocacaoMala[]
   recebimentosMiami RecebimentoMiami[]
+  recebimentoItens RecebimentoItem[]
   @@unique([pedidoCompraId, produtoId])
   @@unique([id, lojaId])
   @@index([lojaId, produtoId])
@@ -320,6 +330,7 @@ model Viagem {
   loja Loja @relation(fields:[lojaId],references:[id],onDelete:Restrict)
   viajante Viajante @relation(fields:[viajanteId,lojaId],references:[id,lojaId],onDelete:Restrict)
   malas Mala[]
+  recebimentos Recebimento[]
   @@unique([id,lojaId])
   @@index([lojaId,status])
   @@index([lojaId,partidaEm])
@@ -339,6 +350,7 @@ model Mala {
   viagem Viagem @relation(fields:[viagemId,lojaId],references:[id,lojaId],onDelete:Restrict)
   volumes VolumeLogistico[]
   alocacoes AlocacaoMala[]
+  recebimentos Recebimento[]
   @@unique([viagemId,codigo])
   @@unique([id,lojaId])
   @@index([lojaId,status])
@@ -393,4 +405,112 @@ model RecebimentoMiami {
   item PedidoCompraItem @relation(fields:[pedidoCompraItemId,lojaId],references:[id,lojaId],onDelete:Restrict)
   confirmadoPor Usuario @relation(fields:[confirmadoPorId],references:[id],onDelete:Restrict)
   @@index([lojaId,pedidoCompraItemId])
+}
+
+enum RecebimentoStatus {
+  PENDING
+  IN_PROGRESS
+  PARTIALLY_COMPLETED
+  COMPLETED
+  REJECTED
+}
+enum MovimentacaoEstoqueTipo {
+  ENTRY
+  RESERVE
+  RELEASE_RESERVATION
+  EXIT
+  ADJUSTMENT_POSITIVE
+  ADJUSTMENT_NEGATIVE
+  RETURN_ENTRY
+  RETURN_EXIT
+}
+enum MovimentacaoEstoqueMotivo {
+  PURCHASE_RECEIPT
+  SALE
+  MANUAL_CORRECTION
+  DAMAGE
+  LOSS
+  RETURN
+  RESERVATION
+  RESERVATION_RELEASE
+}
+
+model Recebimento {
+  id String @id @default(cuid())
+  lojaId String
+  viagemId String
+  malaId String
+  status RecebimentoStatus @default(PENDING)
+  iniciadoEm DateTime
+  concluidoEm DateTime?
+  confirmadoPorId String
+  observacoes String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  loja Loja @relation(fields:[lojaId],references:[id],onDelete:Restrict)
+  viagem Viagem @relation(fields:[viagemId,lojaId],references:[id,lojaId],onDelete:Restrict)
+  mala Mala @relation(fields:[malaId,lojaId],references:[id,lojaId],onDelete:Restrict)
+  confirmadoPor Usuario @relation(fields:[confirmadoPorId],references:[id],onDelete:Restrict)
+  itens RecebimentoItem[]
+  movimentacoes MovimentacaoEstoque[]
+  @@unique([id,lojaId])
+  @@index([lojaId,status])
+}
+
+model RecebimentoItem {
+  id String @id @default(cuid())
+  lojaId String
+  recebimentoId String
+  pedidoCompraItemId String
+  produtoId String
+  quantidadeEsperada Int
+  quantidadeRecebida Int @default(0)
+  quantidadeRejeitada Int @default(0)
+  observacoes String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  loja Loja @relation(fields:[lojaId],references:[id],onDelete:Restrict)
+  recebimento Recebimento @relation(fields:[recebimentoId,lojaId],references:[id,lojaId],onDelete:Cascade)
+  pedidoItem PedidoCompraItem @relation(fields:[pedidoCompraItemId,lojaId],references:[id,lojaId],onDelete:Restrict)
+  produto Produto @relation(fields:[produtoId,lojaId],references:[id,lojaId],onDelete:Restrict)
+  @@unique([recebimentoId,pedidoCompraItemId])
+  @@index([lojaId,produtoId])
+}
+
+model Estoque {
+  id String @id @default(cuid())
+  lojaId String
+  produtoId String
+  quantidadeFisica Int @default(0)
+  quantidadeReservada Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  loja Loja @relation(fields:[lojaId],references:[id],onDelete:Restrict)
+  produto Produto @relation(fields:[produtoId,lojaId],references:[id,lojaId],onDelete:Restrict)
+  movimentacoes MovimentacaoEstoque[]
+  @@unique([lojaId,produtoId])
+  @@unique([id,lojaId])
+}
+
+model MovimentacaoEstoque {
+  id String @id @default(cuid())
+  lojaId String
+  produtoId String
+  estoqueId String
+  recebimentoId String?
+  tipo MovimentacaoEstoqueTipo
+  motivo MovimentacaoEstoqueMotivo
+  quantidade Int
+  quantidadeAnterior Int
+  quantidadePosterior Int
+  responsavelId String
+  observacoes String?
+  createdAt DateTime @default(now())
+  loja Loja @relation(fields:[lojaId],references:[id],onDelete:Restrict)
+  produto Produto @relation(fields:[produtoId,lojaId],references:[id,lojaId],onDelete:Restrict)
+  estoque Estoque @relation(fields:[estoqueId,lojaId],references:[id,lojaId],onDelete:Restrict)
+  recebimento Recebimento? @relation(fields:[recebimentoId,lojaId],references:[id,lojaId],onDelete:Restrict)
+  responsavel Usuario @relation(fields:[responsavelId],references:[id],onDelete:Restrict)
+  @@index([lojaId,produtoId,createdAt])
+  @@index([lojaId,tipo])
 }
