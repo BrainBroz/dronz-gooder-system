@@ -10,6 +10,7 @@ import {
   logisticsQueryKeys,
   inventoryQueryKeys,
   financeQueryKeys,
+  dashboardQueryKeys,
   queryClient
 } from "../src/app";
 
@@ -67,6 +68,11 @@ describe("web app", () => {
   it("isola caches financeiros por loja", () => {
     expect(financeQueryKeys.payments("d")).not.toEqual(
       financeQueryKeys.payments("g")
+    );
+  });
+  it("isola o dashboard por loja", () => {
+    expect(dashboardQueryKeys.summary("d")).not.toEqual(
+      dashboardQueryKeys.summary("g")
     );
   });
 });

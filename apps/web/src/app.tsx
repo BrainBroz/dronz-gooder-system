@@ -56,6 +56,9 @@ export const inventoryQueryKeys = {
 export const financeQueryKeys = {
   payments: (id: string | null) => ["finance-payments", id] as const
 };
+export const dashboardQueryKeys = {
+  summary: (id: string | null) => ["dashboard", id] as const
+};
 export const formatSalePrice = (value: string) =>
   Number(value) === 0 ? "A definir" : value;
 
@@ -653,6 +656,16 @@ function ProductsPage() {
 function OperacaoPage() {
   const { stores, activeStoreId } = useAuthStore();
   const activeStore = stores.find((store) => store.id === activeStoreId);
+  const summary = useQuery({
+    queryKey: dashboardQueryKeys.summary(activeStoreId),
+    enabled: !!activeStoreId,
+    queryFn: async () =>
+      (
+        await api.get("/analytics/dashboard", {
+          headers: { ...authHeader(), "x-store-id": activeStoreId }
+        })
+      ).data
+  });
   return (
     <Box p={3}>
       <Stack gap={2}>
@@ -660,28 +673,37 @@ function OperacaoPage() {
         <Typography>
           Loja ativa: {activeStore?.nome ?? "Selecione uma loja"}
         </Typography>
+        {summary.isLoading && <Typography>Carregando...</Typography>}
+        {summary.isError && (
+          <Typography>Falha ao carregar indicadores</Typography>
+        )}
         <Card>
           <CardContent>
-            <Typography>Categoria 1</Typography>
+            <Typography>Pedidos</Typography>
+            <Typography>{summary.data?.orders.count ?? 0}</Typography>
           </CardContent>
         </Card>
         <Card>
           <CardContent>
-            <Typography>Categoria 2</Typography>
+            <Typography>Estoque disponível</Typography>
+            <Typography>{summary.data?.inventory.available ?? 0}</Typography>
           </CardContent>
         </Card>
         <Card>
           <CardContent>
-            <Typography>Categoria 3</Typography>
+            <Typography>Viagens abertas</Typography>
+            <Typography>{summary.data?.openTrips ?? 0}</Typography>
           </CardContent>
         </Card>
         <Card>
           <CardContent>
-            <Typography>Categoria 4</Typography>
+            <Typography>Recebimentos pendentes</Typography>
+            <Typography>{summary.data?.pendingReceiving ?? 0}</Typography>
           </CardContent>
         </Card>
-        <Typography>Área de pendências vazia</Typography>
-        <Typography>Outros módulos virão depois.</Typography>
+        <Typography>
+          Indicadores calculados somente com dados reais da loja ativa.
+        </Typography>
       </Stack>
     </Box>
   );

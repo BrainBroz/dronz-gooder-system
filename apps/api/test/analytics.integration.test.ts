@@ -1,0 +1,45 @@
+import { beforeAll, describe, expect, it } from "vitest";
+import request from "supertest";
+process.env.DATABASE_URL =
+  "postgresql://postgres:postgres@localhost:5432/dronz_gooder?schema=public";
+process.env.WEB_ORIGIN = "http://localhost:5173";
+process.env.JWT_ACCESS_SECRET = "change-me-access";
+process.env.JWT_REFRESH_SECRET = "change-me-refresh";
+process.env.JWT_ACCESS_EXPIRES_IN = "15m";
+process.env.JWT_REFRESH_EXPIRES_IN = "30d";
+let createApp: typeof import("../src/app").createApp;
+beforeAll(async () => {
+  ({ createApp } = await import("../src/app"));
+});
+describe("analytics", () => {
+  it("retorna indicadores e relatórios isolados por loja", async () => {
+    const app = createApp(),
+      login = await request(app)
+        .post("/auth/login")
+        .send({ email: "admin@example.com", password: "change-me" }),
+      d = login.body.stores.find((x: { slug: string }) => x.slug === "dronz"),
+      g = login.body.stores.find((x: { slug: string }) => x.slug === "gooder"),
+      h = (id: string) => ({
+        Authorization: `Bearer ${login.body.accessToken}`,
+        "x-store-id": id
+      });
+    const dashboard = await request(app)
+      .get("/analytics/dashboard")
+      .set(h(d.id));
+    expect(dashboard.status).toBe(200);
+    expect(dashboard.body.inventory.available).toBeGreaterThanOrEqual(0);
+    const dr = await request(app)
+        .get("/analytics/reports/inventory")
+        .set(h(d.id)),
+      gr = await request(app).get("/analytics/reports/inventory").set(h(g.id));
+    expect(dr.body.every((x: { lojaId: string }) => x.lojaId === d.id)).toBe(
+      true
+    );
+    expect(gr.body.every((x: { lojaId: string }) => x.lojaId === g.id)).toBe(
+      true
+    );
+    expect(
+      (await request(app).get("/analytics/reports/unknown").set(h(d.id))).status
+    ).toBe(400);
+  });
+});
