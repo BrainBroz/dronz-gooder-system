@@ -48,7 +48,12 @@ export function createApp() {
   app.post("/auth/refresh", async (req, res, next) => {
     try {
       const { refreshToken } = refreshSchema.parse(req.body);
-      const decoded = jwt.verify(refreshToken, env.JWT_REFRESH_SECRET) as { sub: string; jti: string };
+      let decoded: { sub: string; jti: string };
+      try {
+        decoded = jwt.verify(refreshToken, env.JWT_REFRESH_SECRET) as { sub: string; jti: string };
+      } catch {
+        return res.status(401).json({ error: "invalid_refresh_token" });
+      }
       const tokenHash = hashToken(refreshToken);
       const stored = await prisma.refreshToken.findUnique({ where: { tokenHash } });
       if (!stored || stored.revokedAt || stored.expiresAt.getTime() < Date.now()) {
@@ -88,8 +93,10 @@ export function createApp() {
     }
   });
 
-  app.use((error: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
-    void next;
+  app.use((error: unknown, _req: express.Request, res: express.Response) => {
+    if (error instanceof Error && error.message === "USER_NOT_FOUND") {
+      return res.status(401).json({ error: "unauthorized" });
+    }
     res.status(400).json({ error: "bad_request" });
   });
 
