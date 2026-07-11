@@ -66,6 +66,63 @@ async function main() {
     create: { perfilId: profile.id, permissaoId: permission.id }
   });
 
+  // Perfil CHECKPOINT_MIAMI (ARQUITETURA_OPERACIONAL_V2 §11): somente as
+  // quatro permissões logísticas — nenhum campo monetário jamais.
+  const miamiProfile = await prisma.perfil.upsert({
+    where: { code: "CHECKPOINT_MIAMI" },
+    update: { name: "Checkpoint Miami" },
+    create: { code: "CHECKPOINT_MIAMI", name: "Checkpoint Miami" }
+  });
+  const miamiPermissionCodes = [
+    "MIAMI_PEDIDOS_LER_LOGISTICA",
+    "MIAMI_RECEBIMENTO_CONFIRMAR",
+    "MIAMI_DIVERGENCIA_CRIAR",
+    "MIAMI_LOGISTICA_LER"
+  ];
+  for (const code of miamiPermissionCodes) {
+    const perm = await prisma.permissao.upsert({
+      where: { code },
+      update: { name: code },
+      create: { code, name: code }
+    });
+    await prisma.perfilPermissao.upsert({
+      where: {
+        perfilId_permissaoId: {
+          perfilId: miamiProfile.id,
+          permissaoId: perm.id
+        }
+      },
+      update: {},
+      create: { perfilId: miamiProfile.id, permissaoId: perm.id }
+    });
+  }
+
+  // Fase 0 da migração (§16): Localizacao Brasil de abertura por loja.
+  for (const [store, suffix] of [
+    [dronz, "dronz"],
+    [gooder, "gooder"]
+  ] as const) {
+    const loc = await prisma.localizacao.upsert({
+      where: { id: `seed-loc-brasil-${suffix}` },
+      update: { nome: "Abertura Brasil", ativo: true },
+      create: {
+        id: `seed-loc-brasil-${suffix}`,
+        nome: "Abertura Brasil",
+        tipo: "WAREHOUSE",
+        timezone: "America/Sao_Paulo",
+        pais: "BR",
+        ownerLojaId: store.id
+      }
+    });
+    await prisma.localizacaoLoja.upsert({
+      where: {
+        localizacaoId_lojaId: { localizacaoId: loc.id, lojaId: store.id }
+      },
+      update: {},
+      create: { localizacaoId: loc.id, lojaId: store.id }
+    });
+  }
+
   const categories = await Promise.all([
     prisma.categoria.upsert({
       where: { lojaId_slug: { lojaId: dronz.id, slug: "dronz-geral" } },

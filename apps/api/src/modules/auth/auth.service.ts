@@ -30,6 +30,7 @@ export async function getAuthenticatedUser(userId: string) {
   if (!user || !user.active) throw new AppError(401, "unauthorized");
   return {
     user: { id: user.id, name: user.name, email: user.email, active: user.active },
+    permissionScopeVersion: user.authorizationVersion,
     lojas: user.lojas.map((entry) => ({ id: entry.loja.id, slug: entry.loja.slug, nome: entry.loja.nome })),
     perfis: user.perfis.map((entry) => ({ id: entry.perfil.id, code: entry.perfil.code, name: entry.perfil.name })),
     permissoes: user.perfis.flatMap((entry) => entry.perfil.permissoes.map((link) => ({ id: link.permissao.id, code: link.permissao.code, name: link.permissao.name })))

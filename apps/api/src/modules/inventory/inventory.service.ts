@@ -4,6 +4,8 @@ import {
 } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { AppError } from "../../lib/app-error";
+import { flags } from "../../lib/feature-flags";
+import { shadowWriteMovimentacao } from "../migration/shadow.service";
 export const list = (lojaId: string) =>
   prisma.estoque.findMany({
     where: { lojaId },
@@ -66,7 +68,7 @@ export async function move(
       where: { id: stock.id },
       data: { quantidadeFisica: physical, quantidadeReservada: reserved }
     });
-    return tx.movimentacaoEstoque.create({
+    const movimentacao = await tx.movimentacaoEstoque.create({
       data: {
         lojaId,
         produtoId: d.produtoId,
@@ -80,5 +82,18 @@ export async function move(
         observacoes: d.observacoes
       }
     });
+    // Shadow write (§16 Fase 2): ledger na MESMA transação — rollback conjunto.
+    if (flags.ledgerShadowWrite) {
+      await shadowWriteMovimentacao(tx, {
+        lojaId,
+        produtoId: d.produtoId,
+        estoqueId: stock.id,
+        tipo: d.tipo,
+        motivo: d.motivo,
+        quantidade: d.quantidade,
+        responsavelId: userId
+      });
+    }
+    return movimentacao;
   });
 }
