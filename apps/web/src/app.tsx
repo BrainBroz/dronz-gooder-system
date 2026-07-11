@@ -6,9 +6,16 @@ import { Controller, useForm } from "react-hook-form";
 import { create } from "zustand";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
 export const api = axios.create({ baseURL: API_URL, withCredentials: true });
+export const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+export const catalogQueryKeys = {
+  categories: (storeId: string | null) => ["categories", storeId] as const,
+  products: (storeId: string | null) => ["products", storeId] as const
+};
+export const formatSalePrice = (value: string) => Number(value) === 0 ? "A definir" : value;
 
 type Store = { id: string; slug: string; nome: string };
 type AuthUser = { id: string; name: string; email: string; active: boolean };
@@ -90,37 +97,23 @@ export function LoginPage() {
   return <Box sx={{ minHeight: "100vh", display: "grid", placeItems: "center", p: 2 }}><Card sx={{ width: 380 }}><CardContent><Typography variant="h5" mb={2}>Entrar</Typography><form onSubmit={onSubmit}><Stack gap={2}><Controller name="email" control={control} render={({ field }) => <TextField {...field} label="E-mail" error={!!errors.email} helperText={errors.email?.message} />} /><Controller name="password" control={control} render={({ field }) => <TextField {...field} type="password" label="Senha" error={!!errors.password} helperText={errors.password?.message} />} /><Button type="submit" variant="contained" disabled={isSubmitting}>Entrar</Button></Stack></form></CardContent></Card></Box>;
 }
 
-function useStoreData() {
+function useCatalogContext() {
   const { activeStoreId, accessToken } = useAuthStore();
-  const [categories, setCategories] = React.useState<Category[]>([]);
-  const [products, setProducts] = React.useState<Product[]>([]);
-  const [error, setError] = React.useState<string | null>(null);
-  const [loading, setLoading] = React.useState(false);
-  React.useEffect(() => {
-    let alive = true;
-    void (async () => {
-      if (!activeStoreId || !accessToken) return;
-      setLoading(true);
-      try {
-        const [cat, prod] = await Promise.all([
-          api.get("/categories", { headers: { ...authHeader(), "x-store-id": activeStoreId } }),
-          api.get("/products", { headers: { ...authHeader(), "x-store-id": activeStoreId } })
-        ]);
-        if (!alive) return;
-        setCategories(cat.data.items ?? []);
-        setProducts(prod.data.items ?? []);
-        setError(null);
-      } catch {
-        if (alive) setError("Falha ao carregar dados");
-      } finally {
-        if (alive) setLoading(false);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [activeStoreId, accessToken]);
-  return { categories, products, setCategories, setProducts, error, loading };
+  const enabled = Boolean(activeStoreId && accessToken);
+  const headers = () => ({ ...authHeader(), "x-store-id": activeStoreId! });
+  return { activeStoreId, enabled, headers };
+}
+
+function useCategories() {
+  const { activeStoreId, enabled, headers } = useCatalogContext();
+  const categoriesQuery = useQuery<Category[]>({ queryKey: catalogQueryKeys.categories(activeStoreId), enabled, queryFn: async () => (await api.get("/categories", { headers: headers() })).data.items ?? [] });
+  return { categories: categoriesQuery.data ?? [], categoriesError: categoriesQuery.error, categoriesLoading: categoriesQuery.isLoading };
+}
+
+function useProducts() {
+  const { activeStoreId, enabled, headers } = useCatalogContext();
+  const productsQuery = useQuery<Product[]>({ queryKey: catalogQueryKeys.products(activeStoreId), enabled, queryFn: async () => (await api.get("/products", { headers: headers() })).data.items ?? [] });
+  return { products: productsQuery.data ?? [], productsError: productsQuery.error, productsLoading: productsQuery.isLoading };
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -131,49 +124,37 @@ function Shell({ children }: { children: React.ReactNode }) {
 }
 
 function CategoriesPage() {
-  const { categories, setCategories, error, loading } = useStoreData();
+  const { categories, categoriesError, categoriesLoading: loading } = useCategories();
+  const error = categoriesError ? "Falha ao carregar dados" : null;
   const activeStoreId = useAuthStore((s) => s.activeStoreId);
+  const client = useQueryClient();
   const [editing, setEditing] = React.useState<Category | null>(null);
   const form = useForm({ resolver: zodResolver(categorySchema), defaultValues: { nome: "", slug: "", descricao: "", ordem: 0, ativo: true } });
-  const save = form.handleSubmit(async (values) => {
-    if (!activeStoreId) return;
-    const payload = { ...values };
-    const response = editing
-      ? await api.patch(`/categories/${editing.id}`, payload, { headers: { ...authHeader(), "x-store-id": activeStoreId } })
-      : await api.post("/categories", payload, { headers: { ...authHeader(), "x-store-id": activeStoreId } });
-    const next = editing ? categories.map((item) => item.id === editing.id ? response.data : item) : [...categories, response.data];
-    setCategories(next);
-    setEditing(null);
-    form.reset();
-  });
-  const toggle = async (category: Category) => {
-    if (!activeStoreId) return;
-    const response = await api.patch(`/categories/${category.id}/status`, {}, { headers: { ...authHeader(), "x-store-id": activeStoreId } });
-    setCategories(categories.map((item) => item.id === category.id ? response.data : item));
-  };
-  const remove = async (category: Category) => {
-    if (!activeStoreId) return;
-    await api.delete(`/categories/${category.id}`, { headers: { ...authHeader(), "x-store-id": activeStoreId } });
-    setCategories(categories.filter((item) => item.id !== category.id));
-  };
-  return <Box p={3}><Typography variant="h4" mb={2}>Categorias</Typography>{loading && <div>Carregando...</div>}{error && <div>{error}</div>}<Stack direction="row" gap={2} flexWrap="wrap"><Card sx={{ width: 340 }}><CardContent><form onSubmit={save}><Stack gap={2}><Controller name="nome" control={form.control} render={({ field }) => <TextField {...field} label="Nome" />} /><Controller name="slug" control={form.control} render={({ field }) => <TextField {...field} label="Slug" />} /><Controller name="descricao" control={form.control} render={({ field }) => <TextField {...field} label="Descrição" />} /><Controller name="ordem" control={form.control} render={({ field }) => <TextField {...field} label="Ordem" type="number" />} /><Button type="submit" variant="contained">{editing ? "Salvar" : "Criar"}</Button></Stack></form></CardContent></Card>{categories.map((category) => <Card key={category.id} sx={{ width: 300, opacity: category.ativo ? 1 : 0.6 }}><CardContent><Typography>{category.nome}</Typography><Typography variant="body2">{category.slug}</Typography><Stack direction="row" gap={1} mt={2}><Button onClick={() => { setEditing(category); form.reset({ nome: category.nome, slug: category.slug, descricao: category.descricao ?? "", ordem: category.ordem, ativo: category.ativo }); }}>Editar</Button><Button onClick={() => toggle(category)}>{category.ativo ? "Desativar" : "Ativar"}</Button><Button color="error" onClick={() => remove(category)}>Excluir</Button></Stack></CardContent></Card>)}</Stack>{!categories.length && <Typography mt={2}>Nenhuma categoria.</Typography>}</Box>;
+  const invalidate = () => Promise.all([
+    client.invalidateQueries({ queryKey: catalogQueryKeys.categories(activeStoreId) }),
+    client.invalidateQueries({ queryKey: catalogQueryKeys.products(activeStoreId) })
+  ]);
+  const saveMutation = useMutation({ mutationFn: async (values: z.infer<typeof categorySchema>) => editing ? api.patch(`/categories/${editing.id}`, values, { headers: { ...authHeader(), "x-store-id": activeStoreId } }) : api.post("/categories", values, { headers: { ...authHeader(), "x-store-id": activeStoreId } }), onSuccess: async () => { await invalidate(); setEditing(null); form.reset(); } });
+  const toggleMutation = useMutation({ mutationFn: (category: Category) => api.patch(`/categories/${category.id}/status`, {}, { headers: { ...authHeader(), "x-store-id": activeStoreId } }), onSuccess: invalidate });
+  const removeMutation = useMutation({ mutationFn: (category: Category) => api.delete(`/categories/${category.id}`, { headers: { ...authHeader(), "x-store-id": activeStoreId } }), onSuccess: invalidate });
+  const save = form.handleSubmit((values) => saveMutation.mutateAsync(values));
+  return <Box p={3}><Typography variant="h4" mb={2}>Categorias</Typography>{loading && <div>Carregando...</div>}{error && <div>{error}</div>}<Stack direction="row" gap={2} flexWrap="wrap"><Card sx={{ width: 340 }}><CardContent><form onSubmit={save}><Stack gap={2}><Controller name="nome" control={form.control} render={({ field }) => <TextField {...field} label="Nome" />} /><Controller name="slug" control={form.control} render={({ field }) => <TextField {...field} label="Slug" />} /><Controller name="descricao" control={form.control} render={({ field }) => <TextField {...field} label="Descrição" />} /><Controller name="ordem" control={form.control} render={({ field }) => <TextField {...field} label="Ordem" type="number" />} /><Button type="submit" variant="contained">{editing ? "Salvar" : "Criar"}</Button></Stack></form></CardContent></Card>{categories.map((category) => <Card key={category.id} sx={{ width: 300, opacity: category.ativo ? 1 : 0.6 }}><CardContent><Typography>{category.nome}</Typography><Typography variant="body2">{category.slug}</Typography><Stack direction="row" gap={1} mt={2}><Button onClick={() => { setEditing(category); form.reset({ nome: category.nome, slug: category.slug, descricao: category.descricao ?? "", ordem: category.ordem, ativo: category.ativo }); }}>Editar</Button><Button onClick={() => toggleMutation.mutate(category)}>{category.ativo ? "Desativar" : "Ativar"}</Button><Button color="error" onClick={() => removeMutation.mutate(category)}>Excluir</Button></Stack></CardContent></Card>)}</Stack>{!loading && !categories.length && <Typography mt={2}>Nenhuma categoria.</Typography>}</Box>;
 }
 
 function ProductsPage() {
-  const { categories, products, setProducts, error, loading } = useStoreData();
+  const { categories, categoriesError, categoriesLoading } = useCategories();
+  const { products, productsError, productsLoading } = useProducts();
+  const loading = categoriesLoading || productsLoading;
+  const error = categoriesError || productsError ? "Falha ao carregar dados" : null;
   const activeStoreId = useAuthStore((s) => s.activeStoreId);
+  const client = useQueryClient();
   const [editing, setEditing] = React.useState<Product | null>(null);
   const form = useForm({ resolver: zodResolver(productSchema), defaultValues: { codigo: 301, nome: "", slug: "", categoriaId: "", descricao: "", precoVenda: 0, markup: 25, peso: 0 } });
-  const save = form.handleSubmit(async (values) => {
-    if (!activeStoreId) return;
-    const response = editing
-      ? await api.patch(`/products/${editing.id}`, values, { headers: { ...authHeader(), "x-store-id": activeStoreId } })
-      : await api.post("/products", values, { headers: { ...authHeader(), "x-store-id": activeStoreId } });
-    setProducts(editing ? products.map((item) => item.id === editing.id ? response.data : item) : [...products, response.data]);
-    setEditing(null);
-    form.reset();
-  });
-  return <Box p={3}><Typography variant="h4" mb={2}>Produtos</Typography>{loading && <div>Carregando...</div>}{error && <div>{error}</div>}<Stack direction="row" gap={2} flexWrap="wrap"><Card sx={{ width: 360 }}><CardContent><form onSubmit={save}><Stack gap={2}><Controller name="codigo" control={form.control} render={({ field }) => <TextField {...field} label="Código" type="number" />} /><Controller name="nome" control={form.control} render={({ field }) => <TextField {...field} label="Nome" />} /><Controller name="slug" control={form.control} render={({ field }) => <TextField {...field} label="Slug" />} /><Controller name="categoriaId" control={form.control} render={({ field }) => <TextField {...field} select label="Categoria">{categories.map((category) => <MenuItem key={category.id} value={category.id}>{category.nome}</MenuItem>)}</TextField>} /><Controller name="precoVenda" control={form.control} render={({ field }) => <TextField {...field} label="Preço de venda" type="number" />} /><Controller name="markup" control={form.control} render={({ field }) => <TextField {...field} label="Markup" type="number" />} /><Button type="submit" variant="contained">{editing ? "Salvar" : "Criar"}</Button></Stack></form></CardContent></Card>{products.map((product) => <Card key={product.id} sx={{ width: 320, opacity: product.ativo ? 1 : 0.6 }}><CardContent><Typography>{product.nome}</Typography><Typography variant="body2">Código {product.codigo}</Typography><Typography variant="body2">{Number(product.precoVenda) === 0 ? "A definir" : product.precoVenda}</Typography><Stack direction="row" gap={1} mt={2}><Button onClick={() => { setEditing(product); form.reset({ codigo: product.codigo, nome: product.nome, slug: product.slug, categoriaId: product.categoria.id, descricao: product.descricao ?? "", precoVenda: Number(product.precoVenda), markup: Number(product.markup), peso: 0 }); }}>Editar</Button><Button onClick={async () => { if (!activeStoreId) return; const response = await api.patch(`/products/${product.id}/status`, {}, { headers: { ...authHeader(), "x-store-id": activeStoreId } }); setProducts(products.map((item) => item.id === product.id ? response.data : item)); }}>{product.ativo ? "Desativar" : "Ativar"}</Button></Stack></CardContent></Card>)}</Stack>{!products.length && <Typography mt={2}>Nenhum produto.</Typography>}</Box>;
+  const invalidate = () => client.invalidateQueries({ queryKey: catalogQueryKeys.products(activeStoreId) });
+  const saveMutation = useMutation({ mutationFn: async (values: z.infer<typeof productSchema>) => editing ? api.patch(`/products/${editing.id}`, values, { headers: { ...authHeader(), "x-store-id": activeStoreId } }) : api.post("/products", values, { headers: { ...authHeader(), "x-store-id": activeStoreId } }), onSuccess: async () => { await invalidate(); setEditing(null); form.reset(); } });
+  const toggleMutation = useMutation({ mutationFn: (product: Product) => api.patch(`/products/${product.id}/status`, {}, { headers: { ...authHeader(), "x-store-id": activeStoreId } }), onSuccess: invalidate });
+  const save = form.handleSubmit((values) => saveMutation.mutateAsync(values));
+  return <Box p={3}><Typography variant="h4" mb={2}>Produtos</Typography>{loading && <div>Carregando...</div>}{error && <div>{error}</div>}<Stack direction="row" gap={2} flexWrap="wrap"><Card sx={{ width: 360 }}><CardContent><form onSubmit={save}><Stack gap={2}><Controller name="codigo" control={form.control} render={({ field }) => <TextField {...field} label="Código" type="number" />} /><Controller name="nome" control={form.control} render={({ field }) => <TextField {...field} label="Nome" />} /><Controller name="slug" control={form.control} render={({ field }) => <TextField {...field} label="Slug" />} /><Controller name="categoriaId" control={form.control} render={({ field }) => <TextField {...field} select label="Categoria">{categories.map((category) => <MenuItem key={category.id} value={category.id}>{category.nome}</MenuItem>)}</TextField>} /><Controller name="precoVenda" control={form.control} render={({ field }) => <TextField {...field} label="Preço de venda" type="number" />} /><Controller name="markup" control={form.control} render={({ field }) => <TextField {...field} label="Markup" type="number" />} /><Button type="submit" variant="contained">{editing ? "Salvar" : "Criar"}</Button></Stack></form></CardContent></Card>{products.map((product) => <Card key={product.id} sx={{ width: 320, opacity: product.ativo ? 1 : 0.6 }}><CardContent><Typography>{product.nome}</Typography><Typography variant="body2">Código {product.codigo}</Typography><Typography variant="body2">{formatSalePrice(product.precoVenda)}</Typography><Stack direction="row" gap={1} mt={2}><Button onClick={() => { setEditing(product); form.reset({ codigo: product.codigo, nome: product.nome, slug: product.slug, categoriaId: product.categoria.id, descricao: product.descricao ?? "", precoVenda: Number(product.precoVenda), markup: Number(product.markup), peso: 0 }); }}>Editar</Button><Button onClick={() => toggleMutation.mutate(product)}>{product.ativo ? "Desativar" : "Ativar"}</Button></Stack></CardContent></Card>)}</Stack>{!loading && !products.length && <Typography mt={2}>Nenhum produto.</Typography>}</Box>;
 }
 
 function OperacaoPage() {
@@ -187,5 +168,5 @@ export function NotFoundPage() {
 }
 
 export function AppRoutes() {
-  return <ThemeProvider theme={theme}><Routes><Route path="/login" element={<LoginPage />} /><Route path="/operacao" element={<AuthGate><Shell><OperacaoPage /></Shell></AuthGate>} /><Route path="/categorias" element={<AuthGate><Shell><CategoriesPage /></Shell></AuthGate>} /><Route path="/produtos" element={<AuthGate><Shell><ProductsPage /></Shell></AuthGate>} /><Route path="*" element={<NotFoundPage />} /></Routes></ThemeProvider>;
+  return <QueryClientProvider client={queryClient}><ThemeProvider theme={theme}><Routes><Route path="/login" element={<LoginPage />} /><Route path="/operacao" element={<AuthGate><Shell><OperacaoPage /></Shell></AuthGate>} /><Route path="/categorias" element={<AuthGate><Shell><CategoriesPage /></Shell></AuthGate>} /><Route path="/produtos" element={<AuthGate><Shell><ProductsPage /></Shell></AuthGate>} /><Route path="*" element={<NotFoundPage />} /></Routes></ThemeProvider></QueryClientProvider>;
 }

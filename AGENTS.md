@@ -32,9 +32,18 @@ Construir um sistema operacional para Dronz e Gooder com separação rigorosa en
 - Backend: Node.js, Express, TypeScript, PostgreSQL, Prisma, JWT, refresh token, storage compatível com S3
 - Monorepo: npm workspaces
 
-## Escopo desta fundação
+## Estado da fundação
 
-Implementar apenas a fundação do monorepo, a documentação inicial, os contratos base e as telas/rotas mínimas. Não implementar compras, produtos, tracking, estoque, remessas, viajantes, financeiro, e-mail, QR Code ou integrações além do necessário para autenticação e health check.
+A fundação do monorepo, a autenticação cookie-only, Categorias e Produtos estão implementados e validados. Compras, pedidos, fornecedores, tracking, estoque, remessas, viajantes, logística, financeiro, PayPal, e-mail, QR Code e dashboard ainda não foram implementados.
+
+## Padrões arquiteturais vigentes
+
+- A API é organizada por módulos com rotas, controllers, services e schemas Zod próximos ao domínio.
+- Controllers tratam HTTP; services concentram regras e acessam o Prisma centralizado em `apps/api/src/lib/prisma.ts`.
+- Rotas e controllers não acessam Prisma diretamente.
+- Não criar repository genérico ou camadas vazias; repositories específicos só existem quando trouxerem valor real.
+- TanStack Query é o padrão para server state no frontend, sempre com `lojaId` nas query keys de dados comerciais.
+- Zustand permanece restrito à identidade autenticada, loja ativa e estado global legítimo de interface.
 
 ## Rotina
 
@@ -44,4 +53,3 @@ Implementar apenas a fundação do monorepo, a documentação inicial, os contra
 - não usar mocks como banco;
 - manter backend como fonte de autorização;
 - não alterar regras de negócio sem aprovação explícita.
-
