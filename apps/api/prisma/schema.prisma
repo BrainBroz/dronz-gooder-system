@@ -16,6 +16,8 @@ model Loja {
   updatedAt DateTime @updatedAt
 
   usuarios  UsuarioLoja[]
+  categorias Categoria[]
+  produtos   Produto[]
 }
 
 model Usuario {
@@ -124,4 +126,47 @@ model AuditLog {
   @@index([action])
   @@index([entity])
   @@index([usuarioId])
+}
+
+model Categoria {
+  id        String   @id @default(cuid())
+  lojaId    String
+  nome      String
+  slug      String
+  descricao String?
+  ordem     Int      @default(0)
+  ativo     Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  loja     Loja      @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  produtos Produto[]
+
+  @@unique([lojaId, slug])
+  @@index([lojaId])
+  @@index([lojaId, ativo])
+}
+
+model Produto {
+  id          String   @id @default(cuid())
+  codigo      Int      @unique
+  lojaId      String
+  categoriaId String
+  nome        String
+  slug        String
+  descricao   String?
+  precoVenda  Decimal  @db.Decimal(10, 2)
+  markup      Decimal  @db.Decimal(5, 2)
+  peso        Decimal? @db.Decimal(10, 3)
+  ativo       Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  loja      Loja      @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  categoria Categoria @relation(fields: [categoriaId], references: [id], onDelete: Restrict)
+
+  @@index([lojaId])
+  @@index([lojaId, categoriaId])
+  @@index([lojaId, ativo])
+  @@unique([lojaId, slug])
 }

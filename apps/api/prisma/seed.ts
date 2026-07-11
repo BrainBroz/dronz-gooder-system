@@ -63,6 +63,70 @@ async function main() {
     update: {},
     create: { perfilId: profile.id, permissaoId: permission.id }
   });
+
+  const categories = await Promise.all([
+    prisma.categoria.upsert({
+      where: { lojaId_slug: { lojaId: dronz.id, slug: "dronz-geral" } },
+      update: { nome: "Dronz Geral", descricao: "Categoria de demonstração", ordem: 1, ativo: true },
+      create: { lojaId: dronz.id, nome: "Dronz Geral", slug: "dronz-geral", descricao: "Categoria de demonstração", ordem: 1, ativo: true }
+    }),
+    prisma.categoria.upsert({
+      where: { lojaId_slug: { lojaId: gooder.id, slug: "gooder-geral" } },
+      update: { nome: "Gooder Geral", descricao: "Categoria de demonstração", ordem: 1, ativo: true },
+      create: { lojaId: gooder.id, nome: "Gooder Geral", slug: "gooder-geral", descricao: "Categoria de demonstração", ordem: 1, ativo: true }
+    })
+  ]);
+
+  await Promise.all([
+    prisma.produto.upsert({
+      where: { codigo: 101 },
+      update: {
+        lojaId: dronz.id,
+        categoriaId: categories[0].id,
+        nome: "Produto Dronz 101",
+        slug: "produto-dronz-101",
+        descricao: "Produto de demonstração",
+        precoVenda: "0.00",
+        markup: "25.00",
+        ativo: true
+      },
+      create: {
+        codigo: 101,
+        lojaId: dronz.id,
+        categoriaId: categories[0].id,
+        nome: "Produto Dronz 101",
+        slug: "produto-dronz-101",
+        descricao: "Produto de demonstração",
+        precoVenda: "0.00",
+        markup: "25.00",
+        ativo: true
+      }
+    }),
+    prisma.produto.upsert({
+      where: { codigo: 201 },
+      update: {
+        lojaId: gooder.id,
+        categoriaId: categories[1].id,
+        nome: "Produto Gooder 201",
+        slug: "produto-gooder-201",
+        descricao: "Produto de demonstração",
+        precoVenda: "49.90",
+        markup: "25.00",
+        ativo: true
+      },
+      create: {
+        codigo: 201,
+        lojaId: gooder.id,
+        categoriaId: categories[1].id,
+        nome: "Produto Gooder 201",
+        slug: "produto-gooder-201",
+        descricao: "Produto de demonstração",
+        precoVenda: "49.90",
+        markup: "25.00",
+        ativo: true
+      }
+    })
+  ]);
 }
 
 main()
