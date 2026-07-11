@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
-let idem: any;
+let idem: typeof import("../src/lib/idempotency.service");
 
 beforeAll(async () => {
   idem = await import("../src/lib/idempotency.service");
@@ -39,7 +39,7 @@ describe("idempotency", () => {
       idem.runIdempotent("test", "key4", async () => { callCount++; return callCount; })
     );
     const results = await Promise.all(promises);
-    expect(results.every((r: any) => r === results[0])).toBe(true);
+    expect(results.every((r: string) => r === results[0])).toBe(true);
   });
 
   it("auditlog in transaction", async () => {

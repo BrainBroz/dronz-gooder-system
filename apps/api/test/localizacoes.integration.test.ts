@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
-let loc: any, dronzId: string;
+let loc: typeof import("../src/modules/localizacoes/localizacoes.service"), dronzId: string;
 
 beforeAll(async () => {
   loc = await import("../src/modules/localizacoes/localizacoes.service");

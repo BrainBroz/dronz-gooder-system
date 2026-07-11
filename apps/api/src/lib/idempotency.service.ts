@@ -1,12 +1,13 @@
 import crypto from "crypto";
 import { prisma } from "./prisma";
 import { AppError } from "./app-error";
+import type { Prisma } from "@prisma/client";
 
 export async function runIdempotent<T>(
   scope: string,
   key: string,
   callback: () => Promise<T>,
-  tx?: any
+  tx?: Prisma.TransactionClient
 ): Promise<T> {
   const hash = hashRequest({ scope, key });
 
@@ -37,8 +38,9 @@ export async function runIdempotent<T>(
       });
       throw error;
     }
-  } catch (error: any) {
-    if (error.code === "P2002") {
+  } catch (error: unknown) {
+    const err = error as Record<string, string>;
+    if (err.code === "P2002") {
       // Unique constraint violation: another process is handling this request
       const existing = await (tx || prisma).idempotencyRecord.findUnique({
         where: { scope_key: { scope, key: hash } }
@@ -64,7 +66,7 @@ export async function runIdempotent<T>(
   }
 }
 
-export function hashRequest(payload: any): string {
+export function hashRequest(payload: Record<string, unknown>): string {
   return crypto
     .createHash("sha256")
     .update(JSON.stringify(payload))

@@ -6,7 +6,7 @@ process.env.DATABASE_URL =
   "postgresql://postgres:postgres@localhost:5432/dronz_gooder_test?schema=public";
 
 const prisma = new PrismaClient();
-let ledger: any;
+let ledger: typeof import("../src/modules/ledger/ledger.service");
 let dronzId: string;
 let produtoId: string;
 let userId: string;

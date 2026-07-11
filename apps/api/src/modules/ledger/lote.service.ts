@@ -1,4 +1,3 @@
-import { prisma } from "../../lib/prisma";
 import { AppError } from "../../lib/app-error";
 import type { Tx } from "./ledger.service";
 
@@ -19,10 +18,10 @@ export async function criarLote(
     data: {
       lojaId: d.lojaId,
       produtoId: d.produtoId,
-      origem: d.origem as any,
+      origem: d.origem as unknown as typeof import("@prisma/client").LoteOrigem,
       pedidoCompraItemId: d.pedidoCompraItemId,
-      condicao: (d.condicao || "UNKNOWN") as any,
-      costStatus: (d.costStatus || "UNKNOWN") as any,
+      condicao: (d.condicao || "UNKNOWN") as unknown as typeof import("@prisma/client").LoteCondicao,
+      costStatus: (d.costStatus || "UNKNOWN") as unknown as typeof import("@prisma/client").LoteCostStatus,
       moedaOriginal: d.moedaOriginal,
       valorUnitarioOriginal: d.valorUnitarioOriginal ? parseFloat(d.valorUnitarioOriginal) : undefined
     }
@@ -33,7 +32,7 @@ export async function splitLote(
   tx: Tx,
   d: {
     loteParentId: string;
-    splits: Array<{ quantidade: number; lancamentos?: any[] }>;
+    splits: Array<{ quantidade: number; lancamentos?: Record<string, unknown>[] }>;
     realizadoPorId: string;
   }
 ) {

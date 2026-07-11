@@ -1,5 +1,6 @@
 import { prisma } from "./prisma";
 import { AppError } from "./app-error";
+import type { Prisma } from "@prisma/client";
 
 export async function checkPermission(
   usuarioId: string,
@@ -59,7 +60,7 @@ export async function requirePermission(
 }
 
 export async function bumpAuthorizationVersion(
-  tx: any,
+  tx: Prisma.TransactionClient,
   usuarioId: string
 ) {
   return tx.usuario.update({

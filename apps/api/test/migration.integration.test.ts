@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
-let backfill: any, recon: any, inventory: any, dronzId: string, produtoId: string, userId: string, estoqueId: string;
+let backfill: typeof import("../src/modules/migration/backfill.service"), recon: typeof import("../src/modules/migration/reconciliation.service"), inventory: typeof import("../src/modules/inventory/inventory.service"), dronzId: string, produtoId: string, userId: string, estoqueId: string;
 
 beforeAll(async () => {
   backfill = await import("../src/modules/migration/backfill.service");

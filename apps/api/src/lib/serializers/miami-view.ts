@@ -24,6 +24,7 @@ const MONETARY_PATTERNS = [
   "moeda"
 ];
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function toMiamiView(obj: any): any {
   if (obj === null || obj === undefined) return obj;
 
@@ -35,6 +36,7 @@ export function toMiamiView(obj: any): any {
     return obj;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const result: any = {};
   for (const [key, value] of Object.entries(obj)) {
     const keyLower = key.toLowerCase();

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
-let perm: any, dronzId: string, userId: string;
+let perm: typeof import("../src/lib/permission.service"), dronzId: string, userId: string;
 
 beforeAll(async () => {
   perm = await import("../src/lib/permission.service");

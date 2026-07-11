@@ -31,7 +31,7 @@ export async function criarLocalizacao(d: {
   return prisma.localizacao.create({
     data: {
       nome: d.nome,
-      tipo: d.tipo as any,
+      tipo: d.tipo as unknown as typeof import("@prisma/client").LocalizacaoTipo,
       timezone: d.timezone,
       pais: d.pais,
       estado: d.estado,

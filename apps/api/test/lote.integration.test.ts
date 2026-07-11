@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
-let lote: any, dronzId: string, produtoId: string, userId: string;
+let lote: typeof import("../src/modules/ledger/lote.service"), dronzId: string, produtoId: string, userId: string;
 
 beforeAll(async () => {
   lote = await import("../src/modules/ledger/lote.service");
