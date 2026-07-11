@@ -18,6 +18,9 @@ model Loja {
   usuarios  UsuarioLoja[]
   categorias Categoria[]
   produtos   Produto[]
+  fornecedores Fornecedor[]
+  pedidosCompra PedidoCompra[]
+  pedidoCompraItens PedidoCompraItem[]
 }
 
 model Usuario {
@@ -165,9 +168,93 @@ model Produto {
 
   loja      Loja      @relation(fields: [lojaId], references: [id], onDelete: Cascade)
   categoria Categoria @relation(fields: [categoriaId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  pedidoCompraItens PedidoCompraItem[]
 
   @@index([lojaId])
   @@index([lojaId, categoriaId])
   @@index([lojaId, ativo])
   @@unique([lojaId, slug])
+  @@unique([id, lojaId])
+}
+
+enum PedidoCompraStatus {
+  DRAFT
+  PLACED
+  CONFIRMED
+  PARTIALLY_RECEIVED_MIAMI
+  RECEIVED_MIAMI
+  ALLOCATED_TO_TRIP
+  IN_TRANSIT_BRAZIL
+  ARRIVED_BRAZIL
+  COMPLETED
+  CANCELLED
+}
+
+model Fornecedor {
+  id String @id @default(cuid())
+  lojaId String
+  nome String
+  nomeFantasia String?
+  site String?
+  email String?
+  telefone String?
+  pais String?
+  moedaPadrao String?
+  observacoes String?
+  ativo Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  loja Loja @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  pedidosCompra PedidoCompra[]
+  @@unique([id, lojaId])
+  @@index([lojaId, ativo])
+  @@index([lojaId, nome])
+}
+
+model PedidoCompra {
+  id String @id @default(cuid())
+  lojaId String
+  fornecedorId String
+  numeroPedido String
+  dataCompra DateTime
+  moeda String @default("USD")
+  status PedidoCompraStatus @default(DRAFT)
+  descontoPedido Decimal @default(0) @db.Decimal(12, 2)
+  frete Decimal @default(0) @db.Decimal(12, 2)
+  imposto Decimal @default(0) @db.Decimal(12, 2)
+  subtotal Decimal @default(0) @db.Decimal(12, 2)
+  total Decimal @default(0) @db.Decimal(12, 2)
+  observacoes String?
+  canceladoEm DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  loja Loja @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  fornecedor Fornecedor @relation(fields: [fornecedorId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  itens PedidoCompraItem[]
+  @@unique([lojaId, fornecedorId, numeroPedido])
+  @@unique([id, lojaId])
+  @@index([lojaId, status])
+  @@index([lojaId, fornecedorId])
+  @@index([lojaId, dataCompra])
+}
+
+model PedidoCompraItem {
+  id String @id @default(cuid())
+  pedidoCompraId String
+  lojaId String
+  produtoId String
+  quantidade Int
+  quantidadeRecebidaMiami Int @default(0)
+  precoUnitario Decimal @db.Decimal(12, 2)
+  descontoItem Decimal @default(0) @db.Decimal(12, 2)
+  totalItem Decimal @db.Decimal(12, 2)
+  observacoes String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  loja Loja @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  pedido PedidoCompra @relation(fields: [pedidoCompraId, lojaId], references: [id, lojaId], onDelete: Cascade)
+  produto Produto @relation(fields: [produtoId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  @@unique([pedidoCompraId, produtoId])
+  @@index([lojaId, produtoId])
+  @@index([lojaId, pedidoCompraId])
 }

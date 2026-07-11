@@ -1,0 +1,11 @@
+import { Router } from "express";
+import { requireAuth, requireStore } from "../../middlewares/auth";
+import * as c from "./suppliers.controller";
+export const suppliersRouter = Router();
+suppliersRouter.use(requireAuth, requireStore);
+suppliersRouter.get("/", c.list);
+suppliersRouter.get("/:id", c.get);
+suppliersRouter.post("/", c.create);
+suppliersRouter.patch("/:id", c.update);
+suppliersRouter.patch("/:id/status", c.toggle);
+suppliersRouter.delete("/:id", c.remove);

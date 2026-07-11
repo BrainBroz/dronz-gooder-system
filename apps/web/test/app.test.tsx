@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import React from "react";
 import { MemoryRouter } from "react-router-dom";
-import { AppRoutes, catalogQueryKeys, formatSalePrice, queryClient } from "../src/app";
+import {
+  AppRoutes,
+  catalogQueryKeys,
+  formatSalePrice,
+  purchasingQueryKeys,
+  queryClient
+} from "../src/app";
 
 describe("web app", () => {
   it("renders the login route shell", () => {
@@ -25,12 +31,24 @@ describe("web app", () => {
 
   it("configura QueryClient e separa cache por loja", () => {
     expect(queryClient).toBeTruthy();
-    expect(catalogQueryKeys.categories("dronz-id")).not.toEqual(catalogQueryKeys.categories("gooder-id"));
-    expect(catalogQueryKeys.products("dronz-id")).not.toEqual(catalogQueryKeys.products("gooder-id"));
+    expect(catalogQueryKeys.categories("dronz-id")).not.toEqual(
+      catalogQueryKeys.categories("gooder-id")
+    );
+    expect(catalogQueryKeys.products("dronz-id")).not.toEqual(
+      catalogQueryKeys.products("gooder-id")
+    );
   });
 
   it("exibe preço zero como A definir", () => {
     expect(formatSalePrice("0")).toBe("A definir");
     expect(formatSalePrice("49.90")).toBe("49.90");
+  });
+  it("isola caches de compras por loja", () => {
+    expect(purchasingQueryKeys.suppliers("d")).not.toEqual(
+      purchasingQueryKeys.suppliers("g")
+    );
+    expect(purchasingQueryKeys.orders("d")).not.toEqual(
+      purchasingQueryKeys.orders("g")
+    );
   });
 });

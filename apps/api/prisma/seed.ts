@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
@@ -59,7 +59,9 @@ async function main() {
   });
 
   await prisma.perfilPermissao.upsert({
-    where: { perfilId_permissaoId: { perfilId: profile.id, permissaoId: permission.id } },
+    where: {
+      perfilId_permissaoId: { perfilId: profile.id, permissaoId: permission.id }
+    },
     update: {},
     create: { perfilId: profile.id, permissaoId: permission.id }
   });
@@ -67,17 +69,41 @@ async function main() {
   const categories = await Promise.all([
     prisma.categoria.upsert({
       where: { lojaId_slug: { lojaId: dronz.id, slug: "dronz-geral" } },
-      update: { nome: "Dronz Geral", descricao: "Categoria de demonstração", ordem: 1, ativo: true },
-      create: { lojaId: dronz.id, nome: "Dronz Geral", slug: "dronz-geral", descricao: "Categoria de demonstração", ordem: 1, ativo: true }
+      update: {
+        nome: "Dronz Geral",
+        descricao: "Categoria de demonstração",
+        ordem: 1,
+        ativo: true
+      },
+      create: {
+        lojaId: dronz.id,
+        nome: "Dronz Geral",
+        slug: "dronz-geral",
+        descricao: "Categoria de demonstração",
+        ordem: 1,
+        ativo: true
+      }
     }),
     prisma.categoria.upsert({
       where: { lojaId_slug: { lojaId: gooder.id, slug: "gooder-geral" } },
-      update: { nome: "Gooder Geral", descricao: "Categoria de demonstração", ordem: 1, ativo: true },
-      create: { lojaId: gooder.id, nome: "Gooder Geral", slug: "gooder-geral", descricao: "Categoria de demonstração", ordem: 1, ativo: true }
+      update: {
+        nome: "Gooder Geral",
+        descricao: "Categoria de demonstração",
+        ordem: 1,
+        ativo: true
+      },
+      create: {
+        lojaId: gooder.id,
+        nome: "Gooder Geral",
+        slug: "gooder-geral",
+        descricao: "Categoria de demonstração",
+        ordem: 1,
+        ativo: true
+      }
     })
   ]);
 
-  await Promise.all([
+  const products = await Promise.all([
     prisma.produto.upsert({
       where: { codigo: 101 },
       update: {
@@ -127,9 +153,128 @@ async function main() {
       }
     })
   ]);
+
+  const suppliers = await Promise.all([
+    prisma.fornecedor.upsert({
+      where: { id: "seed-supplier-dronz" },
+      update: {
+        lojaId: dronz.id,
+        nome: "Fornecedor Dronz",
+        moedaPadrao: "USD",
+        ativo: true
+      },
+      create: {
+        id: "seed-supplier-dronz",
+        lojaId: dronz.id,
+        nome: "Fornecedor Dronz",
+        moedaPadrao: "USD"
+      }
+    }),
+    prisma.fornecedor.upsert({
+      where: { id: "seed-supplier-gooder" },
+      update: {
+        lojaId: gooder.id,
+        nome: "Fornecedor Gooder",
+        moedaPadrao: "USD",
+        ativo: true
+      },
+      create: {
+        id: "seed-supplier-gooder",
+        lojaId: gooder.id,
+        nome: "Fornecedor Gooder",
+        moedaPadrao: "USD"
+      }
+    })
+  ]);
+  const orders = await Promise.all([
+    prisma.pedidoCompra.upsert({
+      where: {
+        lojaId_fornecedorId_numeroPedido: {
+          lojaId: dronz.id,
+          fornecedorId: suppliers[0].id,
+          numeroPedido: "SEED-DRONZ-001"
+        }
+      },
+      update: {},
+      create: {
+        lojaId: dronz.id,
+        fornecedorId: suppliers[0].id,
+        numeroPedido: "SEED-DRONZ-001",
+        dataCompra: new Date("2026-01-01T12:00:00Z"),
+        moeda: "USD"
+      }
+    }),
+    prisma.pedidoCompra.upsert({
+      where: {
+        lojaId_fornecedorId_numeroPedido: {
+          lojaId: gooder.id,
+          fornecedorId: suppliers[1].id,
+          numeroPedido: "SEED-GOODER-001"
+        }
+      },
+      update: {},
+      create: {
+        lojaId: gooder.id,
+        fornecedorId: suppliers[1].id,
+        numeroPedido: "SEED-GOODER-001",
+        dataCompra: new Date("2026-01-01T12:00:00Z"),
+        moeda: "USD"
+      }
+    })
+  ]);
+  await Promise.all([
+    prisma.pedidoCompraItem.upsert({
+      where: {
+        pedidoCompraId_produtoId: {
+          pedidoCompraId: orders[0].id,
+          produtoId: products[0].id
+        }
+      },
+      update: {},
+      create: {
+        pedidoCompraId: orders[0].id,
+        lojaId: dronz.id,
+        produtoId: products[0].id,
+        quantidade: 1,
+        precoUnitario: "10.00",
+        totalItem: "10.00"
+      }
+    }),
+    prisma.pedidoCompraItem.upsert({
+      where: {
+        pedidoCompraId_produtoId: {
+          pedidoCompraId: orders[1].id,
+          produtoId: products[1].id
+        }
+      },
+      update: {},
+      create: {
+        pedidoCompraId: orders[1].id,
+        lojaId: gooder.id,
+        produtoId: products[1].id,
+        quantidade: 1,
+        precoUnitario: "20.00",
+        totalItem: "20.00"
+      }
+    })
+  ]);
+  await Promise.all(
+    orders.map(async (order) => {
+      const items = await prisma.pedidoCompraItem.findMany({
+        where: { pedidoCompraId: order.id }
+      });
+      const subtotal = items.reduce(
+        (sum, item) => sum.plus(item.totalItem),
+        new Prisma.Decimal(0)
+      );
+      await prisma.pedidoCompra.update({
+        where: { id: order.id },
+        data: { subtotal, total: subtotal }
+      });
+    })
+  );
 }
 
-main()
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+main().finally(async () => {
+  await prisma.$disconnect();
+});
