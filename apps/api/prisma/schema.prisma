@@ -143,6 +143,7 @@ model Categoria {
   produtos Produto[]
 
   @@unique([lojaId, slug])
+  @@unique([id, lojaId])
   @@index([lojaId])
   @@index([lojaId, ativo])
 }
@@ -163,7 +164,7 @@ model Produto {
   updatedAt   DateTime @updatedAt
 
   loja      Loja      @relation(fields: [lojaId], references: [id], onDelete: Cascade)
-  categoria Categoria @relation(fields: [categoriaId], references: [id], onDelete: Restrict)
+  categoria Categoria @relation(fields: [categoriaId, lojaId], references: [id, lojaId], onDelete: Restrict)
 
   @@index([lojaId])
   @@index([lojaId, categoriaId])

@@ -135,5 +135,8 @@ describe("catalog integration", () => {
 
     const crossGet = await request(app).get(`/products/${createdGooder.body.id}`).set("Authorization", `Bearer ${accessToken}`).set("x-store-id", dronz.id);
     expect(crossGet.status).toBe(404);
+
+    const invalidPage = await request(app).get("/products?page=0").set("Authorization", `Bearer ${accessToken}`).set("x-store-id", dronz.id);
+    expect(invalidPage.status).toBe(400);
   });
 });

@@ -47,7 +47,7 @@ export async function getAuthenticatedUser(userId: string) {
       perfis: { include: { perfil: { include: { permissoes: { include: { permissao: true } } } } } }
     }
   });
-  if (!user) throw new Error("USER_NOT_FOUND");
+  if (!user || !user.active) throw new Error("USER_NOT_FOUND");
 
   return {
     user: {

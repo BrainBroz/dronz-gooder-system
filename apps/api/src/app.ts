@@ -74,6 +74,15 @@ function parseAccessToken(req: express.Request) {
   return auth.slice(7);
 }
 
+function verifyAccessToken(token: string) {
+  const payload = jwt.verify(token, env.JWT_ACCESS_SECRET) as {
+    sub?: string;
+    tokenType?: string;
+  };
+  if (!payload.sub || payload.tokenType !== "access") throw new Error("INVALID_ACCESS_TOKEN");
+  return { sub: payload.sub };
+}
+
 async function authorizeUser(req: express.Request, res: express.Response) {
   const token = parseAccessToken(req);
   if (!token) {
@@ -81,7 +90,7 @@ async function authorizeUser(req: express.Request, res: express.Response) {
     return undefined;
   }
   try {
-    const payload = jwt.verify(token, env.JWT_ACCESS_SECRET) as { sub: string };
+    const payload = verifyAccessToken(token);
     const identity = await getAuthenticatedUser(payload.sub);
     return identity;
   } catch {
@@ -136,16 +145,17 @@ export function createApp() {
         res.setHeader("Set-Cookie", clearAuthCookie());
         return res.status(401).json({ error: "invalid_refresh_token" });
       }
-      let decoded: { sub: string; jti: string };
+      let decoded: { sub: string; jti: string; tokenType?: string };
       try {
-        decoded = jwt.verify(refreshToken, env.JWT_REFRESH_SECRET) as { sub: string; jti: string };
+        decoded = jwt.verify(refreshToken, env.JWT_REFRESH_SECRET) as { sub: string; jti: string; tokenType?: string };
+        if (decoded.tokenType !== "refresh") throw new Error("INVALID_REFRESH_TOKEN");
       } catch {
         res.setHeader("Set-Cookie", clearAuthCookie());
         return res.status(401).json({ error: "invalid_refresh_token" });
       }
       const tokenHash = hashToken(refreshToken);
       const stored = await prisma.refreshToken.findUnique({ where: { tokenHash } });
-      if (!stored || stored.revokedAt || stored.expiresAt.getTime() < Date.now()) {
+      if (!stored || stored.usuarioId !== decoded.sub || stored.revokedAt || stored.expiresAt.getTime() < Date.now()) {
         res.setHeader("Set-Cookie", clearAuthCookie());
         return res.status(401).json({ error: "invalid_refresh_token" });
       }
@@ -179,7 +189,7 @@ export function createApp() {
     if (!auth?.startsWith("Bearer ")) return res.status(401).json({ error: "unauthorized" });
     const token = auth.slice(7);
     try {
-      const payload = jwt.verify(token, env.JWT_ACCESS_SECRET) as { sub: string };
+      const payload = verifyAccessToken(token);
       const identity = await getAuthenticatedUser(payload.sub);
       res.json(identity);
     } catch {
@@ -274,8 +284,12 @@ export function createApp() {
     const search = typeof req.query.search === "string" ? req.query.search : undefined;
     const categoryId = typeof req.query.categoriaId === "string" ? req.query.categoriaId : undefined;
     const ativo = typeof req.query.ativo === "string" ? req.query.ativo === "true" : undefined;
-    const page = Number(req.query.page ?? 1);
-    const limit = Math.min(Number(req.query.limit ?? 20), 100);
+    const pagination = z.object({
+      page: z.coerce.number().int().min(1).default(1),
+      limit: z.coerce.number().int().min(1).max(100).default(20)
+    }).safeParse({ page: req.query.page, limit: req.query.limit });
+    if (!pagination.success) return res.status(400).json({ error: "bad_request" });
+    const { page, limit } = pagination.data;
     const products = await prisma.produto.findMany({
       where: {
         lojaId: storeId,

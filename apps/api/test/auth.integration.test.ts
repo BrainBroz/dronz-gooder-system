@@ -144,4 +144,15 @@ describe("auth integration", () => {
     expect(missing.status).toBe(401);
     expect(invalid.status).toBe(401);
   });
+
+  it("rejeita JWT assinado com tipo incorreto nas rotas protegidas", async () => {
+    const loginResponse = await login();
+    const wrongType = jwt.sign(
+      { sub: loginResponse.body.user.id, tokenType: "refresh", jti: "wrong-type" },
+      process.env.JWT_ACCESS_SECRET!,
+      { expiresIn: "15m" }
+    );
+    const response = await request(createApp()).get("/auth/me").set("Authorization", `Bearer ${wrongType}`);
+    expect(response.status).toBe(401);
+  });
 });
