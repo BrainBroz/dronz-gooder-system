@@ -125,7 +125,7 @@ describe("web app", () => {
   it.each([
     [CategoriesPage, "Categorias"],
     [SuppliersPage, "Fornecedores"],
-    [PurchaseOrdersPage, "Pedidos de Compra"],
+    [PurchaseOrdersPage, "Compras"],
     [ProductsPage, "Produtos"],
     [LogisticsPage, "Adicionar viajante"],
     [InventoryPage, "Registrar movimento"],

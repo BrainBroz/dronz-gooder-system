@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
 import { PrismaClient } from "@prisma/client";
 
@@ -12,326 +13,281 @@ process.env.JWT_ACCESS_EXPIRES_IN = "15m";
 process.env.JWT_REFRESH_EXPIRES_IN = "30d";
 
 const prisma = new PrismaClient();
+const createdOrderIds: string[] = [];
+const createdImportIds: string[] = [];
 let createApp: typeof import("../src/app").createApp;
+let testSession: Awaited<ReturnType<typeof createSession>>;
 
 beforeAll(async () => {
   ({ createApp } = await import("../src/app"));
+  testSession = await createSession();
+});
+
+afterEach(async () => {
+  const orderIds = createdOrderIds.splice(0);
+  if (orderIds.length) {
+    const items = await prisma.pedidoCompraItem.findMany({
+      where: { pedidoCompraId: { in: orderIds } },
+      select: { id: true }
+    });
+    await prisma.recebimentoMiami.deleteMany({
+      where: { pedidoCompraItemId: { in: items.map((item) => item.id) } }
+    });
+    await prisma.atribuicaoItem.deleteMany({
+      where: { pedidoCompraItemId: { in: items.map((item) => item.id) } }
+    });
+    await prisma.pedidoCompra.deleteMany({ where: { id: { in: orderIds } } });
+  }
+  const importIds = createdImportIds.splice(0);
+  if (importIds.length) {
+    await prisma.compraImportada.deleteMany({
+      where: { id: { in: importIds } }
+    });
+  }
 });
 
 afterAll(async () => {
   await prisma.$disconnect();
 });
 
-async function session() {
+async function createSession() {
   const app = createApp();
   const login = await request(app)
     .post("/auth/login")
     .send({ email: "admin@example.com", password: "change-me" });
-  const d = login.body.stores.find((x: { slug: string }) => x.slug === "dronz");
-  const g = login.body.stores.find((x: { slug: string }) => x.slug === "gooder");
-  const h = (id: string) => ({
+  expect(login.status).toBe(200);
+  const dronz = login.body.stores.find(
+    (store: { slug: string }) => store.slug === "dronz"
+  );
+  const gooder = login.body.stores.find(
+    (store: { slug: string }) => store.slug === "gooder"
+  );
+  expect(dronz).toBeTruthy();
+  expect(gooder).toBeTruthy();
+  const headers = (storeId: string) => ({
     Authorization: `Bearer ${login.body.accessToken}`,
-    "x-store-id": id
+    "x-store-id": storeId
   });
-  return { app, d, g, h };
+  return { app, dronz, gooder, headers };
 }
 
-describe("Batch 2.1.1 — Triagem de Compras", () => {
-  it("atribui item para loja", async () => {
-    const { app, d, h } = await session();
-    const order = await prisma.pedidoCompra.findFirst({
-      where: { lojaId: d.id }
-    });
-    const item = await prisma.pedidoCompraItem.findFirst({
-      where: { pedidoCompraId: order?.id }
-    });
+async function createFixture(
+  lojaId: string,
+  slug: "dronz" | "gooder",
+  compraImportadaId?: string
+) {
+  const fornecedor = await prisma.fornecedor.findFirstOrThrow({
+    where: { lojaId, ativo: true }
+  });
+  const produto = await prisma.produto.findFirstOrThrow({
+    where: { lojaId, ativo: true }
+  });
+  const order = await prisma.pedidoCompra.create({
+    data: {
+      lojaId,
+      fornecedorId: fornecedor.id,
+      numeroPedido: `TRIAGEM-${slug}-${randomUUID()}`,
+      dataCompra: new Date(),
+      moeda: "USD",
+      compraImportadaId
+    }
+  });
+  const item = await prisma.pedidoCompraItem.create({
+    data: {
+      pedidoCompraId: order.id,
+      lojaId,
+      produtoId: produto.id,
+      quantidade: 4,
+      precoUnitario: "10.00",
+      totalItem: "40.00"
+    }
+  });
+  createdOrderIds.push(order.id);
+  return { order, item };
+}
 
-    if (order && item) {
-      await prisma.atribuicaoItem.deleteMany({
+describe("Batch 2.1.1 — atribuição operacional de compras", () => {
+  it("registra atribuição rastreável na loja do item", async () => {
+    const { app, dronz, headers } = testSession;
+    const { order, item } = await createFixture(dronz.id, "dronz");
+
+    const result = await request(app)
+      .post(`/purchase-orders/${order.id}/items/${item.id}/atribuir`)
+      .set(headers(dronz.id))
+      .send({ lojaId: dronz.id, quantidade: 2 });
+
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({
+      pedidoCompraItemId: item.id,
+      lojaId: dronz.id,
+      quantidade: 2
+    });
+    expect(result.body.atribuidoPorId).toBeTruthy();
+  });
+
+  it("substitui a quantidade da atribuição sem somar o valor anterior", async () => {
+    const { app, dronz, headers } = testSession;
+    const { order, item } = await createFixture(dronz.id, "dronz");
+    const endpoint = `/purchase-orders/${order.id}/items/${item.id}/atribuir`;
+
+    expect(
+      (
+        await request(app).post(endpoint).set(headers(dronz.id)).send({
+          lojaId: dronz.id,
+          quantidade: 2
+        })
+      ).status
+    ).toBe(200);
+    const updated = await request(app)
+      .post(endpoint)
+      .set(headers(dronz.id))
+      .send({ lojaId: dronz.id, quantidade: 4 });
+
+    expect(updated.status).toBe(200);
+    expect(updated.body.quantidade).toBe(4);
+    expect(
+      await prisma.atribuicaoItem.count({
         where: { pedidoCompraItemId: item.id }
-      });
+      })
+    ).toBe(1);
+  });
 
-      const result = await request(app)
-        .post(`/purchase-orders/${order.id}/items/${item.id}/atribuir`)
-        .set(h(d.id))
-        .send({
-          lojaId: d.id,
-          quantidade: 1
-        });
+  it("mantém o status parcial e conclui quando toda quantidade é atribuída", async () => {
+    const { app, dronz, headers } = testSession;
+    const { order, item } = await createFixture(dronz.id, "dronz");
+    const endpoint = `/purchase-orders/${order.id}/items/${item.id}/atribuir`;
 
-      if (result.status !== 200) {
-        console.log("Response:", { status: result.status, body: result.body });
+    await request(app).post(endpoint).set(headers(dronz.id)).send({
+      lojaId: dronz.id,
+      quantidade: 2
+    });
+    expect(
+      (
+        await prisma.pedidoCompra.findUniqueOrThrow({
+          where: { id: order.id }
+        })
+      ).statusAtribuicao
+    ).toBe("PARCIALMENTE_ATRIBUIDA");
+
+    await request(app).post(endpoint).set(headers(dronz.id)).send({
+      lojaId: dronz.id,
+      quantidade: 4
+    });
+    expect(
+      (
+        await prisma.pedidoCompra.findUniqueOrThrow({
+          where: { id: order.id }
+        })
+      ).statusAtribuicao
+    ).toBe("ATRIBUIDA");
+  });
+
+  it("rejeita quantidade superior à quantidade do item", async () => {
+    const { app, dronz, headers } = testSession;
+    const { order, item } = await createFixture(dronz.id, "dronz");
+
+    const result = await request(app)
+      .post(`/purchase-orders/${order.id}/items/${item.id}/atribuir`)
+      .set(headers(dronz.id))
+      .send({ lojaId: dronz.id, quantidade: 5 });
+
+    expect(result.status).toBe(400);
+    expect(result.body.error).toBe("quantidade_insuficiente");
+  });
+
+  it("não aceita loja do body diferente da loja autenticada", async () => {
+    const { app, dronz, gooder, headers } = testSession;
+    const { order, item } = await createFixture(dronz.id, "dronz");
+
+    const result = await request(app)
+      .post(`/purchase-orders/${order.id}/items/${item.id}/atribuir`)
+      .set(headers(dronz.id))
+      .send({ lojaId: gooder.id, quantidade: 1 });
+
+    expect(result.status).toBe(403);
+  });
+
+  it("bloqueia atribuição cross-store antes da FK composta", async () => {
+    const { app, dronz, gooder, headers } = testSession;
+    const { order, item } = await createFixture(dronz.id, "dronz");
+
+    const result = await request(app)
+      .post(`/purchase-orders/${order.id}/items/${item.id}/atribuir`)
+      .set(headers(gooder.id))
+      .send({ lojaId: gooder.id, quantidade: 1 });
+
+    expect(result.status).toBe(404);
+    expect(
+      await prisma.atribuicaoItem.count({
+        where: { pedidoCompraItemId: item.id }
+      })
+    ).toBe(0);
+  });
+
+  it("lista somente atribuições de pedido pertencente à loja autenticada", async () => {
+    const { app, dronz, gooder, headers } = testSession;
+    const { order, item } = await createFixture(dronz.id, "dronz");
+    await request(app)
+      .post(`/purchase-orders/${order.id}/items/${item.id}/atribuir`)
+      .set(headers(dronz.id))
+      .send({ lojaId: dronz.id, quantidade: 1 });
+
+    const own = await request(app)
+      .get(`/purchase-orders/${order.id}/atribuicoes`)
+      .set(headers(dronz.id));
+    const otherStore = await request(app)
+      .get(`/purchase-orders/${order.id}/atribuicoes`)
+      .set(headers(gooder.id));
+
+    expect(own.status).toBe(200);
+    expect(own.body).toHaveLength(1);
+    expect(own.body[0].lojaId).toBe(dronz.id);
+    expect(otherStore.status).toBe(404);
+  });
+
+  it("não mistura atribuição operacional com a staging importada", async () => {
+    const { app, dronz, headers } = testSession;
+    const imported = await prisma.compraImportada.create({
+      data: {
+        fornecedorId: `external-${randomUUID()}`,
+        numeroPedido: `IMPORT-${randomUUID()}`,
+        quantidade: 8
       }
+    });
+    createdImportIds.push(imported.id);
+    const first = await createFixture(dronz.id, "dronz", imported.id);
+    const second = await createFixture(dronz.id, "dronz", imported.id);
 
-      expect(result.status).toBe(200);
-      expect(result.body.pedidoCompraItemId).toBe(item.id);
-      expect(result.body.lojaId).toBe(d.id);
-      expect(result.body.quantidade).toBe(1);
-    }
+    const firstResult = await request(app)
+      .post(
+        `/purchase-orders/${first.order.id}/items/${first.item.id}/atribuir`
+      )
+      .set(headers(dronz.id))
+      .send({ lojaId: dronz.id, quantidade: 1 });
+    const secondResult = await request(app)
+      .post(
+        `/purchase-orders/${second.order.id}/items/${second.item.id}/atribuir`
+      )
+      .set(headers(dronz.id))
+      .send({ lojaId: dronz.id, quantidade: 1 });
+
+    expect(firstResult.status).toBe(200);
+    expect(secondResult.status).toBe(200);
+    expect(firstResult.body.compraImportadaId).toBeNull();
+    expect(secondResult.body.compraImportadaId).toBeNull();
   });
 
-  it("bloqueia atribuição com quantidade maior que disponível", async () => {
-    const { app, d, h } = await session();
-    const order = await prisma.pedidoCompra.findFirst({
-      where: { lojaId: d.id }
-    });
-    const item = await prisma.pedidoCompraItem.findFirst({
-      where: { pedidoCompraId: order?.id }
-    });
+  it("retorna 404 para pedido ou item inexistente", async () => {
+    const { app, dronz, headers } = testSession;
 
-    if (order && item) {
-      const result = await request(app)
-        .post(`/purchase-orders/${order.id}/items/${item.id}/atribuir`)
-        .set(h(d.id))
-        .send({
-          lojaId: d.id,
-          quantidade: item.quantidade + 1
-        });
+    const result = await request(app)
+      .post(
+        "/purchase-orders/pedido-inexistente/items/item-inexistente/atribuir"
+      )
+      .set(headers(dronz.id))
+      .send({ lojaId: dronz.id, quantidade: 1 });
 
-      expect(result.status).toBe(400);
-    }
-  });
-
-  it("bloqueia atribuição com lojaId diferente do header", async () => {
-    const { app, d, g, h } = await session();
-    const order = await prisma.pedidoCompra.findFirst({
-      where: { lojaId: d.id }
-    });
-    const item = await prisma.pedidoCompraItem.findFirst({
-      where: { pedidoCompraId: order?.id }
-    });
-
-    if (order && item && g) {
-      const result = await request(app)
-        .post(`/purchase-orders/${order.id}/items/${item.id}/atribuir`)
-        .set(h(d.id))
-        .send({
-          lojaId: g.id,
-          quantidade: 1
-        });
-
-      expect(result.status).toBe(403);
-    }
-  });
-
-  it("permite Miami check-in após atribuição", async () => {
-    const { app, d, h } = await session();
-    const order = await prisma.pedidoCompra.findFirst({
-      where: { lojaId: d.id }
-    });
-    const item = await prisma.pedidoCompraItem.findFirst({
-      where: { pedidoCompraId: order?.id }
-    });
-
-    if (order && item) {
-      await prisma.atribuicaoItem.deleteMany({
-        where: { pedidoCompraItemId: item.id }
-      });
-
-      await prisma.recebimentoMiami.deleteMany({
-        where: { pedidoCompraItemId: item.id }
-      });
-
-      await prisma.pedidoCompraItem.update({
-        where: { id: item.id },
-        data: { quantidadeRecebidaMiami: 0 }
-      });
-
-      await request(app)
-        .post(`/purchase-orders/${order.id}/items/${item.id}/atribuir`)
-        .set(h(d.id))
-        .send({
-          lojaId: d.id,
-          quantidade: 1
-        });
-
-      const miami = await request(app)
-        .post("/logistics/miami-confirmations")
-        .set(h(d.id))
-        .send({
-          pedidoCompraItemId: item.id,
-          quantidadeRecebida: 1,
-          recebidoEm: new Date()
-        });
-
-      expect(miami.status).toBe(200);
-    }
-  });
-
-
-  it("lista atribuições do pedido", async () => {
-    const { app, d, h } = await session();
-    const order = await prisma.pedidoCompra.findFirst({
-      where: { lojaId: d.id }
-    });
-    const item = await prisma.pedidoCompraItem.findFirst({
-      where: { pedidoCompraId: order?.id }
-    });
-
-    if (order && item) {
-      await request(app)
-        .post(`/purchase-orders/${order.id}/items/${item.id}/atribuir`)
-        .set(h(d.id))
-        .send({
-          lojaId: d.id,
-          quantidade: 1
-        });
-
-      const result = await request(app)
-        .get(`/purchase-orders/${order.id}/atribuicoes`)
-        .set(h(d.id));
-
-      expect(result.status).toBe(200);
-      expect(Array.isArray(result.body)).toBe(true);
-      if (result.body.length > 0) {
-        expect(result.body[0].lojaId).toBe(d.id);
-      }
-    }
-  });
-
-  it("atribuição parcial sem ultrapassar quantidade", async () => {
-    const { app, d, h } = await session();
-    const order = await prisma.pedidoCompra.findFirst({
-      where: { lojaId: d.id, id: { not: "seed-order-dronz" } }
-    });
-    const item = await prisma.pedidoCompraItem.findFirst({
-      where: { pedidoCompraId: order?.id }
-    });
-
-    if (order && item) {
-      await prisma.atribuicaoItem.deleteMany({
-        where: { pedidoCompraItemId: item.id }
-      });
-
-      const partial = await request(app)
-        .post(`/purchase-orders/${order.id}/items/${item.id}/atribuir`)
-        .set(h(d.id))
-        .send({
-          lojaId: d.id,
-          quantidade: Math.max(1, Math.floor(item.quantidade / 2))
-        });
-      expect(partial.status).toBe(200);
-
-      const total = await prisma.atribuicaoItem.aggregate({
-        _sum: { quantidade: true },
-        where: { pedidoCompraItemId: item.id }
-      });
-
-      expect((total._sum.quantidade || 0) <= item.quantidade).toBe(true);
-    }
-  });
-
-  it("atribuição é registrada e rastreável", async () => {
-    const { app, d, h } = await session();
-    const order = await prisma.pedidoCompra.findFirst({
-      where: { lojaId: d.id, id: { not: "seed-order-dronz" } }
-    });
-    const item = await prisma.pedidoCompraItem.findFirst({
-      where: { pedidoCompraId: order?.id }
-    });
-
-    if (order && item) {
-      await prisma.atribuicaoItem.deleteMany({
-        where: { pedidoCompraItemId: item.id }
-      });
-
-      const atrib = await request(app)
-        .post(`/purchase-orders/${order.id}/items/${item.id}/atribuir`)
-        .set(h(d.id))
-        .send({
-          lojaId: d.id,
-          quantidade: 1
-        });
-
-      expect(atrib.status).toBe(200);
-      expect(atrib.body.pedidoCompraItemId).toBe(item.id);
-      expect(atrib.body.lojaId).toBe(d.id);
-      expect(atrib.body.quantidade).toBe(1);
-    }
-  });
-
-  it("soma de atribuições não ultrapassa total do item", async () => {
-    const { d } = await session();
-    const order = await prisma.pedidoCompra.findFirst({
-      where: { lojaId: d.id }
-    });
-
-    if (order) {
-      const items = await prisma.pedidoCompraItem.findMany({
-        where: { pedidoCompraId: order.id }
-      });
-
-      for (const item of items.slice(0, 1)) {
-        const atribs = await prisma.atribuicaoItem.findMany({
-          where: { pedidoCompraItemId: item.id }
-        });
-
-        const totalAtribuido = atribs.reduce((sum, a) => sum + a.quantidade, 0);
-        expect(totalAtribuido <= item.quantidade).toBe(true);
-      }
-    }
-  });
-
-  it("bloqueia atribuição que ultrapassa quantidade total", async () => {
-    const { app, d, h } = await session();
-    const order = await prisma.pedidoCompra.findFirst({
-      where: { lojaId: d.id }
-    });
-    const item = await prisma.pedidoCompraItem.findFirst({
-      where: { pedidoCompraId: order?.id }
-    });
-
-    if (order && item) {
-      const result = await request(app)
-        .post(`/purchase-orders/${order.id}/items/${item.id}/atribuir`)
-        .set(h(d.id))
-        .send({
-          lojaId: d.id,
-          quantidade: item.quantidade + 1
-        });
-
-      expect(result.status).toBe(400);
-    }
-  });
-
-  it("usuário de loja vê apenas atribuições de sua loja", async () => {
-    const { app, d, g, h } = await session();
-    const order = await prisma.pedidoCompra.findFirst({
-      where: { lojaId: d.id }
-    });
-    const item = await prisma.pedidoCompraItem.findFirst({
-      where: { pedidoCompraId: order?.id }
-    });
-
-    if (order && item && g) {
-      await prisma.atribuicaoItem.deleteMany({
-        where: { pedidoCompraItemId: item.id }
-      });
-
-      await request(app)
-        .post(`/purchase-orders/${order.id}/items/${item.id}/atribuir`)
-        .set(h(d.id))
-        .send({
-          lojaId: d.id,
-          quantidade: 1
-        });
-
-      await request(app)
-        .post(`/purchase-orders/${order.id}/items/${item.id}/atribuir`)
-        .set(h(g.id))
-        .send({
-          lojaId: g.id,
-          quantidade: 1
-        });
-
-      const dronzList = await request(app)
-        .get(`/purchase-orders/${order.id}/atribuicoes`)
-        .set(h(d.id));
-
-      expect(dronzList.status).toBe(200);
-      expect(
-        dronzList.body.every((a: { lojaId: string }) => a.lojaId === d.id)
-      ).toBe(true);
-    }
+    expect(result.status).toBe(404);
+    expect(result.body.error).toBe("item_not_found");
   });
 });

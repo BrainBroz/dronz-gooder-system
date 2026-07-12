@@ -17,7 +17,10 @@ export class TriagemService {
 
     if (!pedido) return StatusAtribuicao.PENDENTE_ATRIBUICAO;
 
-    const totalPedido = pedido.itens.reduce((sum: number, i) => sum + i.quantidade, 0);
+    const totalPedido = pedido.itens.reduce(
+      (sum: number, i) => sum + i.quantidade,
+      0
+    );
 
     const atribuicoes = await client.atribuicaoItem.findMany({
       where: {
@@ -26,7 +29,10 @@ export class TriagemService {
       select: { quantidade: true }
     });
 
-    const totalAtribuido = atribuicoes.reduce((sum: number, a) => sum + a.quantidade, 0);
+    const totalAtribuido = atribuicoes.reduce(
+      (sum: number, a) => sum + a.quantidade,
+      0
+    );
 
     if (totalAtribuido === 0) return StatusAtribuicao.PENDENTE_ATRIBUICAO;
     if (totalAtribuido >= totalPedido) return StatusAtribuicao.ATRIBUIDA;
@@ -41,11 +47,28 @@ export class TriagemService {
     userId: string,
     observacao?: string,
     tx?: Prisma.TransactionClient
-  ) {
-    const client = tx || this.prisma;
+  ): Promise<
+    Prisma.AtribuicaoItemGetPayload<{
+      include: { loja: true; atribuidoPor: true };
+    }>
+  > {
+    if (!tx) {
+      return this.prisma.$transaction((client) =>
+        this.atribuirItem(
+          pedidoCompraId,
+          pedidoCompraItemId,
+          lojaId,
+          quantidade,
+          userId,
+          observacao,
+          client
+        )
+      );
+    }
+    const client = tx;
 
-    const item = await client.pedidoCompraItem.findUnique({
-      where: { id: pedidoCompraItemId },
+    const item = await client.pedidoCompraItem.findFirst({
+      where: { id: pedidoCompraItemId, pedidoCompraId, lojaId },
       include: { atribuicoes: true }
     });
 
@@ -53,35 +76,40 @@ export class TriagemService {
       throw new AppError(404, "item_not_found");
     }
 
-    if (item.pedidoCompraId !== pedidoCompraId) {
-      throw new AppError(404, "item_not_found");
-    }
-
-    const totalAtribuido = item.atribuicoes.reduce((sum: number, a) => sum + a.quantidade, 0);
-    if (totalAtribuido + quantidade > item.quantidade) {
+    const totalOutrasAtribuicoes = item.atribuicoes
+      .filter((atribuicao) => atribuicao.lojaId !== lojaId)
+      .reduce((sum: number, atribuicao) => sum + atribuicao.quantidade, 0);
+    if (totalOutrasAtribuicoes + quantidade > item.quantidade) {
       throw new AppError(400, "quantidade_insuficiente");
     }
 
-    const pedido = await client.pedidoCompra.findUnique({
-      where: { id: pedidoCompraId },
-      select: { compraImportadaId: true }
+    const pedidoExiste = await client.pedidoCompra.count({
+      where: { id: pedidoCompraId, lojaId }
     });
+    if (!pedidoExiste) throw new AppError(404, "item_not_found");
 
     const atribuicao = await client.atribuicaoItem.upsert({
       where: { pedidoCompraItemId_lojaId: { pedidoCompraItemId, lojaId } },
-      update: { quantidade, atribuidoPorId: userId, atribuidoEm: new Date(), observacao },
+      update: {
+        quantidade,
+        atribuidoPorId: userId,
+        atribuidoEm: new Date(),
+        observacao
+      },
       create: {
         pedidoCompraItemId,
         lojaId,
         quantidade,
         atribuidoPorId: userId,
-        observacao,
-        compraImportadaId: pedido?.compraImportadaId ?? undefined
+        observacao
       },
       include: { loja: true, atribuidoPor: true }
     });
 
-    const novoStatus = await this.calcularStatusAtribuicao(pedidoCompraId, client);
+    const novoStatus = await this.calcularStatusAtribuicao(
+      pedidoCompraId,
+      client
+    );
     await client.pedidoCompra.update({
       where: { id: pedidoCompraId },
       data: { statusAtribuicao: novoStatus }
@@ -91,29 +119,12 @@ export class TriagemService {
   }
 
   async listarAtribuicoes(pedidoCompraId: string, lojaId: string) {
-    const pedido = await this.prisma.pedidoCompra.findUnique({
-      where: { id: pedidoCompraId },
-      select: { compraImportadaId: true }
+    const pedidoExiste = await this.prisma.pedidoCompra.count({
+      where: { id: pedidoCompraId, lojaId }
     });
 
-    if (!pedido) {
-      return [];
-    }
-
-    if (pedido.compraImportadaId) {
-      const atribuicoes = await this.prisma.atribuicaoItem.findMany({
-        where: {
-          compraImportadaId: pedido.compraImportadaId,
-          lojaId
-        },
-        include: {
-          loja: true,
-          atribuidoPor: true,
-          pedidoCompraItem: true
-        },
-        orderBy: { atribuidoEm: "desc" }
-      });
-      return atribuicoes;
+    if (!pedidoExiste) {
+      throw new AppError(404, "not_found");
     }
 
     const atribuicoes = await this.prisma.atribuicaoItem.findMany({

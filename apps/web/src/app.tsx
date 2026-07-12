@@ -195,7 +195,7 @@ function Shell({ children }: { children: React.ReactNode }) {
               ["Operação", "/operacao"],
               ["Produtos", "/produtos"],
               ["Fornecedores", "/fornecedores"],
-              ["Pedidos", "/pedidos"],
+              ["Compras", "/pedidos"],
               ["Logística", "/logistica"],
               ["Estoque", "/estoque"],
               ["Financeiro", "/financeiro"],

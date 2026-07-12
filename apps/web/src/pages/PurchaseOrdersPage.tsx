@@ -97,7 +97,10 @@ export function PurchaseOrdersPage() {
   return (
     <PageContainer>
       <Stack gap={{ xs: 2.5, md: 3.5 }}>
-        <PageHeader title="Pedidos de Compra" />
+        <PageHeader
+          title="Compras"
+          description="Pedidos de compra da loja ativa"
+        />
         <ContentCard>
           <form onSubmit={form.handleSubmit((v) => createOrder.mutateAsync(v))}>
             <Stack direction="row" gap={1} flexWrap="wrap">
