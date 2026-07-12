@@ -12,6 +12,7 @@ import {
 } from "../src/app";
 import { CategoriesPage } from "../src/pages/CategoriesPage";
 import { SuppliersPage } from "../src/pages/SuppliersPage";
+import { PurchaseOrdersPage } from "../src/pages/PurchaseOrdersPage";
 import { queryClient } from "../src/api/client";
 import {
   catalogQueryKeys,
@@ -125,6 +126,7 @@ describe("web app", () => {
   it.each([
     [CategoriesPage, "Categorias"],
     [SuppliersPage, "Fornecedores"],
+    [PurchaseOrdersPage, "Pedidos de Compra"],
     [LogisticsPage, "Adicionar viajante"],
     [InventoryPage, "Registrar movimento"],
     [FinancePage, "Registrar pagamento"],
