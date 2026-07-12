@@ -13,6 +13,7 @@ import { CategoriesPage } from "../src/pages/CategoriesPage";
 import { SuppliersPage } from "../src/pages/SuppliersPage";
 import { PurchaseOrdersPage } from "../src/pages/PurchaseOrdersPage";
 import { ReportsPage } from "../src/pages/ReportsPage";
+import { ProductsPage } from "../src/pages/ProductsPage";
 import { queryClient } from "../src/api/client";
 import {
   catalogQueryKeys,
@@ -127,6 +128,7 @@ describe("web app", () => {
     [CategoriesPage, "Categorias"],
     [SuppliersPage, "Fornecedores"],
     [PurchaseOrdersPage, "Pedidos de Compra"],
+    [ProductsPage, "Produtos"],
     [LogisticsPage, "Adicionar viajante"],
     [InventoryPage, "Registrar movimento"],
     [FinancePage, "Registrar pagamento"],
