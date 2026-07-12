@@ -33,7 +33,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.3",
     "prettier": "^3.6.2",
-    "prisma": "^6.19.3",
+    "prisma": "6.19.3",
     "supertest": "^7.2.2",
     "tsup": "^8.5.0",
     "tsx": "^4.20.3",
@@ -44,7 +44,7 @@
   },
   "dependencies": {
     "@hookform/resolvers": "^5.4.0",
-    "@prisma/client": "^6.19.3",
+    "@prisma/client": "6.19.3",
     "bcryptjs": "^3.0.3"
   }
 }

@@ -19,6 +19,18 @@ O seed cria dados administrativos e deve ser executado deliberadamente, somente 
 
 Os testes de integração exigem `DATABASE_TEST_URL` apontando para um PostgreSQL exclusivo de testes. A suíte aplica migrations e seed nesse banco antes da execução e nunca deve receber a URL do banco de desenvolvimento ou produção.
 
+## Baseline de desenvolvimento
+
+- A versão oficial é Node.js 22, definida em `.nvmrc`. Em instalações Homebrew, use `export PATH="$(brew --prefix node@22)/bin:$PATH"` antes dos comandos do projeto.
+- O monorepo usa npm workspaces e mantém `package-lock.json` versionado. Instalações reproduzíveis devem usar `npm ci`.
+- Prisma CLI e Prisma Client permanecem alinhados em `6.19.3`; upgrades major exigem batch próprio.
+- `npm test` prepara o banco PostgreSQL de testes com valores locais não sensíveis quando `SEED_ADMIN_*` não estiver definido. Esses defaults existem somente no runner de testes e não alteram o seed de desenvolvimento ou produção.
+- Scripts de desenvolvimento não contêm segredos. A API carrega o `.env` local, que permanece ignorado pelo Git.
+
+## Histórico local e stashes
+
+Os stashes anteriores a esta baseline foram preservados apenas como histórico. Eles contêm versões antigas e sobrepostas do frontend e backend e não devem ser reaplicados integralmente. Qualquer recuperação futura exige comparação por arquivo e comprovação de que a mudança ainda não existe na `main`.
+
 ## Riscos conhecidos
 
 O `npm audit` de 2026-07-11 reporta vulnerabilidades na toolchain de testes Vitest 2/Vite transitivo, incluindo um alerta crítico ligado ao servidor de UI do Vitest. Essa UI não é iniciada pelos scripts do projeto e os pacotes são de desenvolvimento, não do runtime publicado. A correção indicada exige upgrade major do Vitest; por restrição de dependências, deve ser tratada em batch próprio com validação de compatibilidade. Não exponha servidores Vite/Vitest à rede pública.

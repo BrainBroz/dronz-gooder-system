@@ -13,12 +13,12 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
-    "db:test:prepare": "DATABASE_URL=${DATABASE_TEST_URL:-postgresql://postgres:postgres@localhost:5432/dronz_gooder_test?schema=public} prisma migrate deploy && DATABASE_URL=${DATABASE_TEST_URL:-postgresql://postgres:postgres@localhost:5432/dronz_gooder_test?schema=public} tsx prisma/seed.ts",
+    "db:test:prepare": "bash ../../scripts/prepare-test-db.sh",
     "db:seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",
-    "@prisma/client": "^6.11.1",
+    "@prisma/client": "6.19.3",
     "bcryptjs": "^3.0.2",
     "express": "^5.1.0",
     "helmet": "^8.1.0",
