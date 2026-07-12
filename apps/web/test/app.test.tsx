@@ -7,12 +7,12 @@ import {
   AppRoutes,
   LogisticsPage,
   InventoryPage,
-  FinancePage,
-  ReportsPage
+  FinancePage
 } from "../src/app";
 import { CategoriesPage } from "../src/pages/CategoriesPage";
 import { SuppliersPage } from "../src/pages/SuppliersPage";
 import { PurchaseOrdersPage } from "../src/pages/PurchaseOrdersPage";
+import { ReportsPage } from "../src/pages/ReportsPage";
 import { queryClient } from "../src/api/client";
 import {
   catalogQueryKeys,

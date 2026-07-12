@@ -40,8 +40,7 @@ import {
   logisticsQueryKeys,
   inventoryQueryKeys,
   financeQueryKeys,
-  dashboardQueryKeys,
-  reportQueryKeys
+  dashboardQueryKeys
 } from "./queryKeys";
 import type { Product } from "./types/catalog";
 import type { PurchaseOrder } from "./types/purchasing";
@@ -49,6 +48,7 @@ import { useCategories, useProducts } from "./hooks/useCatalog";
 import { CategoriesPage } from "./pages/CategoriesPage";
 import { SuppliersPage } from "./pages/SuppliersPage";
 import { PurchaseOrdersPage } from "./pages/PurchaseOrdersPage";
+import { ReportsPage } from "./pages/ReportsPage";
 
 const loginSchema = z.object({
   email: z.string().email("Informe um e-mail válido"),
@@ -1462,83 +1462,6 @@ export function FinancePage() {
           </Card>
         )
       )}
-    </Box>
-  );
-}
-
-const reportTypes = [
-  ["purchase-orders", "Pedidos de Compra"],
-  ["purchase-items", "Itens Comprados"],
-  ["logistics", "Logística por Viagem"],
-  ["suitcase-weight", "Peso por Mala"],
-  ["receiving", "Recebimentos"],
-  ["inventory", "Posição de Estoque"],
-  ["movements", "Movimentações"],
-  ["costs", "Custos por Pedido"],
-  ["payments", "Pagamentos"],
-  ["markup", "Markup e Margem"]
-] as const;
-export function ReportsPage() {
-  const store = useAuthStore((s) => s.activeStoreId);
-  const [type, setType] = React.useState<string>("purchase-orders");
-  const [from, setFrom] = React.useState("");
-  const [to, setTo] = React.useState("");
-  const report = useQuery<unknown[]>({
-    queryKey: reportQueryKeys.report(store, type, from, to),
-    enabled: !!store,
-    queryFn: async () =>
-      (
-        await api.get(`/analytics/reports/${type}`, {
-          headers: { ...authHeader(), "x-store-id": store },
-          params: { from: from || undefined, to: to || undefined }
-        })
-      ).data
-  });
-  return (
-    <Box p={3}>
-      <Typography variant="h4">Relatórios</Typography>
-      <Stack direction={{ xs: "column", md: "row" }} gap={2} my={2}>
-        <TextField
-          select
-          label="Relatório"
-          value={type}
-          onChange={(e) => setType(e.target.value)}
-        >
-          {reportTypes.map(([value, label]) => (
-            <MenuItem key={value} value={value}>
-              {label}
-            </MenuItem>
-          ))}
-        </TextField>
-        <TextField
-          type="date"
-          label="De"
-          value={from}
-          onChange={(e) => setFrom(e.target.value)}
-          InputLabelProps={{ shrink: true }}
-        />
-        <TextField
-          type="date"
-          label="Até"
-          value={to}
-          onChange={(e) => setTo(e.target.value)}
-          InputLabelProps={{ shrink: true }}
-        />
-      </Stack>
-      {report.isLoading && <Typography>Carregando...</Typography>}
-      {report.isError && <Typography>Falha ao carregar relatório</Typography>}
-      {!report.isLoading && !report.data?.length && (
-        <Typography>Nenhum registro.</Typography>
-      )}
-      {report.data?.map((row, index) => (
-        <Card key={String((row as { id?: string }).id ?? index)}>
-          <CardContent>
-            <Typography component="pre" sx={{ whiteSpace: "pre-wrap" }}>
-              {JSON.stringify(row, null, 2)}
-            </Typography>
-          </CardContent>
-        </Card>
-      ))}
     </Box>
   );
 }
