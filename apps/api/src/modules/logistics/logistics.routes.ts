@@ -2,6 +2,7 @@ import { Router, type Response, type NextFunction } from "express";
 import { z } from "zod";
 import {
   requireAuth,
+  requirePermission,
   requireStore,
   type AuthenticatedRequest
 } from "../../middlewares/auth";
@@ -18,7 +19,7 @@ const wrap =
       n(e);
     }
   };
-const parse = (schema: z.ZodTypeAny, body: unknown) => {
+const parse = <T>(schema: z.ZodType<T>, body: unknown): T => {
   const p = schema.safeParse(body);
   if (!p.success)
     throw new AppError(400, "bad_request");
@@ -90,7 +91,8 @@ logisticsRouter.post(
             origem: z.string(),
             destino: z.string(),
             partidaEm: z.coerce.date(),
-            chegadaPrevistaEm: z.coerce.date()
+            chegadaPrevistaEm: z.coerce.date(),
+            rotaCodigo: z.enum(["MIAMI_PARAGUAI_BRASIL", "MIAMI_BRASIL"]).optional()
           })
           .strict(),
         r.body
@@ -292,6 +294,7 @@ logisticsRouter.delete(
 );
 logisticsRouter.post(
   "/miami-confirmations",
+  requirePermission("MIAMI_RECEBIMENTO_CONFIRMAR"),
   wrap((r) =>
     s.confirmMiami(
       r.storeId!,
@@ -316,12 +319,14 @@ logisticsRouter.post(
           })
           .strict(),
         r.body
-      ) as never
+      ),
+      typeof r.headers["idempotency-key"] === "string" ? r.headers["idempotency-key"] : undefined
     )
   )
 );
 logisticsRouter.post(
   "/checkpoint-paraguai",
+  requirePermission("PARAGUAI_CHECKPOINT_CONFIRMAR"),
   wrap((r) =>
     s.confirmParaguai(
       r.storeId!,
@@ -348,12 +353,14 @@ logisticsRouter.post(
           })
           .strict(),
         r.body
-      ) as never
+      ),
+      typeof r.headers["idempotency-key"] === "string" ? r.headers["idempotency-key"] : undefined
     )
   )
 );
 logisticsRouter.post(
   "/checkpoint-brasil",
+  requirePermission("BRASIL_CHECKPOINT_CONFIRMAR"),
   wrap((r) =>
     s.confirmBrasil(
       r.storeId!,
@@ -380,7 +387,8 @@ logisticsRouter.post(
           })
           .strict(),
         r.body
-      ) as never
+      ),
+      typeof r.headers["idempotency-key"] === "string" ? r.headers["idempotency-key"] : undefined
     )
   )
 );

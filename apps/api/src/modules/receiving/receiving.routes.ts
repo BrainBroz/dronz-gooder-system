@@ -2,6 +2,7 @@ import { Router, type NextFunction, type Response } from "express";
 import { z } from "zod";
 import {
   requireAuth,
+  requirePermission,
   requireStore,
   type AuthenticatedRequest
 } from "../../middlewares/auth";
@@ -20,10 +21,12 @@ const w =
   };
 receivingRouter.get(
   "/",
+  requirePermission("RECEBIMENTO_VISUALIZAR"),
   w((r) => s.list(r.storeId!))
 );
 receivingRouter.post(
   "/",
+  requirePermission("RECEBIMENTO_CONFIRMAR"),
   w((r) => {
     const p = z
       .object({
@@ -34,11 +37,12 @@ receivingRouter.post(
       .strict()
       .safeParse(r.body);
     if (!p.success) throw new AppError(400, "bad_request");
-    return s.create(r.storeId!, r.identity!.user.id, p.data);
+    return s.create(r.storeId!, r.identity!.user.id, p.data, typeof r.headers["idempotency-key"] === "string" ? r.headers["idempotency-key"] : undefined);
   })
 );
 receivingRouter.post(
   "/:id/items/:itemId/confirm",
+  requirePermission("RECEBIMENTO_CONFIRMAR"),
   w((r) => {
     const p = z
       .object({
@@ -54,12 +58,14 @@ receivingRouter.post(
       r.identity!.user.id,
       String(r.params.id),
       String(r.params.itemId),
-      p.data
+      p.data,
+      typeof r.headers["idempotency-key"] === "string" ? r.headers["idempotency-key"] : undefined
     );
   })
 );
 receivingRouter.post(
   "/entrada-definitiva",
+  requirePermission("ENTRADA_DEFINITIVA_CONFIRMAR"),
   w((r) => {
     const p = z
       .object({
@@ -71,6 +77,6 @@ receivingRouter.post(
       .strict()
       .safeParse(r.body);
     if (!p.success) throw new AppError(400, "bad_request");
-    return s.entradaDefinitiva(r.storeId!, r.identity!.user.id, p.data);
+    return s.entradaDefinitiva(r.storeId!, r.identity!.user.id, p.data, typeof r.headers["idempotency-key"] === "string" ? r.headers["idempotency-key"] : undefined);
   })
 );

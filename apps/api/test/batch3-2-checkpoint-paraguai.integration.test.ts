@@ -31,8 +31,10 @@ async function session() {
 }
 
 async function fixture(lojaId: string) {
-  const value = await createOperationalFixture(prisma, lojaId);
+  const value = await createOperationalFixture(prisma, lojaId, "MIAMI_PARAGUAI_BRASIL");
   fixtures.push(value);
+  await prisma.viagem.update({ where: { id: value.trip.id }, data: { status: "IN_TRANSIT" } });
+  await prisma.mala.update({ where: { id: value.bag.id }, data: { status: "CHECKED_IN" } });
   return value;
 }
 
@@ -94,7 +96,7 @@ describe("Batch 3.2 — Check-in Paraguai", () => {
   it("confirma duas malas da mesma viagem", async () => {
     const { app, dronz, headers } = await session();
     const data = await fixture(dronz.id);
-    const secondBag = await prisma.mala.create({ data: { lojaId: dronz.id, viagemId: data.trip.id, codigo: `SECOND-${data.bag.id}` } });
+    const secondBag = await prisma.mala.create({ data: { lojaId: dronz.id, viagemId: data.trip.id, codigo: `SECOND-${data.bag.id}`, status: "CHECKED_IN" } });
     const send = (malaId: string) => request(app).post("/logistics/checkpoint-paraguai").set(headers(dronz.id)).send({
       viagemId: data.trip.id, malaId, confirmadoEm: new Date().toISOString(), tipoDivergencia: "CORRETO"
     });

@@ -12,7 +12,7 @@ async function main() {
 
   const passwordHash = await bcrypt.hash(adminPassword, 12);
 
-  const [dronz, gooder, profile, permission] = await Promise.all([
+  const [dronz, gooder, profile] = await Promise.all([
     prisma.loja.upsert({
       where: { slug: "dronz" },
       update: { nome: "Dronz", ativa: true },
@@ -27,13 +27,37 @@ async function main() {
       where: { code: "SUPER_ADMIN" },
       update: { name: "SUPER_ADMIN" },
       create: { code: "SUPER_ADMIN", name: "SUPER_ADMIN" }
-    }),
-    prisma.permissao.upsert({
-      where: { code: "SYSTEM_ADMIN" },
-      update: { name: "SYSTEM_ADMIN" },
-      create: { code: "SYSTEM_ADMIN", name: "SYSTEM_ADMIN" }
     })
   ]);
+
+  const permissionCodes = [
+    "SYSTEM_ADMIN",
+    "MIAMI_RECEBIMENTO_VISUALIZAR",
+    "MIAMI_RECEBIMENTO_CONFIRMAR",
+    "PARAGUAI_CHECKPOINT_VISUALIZAR",
+    "PARAGUAI_CHECKPOINT_CONFIRMAR",
+    "BRASIL_CHECKPOINT_VISUALIZAR",
+    "BRASIL_CHECKPOINT_CONFIRMAR",
+    "RECEBIMENTO_VISUALIZAR",
+    "RECEBIMENTO_CONFIRMAR",
+    "ENTRADA_DEFINITIVA_VISUALIZAR",
+    "ENTRADA_DEFINITIVA_CONFIRMAR",
+    "CHECKPOINT_CORRIGIR"
+  ] as const;
+  const permissions = await Promise.all(
+    permissionCodes.map((code) =>
+      prisma.permissao.upsert({
+        where: { code },
+        update: { name: code },
+        create: { code, name: code }
+      })
+    )
+  );
+  const miamiProfile = await prisma.perfil.upsert({
+    where: { code: "CHECKPOINT_MIAMI" },
+    update: { name: "CHECKPOINT_MIAMI" },
+    create: { code: "CHECKPOINT_MIAMI", name: "CHECKPOINT_MIAMI" }
+  });
 
   const user = await prisma.usuario.upsert({
     where: { email: adminEmail },
@@ -58,13 +82,25 @@ async function main() {
     create: { usuarioId: user.id, perfilId: profile.id }
   });
 
-  await prisma.perfilPermissao.upsert({
-    where: {
-      perfilId_permissaoId: { perfilId: profile.id, permissaoId: permission.id }
-    },
-    update: {},
-    create: { perfilId: profile.id, permissaoId: permission.id }
-  });
+  for (const permission of permissions) {
+    await prisma.perfilPermissao.upsert({
+      where: {
+        perfilId_permissaoId: { perfilId: profile.id, permissaoId: permission.id }
+      },
+      update: {},
+      create: { perfilId: profile.id, permissaoId: permission.id }
+    });
+  }
+  for (const code of ["MIAMI_RECEBIMENTO_VISUALIZAR", "MIAMI_RECEBIMENTO_CONFIRMAR"] as const) {
+    const permission = permissions.find((entry) => entry.code === code)!;
+    await prisma.perfilPermissao.upsert({
+      where: {
+        perfilId_permissaoId: { perfilId: miamiProfile.id, permissaoId: permission.id }
+      },
+      update: {},
+      create: { perfilId: miamiProfile.id, permissaoId: permission.id }
+    });
+  }
 
   const categories = await Promise.all([
     prisma.categoria.upsert({

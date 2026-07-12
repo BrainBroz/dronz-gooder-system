@@ -14,6 +14,7 @@ import { inventoryRouter } from "./modules/inventory/inventory.routes";
 import { financeRouter } from "./modules/finance/finance.routes";
 import { analyticsRouter } from "./modules/analytics/analytics.routes";
 import { simulationRouter } from "./modules/simulation/simulation.routes";
+import { operationsRouter } from "./modules/operations/operations.routes";
 
 export function createApp() {
   const app = express();
@@ -32,6 +33,7 @@ export function createApp() {
   app.use("/finance", financeRouter);
   app.use("/analytics", analyticsRouter);
   app.use("/simulations", simulationRouter);
+  app.use("/operations", operationsRouter);
   app.use(errorHandler);
   return app;
 }

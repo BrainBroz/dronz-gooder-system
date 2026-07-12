@@ -48,7 +48,7 @@ async function eligibleFixture(lojaId: string, received = 2, rejected = 0) {
   } });
   const receipt = await prisma.recebimento.create({ data: {
     lojaId, viagemId: data.trip.id, malaId: data.bag.id,
-    confirmadoPorId: data.admin.id, iniciadoEm: new Date(),
+    confirmadoPorId: data.admin.id, iniciadoEm: new Date(), status: "COMPLETED", concluidoEm: new Date(),
     itens: { create: {
       pedidoCompraItemId: data.item.id, produtoId: data.product.id,
       quantidadeEsperada: Math.max(received + rejected, 2),

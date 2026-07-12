@@ -1,7 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 
-export async function createOperationalFixture(prisma: PrismaClient, lojaId: string) {
+export async function createOperationalFixture(
+  prisma: PrismaClient,
+  lojaId: string,
+  route: "MIAMI_BRASIL" | "MIAMI_PARAGUAI_BRASIL" = "MIAMI_BRASIL"
+) {
   const suffix = randomUUID();
   const admin = await prisma.usuario.findUniqueOrThrow({
     where: { email: "admin@example.com" }
@@ -54,7 +58,11 @@ export async function createOperationalFixture(prisma: PrismaClient, lojaId: str
       destino: "Brasil",
       partidaEm: new Date(Date.now() + 86_400_000),
       chegadaPrevistaEm: new Date(Date.now() + 172_800_000),
-      status: "OPEN_FOR_ALLOCATION"
+      status: "OPEN_FOR_ALLOCATION",
+      rotaCodigo: route,
+      checkpointsObrigatorios: route === "MIAMI_PARAGUAI_BRASIL"
+        ? ["MIAMI", "PARAGUAI", "BRASIL", "RECEBIMENTO", "ENTRADA_DEFINITIVA"]
+        : ["MIAMI", "BRASIL", "RECEBIMENTO", "ENTRADA_DEFINITIVA"]
     }
   });
   const bag = await prisma.mala.create({

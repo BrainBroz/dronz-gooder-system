@@ -56,6 +56,7 @@ model Usuario {
   perfis                  UsuarioPerfil[]
   refreshTokens           RefreshToken[]
   auditLogs               AuditLog[]
+  eventosCorretivos       EventoCorretivo[]
   recebimentosMiami       RecebimentoMiami[]
   checkpointsParaguai     CheckpointParaguai[]
   checkpointsBrasil       CheckpointBrasil[]
@@ -151,6 +152,14 @@ model AuditLog {
   entity    String
   entityId  String?
   data      Json?
+  lojaId    String?
+  permissionCode String?
+  correlationId String?
+  idempotencyKey String?
+  reason    String?
+  beforeData Json?
+  afterData Json?
+  origin    String?
   createdAt DateTime @default(now())
 
   usuario Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
@@ -158,6 +167,43 @@ model AuditLog {
   @@index([action])
   @@index([entity])
   @@index([usuarioId])
+  @@index([lojaId, createdAt])
+  @@index([correlationId])
+}
+
+model IdempotencyRecord {
+  id             String   @id @default(cuid())
+  lojaId         String
+  operation      String
+  entityId       String
+  idempotencyKey String
+  requestHash    String
+  responseData   Json
+  createdAt      DateTime @default(now())
+
+  @@unique([lojaId, operation, entityId, idempotencyKey])
+  @@index([lojaId, createdAt])
+}
+
+model EventoCorretivo {
+  id               String   @id @default(cuid())
+  lojaId           String
+  entity            String
+  entityId          String
+  originalEventId   String
+  correctionType    String
+  reason            String
+  beforeData        Json
+  afterData         Json
+  correlationId     String
+  permissionCode    String
+  usuarioId         String
+  createdAt         DateTime @default(now())
+  usuario            Usuario @relation(fields: [usuarioId], references: [id], onDelete: Restrict)
+
+  @@index([lojaId, entity, entityId, createdAt])
+  @@index([originalEventId])
+  @@index([correlationId])
 }
 
 model Categoria {
@@ -399,6 +445,9 @@ model Viagem {
   status            ViagemStatus  @default(PLANNED)
   periodoEnvio      String        @default("MANHA")
   observacoes       String?
+  rotaCodigo        String        @default("LEGACY_MIAMI_PARAGUAI_BRASIL")
+  rotaVersao        Int           @default(1)
+  checkpointsObrigatorios String[] @default(["MIAMI", "PARAGUAI", "BRASIL", "RECEBIMENTO", "ENTRADA_DEFINITIVA"])
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
   loja              Loja          @relation(fields: [lojaId], references: [id], onDelete: Restrict)
@@ -505,6 +554,7 @@ model CheckpointParaguai {
   tipoDivergencia    TipoDivergenciaParaguai   @default(CORRETO)
   createdAt          DateTime                  @default(now())
   updatedAt          DateTime                  @updatedAt
+  supersededAt       DateTime?
 
   loja               Loja                      @relation(fields: [lojaId], references: [id], onDelete: Restrict)
   viagem             Viagem                    @relation(fields: [viagemId, lojaId], references: [id, lojaId], onDelete: Restrict)
@@ -527,6 +577,7 @@ model CheckpointBrasil {
   tipoDivergencia    TipoDivergenciaBrasil     @default(CORRETO)
   createdAt          DateTime                  @default(now())
   updatedAt          DateTime                  @updatedAt
+  supersededAt       DateTime?
 
   loja               Loja                      @relation(fields: [lojaId], references: [id], onDelete: Restrict)
   viagem             Viagem                    @relation(fields: [viagemId, lojaId], references: [id, lojaId], onDelete: Restrict)
@@ -624,6 +675,7 @@ model Recebimento {
   observacoes     String?
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt
+  supersededAt    DateTime?
   loja            Loja                  @relation(fields: [lojaId], references: [id], onDelete: Restrict)
   viagem          Viagem                @relation(fields: [viagemId, lojaId], references: [id, lojaId], onDelete: Restrict)
   mala            Mala                  @relation(fields: [malaId, lojaId], references: [id, lojaId], onDelete: Restrict)
@@ -684,6 +736,7 @@ model EstoqueEntrada {
   observacao         String?
   createdAt          DateTime                 @default(now())
   updatedAt          DateTime                 @updatedAt
+  supersededAt       DateTime?
 
   loja               Loja                     @relation(fields: [lojaId], references: [id], onDelete: Restrict)
   viagem             Viagem                   @relation(fields: [viagemId, lojaId], references: [id, lojaId], onDelete: Restrict)
@@ -708,6 +761,7 @@ model MovimentacaoEstoque {
   quantidadePosterior Int
   responsavelId       String
   observacoes         String?
+  movimentoOriginalId String?
   createdAt           DateTime                  @default(now())
   loja                Loja                      @relation(fields: [lojaId], references: [id], onDelete: Restrict)
   produto             Produto                   @relation(fields: [produtoId, lojaId], references: [id, lojaId], onDelete: Restrict)
@@ -717,6 +771,7 @@ model MovimentacaoEstoque {
 
   @@index([lojaId, produtoId, createdAt])
   @@index([lojaId, tipo])
+  @@index([movimentoOriginalId])
 }
 
 enum PagamentoStatus {

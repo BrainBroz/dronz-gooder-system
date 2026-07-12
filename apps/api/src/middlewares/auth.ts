@@ -34,3 +34,13 @@ export function requireStore(req: AuthenticatedRequest, res: Response, next: Nex
   req.storeId = parsed.data;
   next();
 }
+
+export function requirePermission(...codes: string[]) {
+  return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    const granted = new Set(req.identity?.permissoes.map((permission) => permission.code));
+    if (!granted.has("SYSTEM_ADMIN") && !codes.some((code) => granted.has(code))) {
+      return res.status(403).json({ error: "insufficient_permission" });
+    }
+    next();
+  };
+}

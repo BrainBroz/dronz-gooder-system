@@ -84,6 +84,22 @@ describe("receiving and inventory", () => {
       .set(headers(token, dronz.id))
       .send({ quantidadeRecebida: 1, quantidadeRejeitada: 0 });
     expect(completed.body.status).toBe("COMPLETED");
+    expect((await request(app).get("/inventory").set(headers(token, dronz.id))).body.find(
+      (entry: { produtoId: string }) => entry.produtoId === detail.itens[0].produtoId
+    )).toBeUndefined();
+    expect(await prisma.movimentacaoEstoque.count({ where: { recebimentoId: created.body.id, tipo: "ENTRY" } })).toBe(0);
+    await prisma.recebimentoMiami.create({ data: {
+      lojaId: dronz.id, pedidoCompraItemId: fixture.item.id, quantidadeRecebida: 2,
+      recebidoEm: new Date(), confirmadoPorId: fixture.admin.id
+    } });
+    await prisma.checkpointBrasil.create({ data: {
+      lojaId: dronz.id, viagemId: trip.id, malaId: bag.id,
+      confirmadoPorId: fixture.admin.id, confirmadoEm: new Date()
+    } });
+    const entry = await request(app).post("/receiving/entrada-definitiva")
+      .set(headers(token, dronz.id))
+      .send({ viagemId: trip.id, malaId: bag.id, confirmadoEm: new Date().toISOString() });
+    expect(entry.status).toBe(200);
     const stock = (
       await request(app).get("/inventory").set(headers(token, dronz.id))
     ).body.find(
@@ -94,7 +110,7 @@ describe("receiving and inventory", () => {
       await prisma.movimentacaoEstoque.count({
         where: { recebimentoId: created.body.id, tipo: "ENTRY" }
       })
-    ).toBe(2);
+    ).toBe(1);
     expect(
       (
         await request(app)
