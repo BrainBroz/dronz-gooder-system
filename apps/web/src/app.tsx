@@ -1,5 +1,4 @@
 import React from "react";
-import axios from "axios";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import {
   AppBar,
@@ -18,11 +17,9 @@ import {
   ThemeProvider
 } from "@mui/material";
 import { Controller, useForm } from "react-hook-form";
-import { create } from "zustand";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
-  QueryClient,
   QueryClientProvider,
   useMutation,
   useQuery,
@@ -31,137 +28,24 @@ import {
 import { ContentCard } from "./components/ui/ContentCard";
 import { PageContainer } from "./components/ui/PageContainer";
 import { PageHeader } from "./components/ui/PageHeader";
+import { MutationStatus } from "./components/ui/MutationStatus";
 import { appTheme } from "./theme";
-
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
-export const api = axios.create({ baseURL: API_URL, withCredentials: true });
-export const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: false } }
-});
-export const catalogQueryKeys = {
-  categories: (storeId: string | null) => ["categories", storeId] as const,
-  products: (storeId: string | null) => ["products", storeId] as const
-};
-export const purchasingQueryKeys = {
-  suppliers: (storeId: string | null) => ["suppliers", storeId] as const,
-  orders: (storeId: string | null) => ["purchase-orders", storeId] as const
-};
-export const logisticsQueryKeys = {
-  travelers: (id: string | null) => ["travelers", id] as const,
-  trips: (id: string | null) => ["trips", id] as const,
-  suitcases: (id: string | null) => ["suitcases", id] as const
-};
-export const inventoryQueryKeys = {
-  stock: (id: string | null) => ["inventory", id] as const,
-  receiving: (id: string | null) => ["receiving", id] as const,
-  movements: (id: string | null) => ["inventory-movements", id] as const
-};
-export const financeQueryKeys = {
-  payments: (id: string | null) => ["finance-payments", id] as const
-};
-export const dashboardQueryKeys = {
-  summary: (id: string | null) => ["dashboard", id] as const
-};
-export const reportQueryKeys = {
-  report: (id: string | null, type: string, from: string, to: string) =>
-    ["report", id, type, from, to] as const
-};
-export const formatSalePrice = (value: string) =>
-  Number(value) === 0 ? "A definir" : value;
-
-const KNOWN_ERROR_MESSAGES: Record<string, string> = {
-  bad_request: "Dados inválidos. Verifique os campos e tente novamente.",
-  conflict: "Já existe um registro com esses dados.",
-  not_found: "Registro não encontrado.",
-  forbidden: "Você não tem permissão para esta ação."
-};
-const STATUS_FALLBACK_MESSAGES: Record<number, string> = {
-  400: "Dados inválidos. Verifique os campos e tente novamente.",
-  403: "Você não tem permissão para esta ação.",
-  404: "Registro não encontrado.",
-  409: "Já existe um registro com esses dados."
-};
-export function extractErrorMessage(error: unknown): string {
-  if (axios.isAxiosError(error)) {
-    const code = error.response?.data?.error;
-    if (typeof code === "string" && KNOWN_ERROR_MESSAGES[code]) {
-      return KNOWN_ERROR_MESSAGES[code];
-    }
-    const status = error.response?.status;
-    if (status && STATUS_FALLBACK_MESSAGES[status]) {
-      return STATUS_FALLBACK_MESSAGES[status];
-    }
-  }
-  return "Falha na operação. Tente novamente.";
-}
-type MinimalMutationState = {
-  isPending: boolean;
-  isError: boolean;
-  isSuccess: boolean;
-  error: unknown;
-};
-function MutationStatus({
-  mutation,
-  successMessage,
-  loadingMessage = "Salvando..."
-}: {
-  mutation: MinimalMutationState;
-  successMessage: string;
-  loadingMessage?: string;
-}) {
-  if (mutation.isPending)
-    return (
-      <Typography variant="body2" color="text.secondary" role="status">
-        {loadingMessage}
-      </Typography>
-    );
-  if (mutation.isError)
-    return (
-      <Typography variant="body2" color="error" role="alert">
-        {extractErrorMessage(mutation.error)}
-      </Typography>
-    );
-  if (mutation.isSuccess)
-    return (
-      <Typography variant="body2" color="success.main" role="status">
-        {successMessage}
-      </Typography>
-    );
-  return null;
-}
-
-type Store = { id: string; slug: string; nome: string };
-type AuthUser = { id: string; name: string; email: string; active: boolean };
-type AuthState = {
-  accessToken: string | null;
-  user: AuthUser | null;
-  stores: Store[];
-  activeStoreId: string | null;
-  setSession: (payload: {
-    accessToken: string;
-    user: AuthUser;
-    stores: Store[];
-  }) => void;
-  setActiveStoreId: (storeId: string) => void;
-  clear: () => void;
-};
-
-export const useAuthStore = create<AuthState>((set) => ({
-  accessToken: null,
-  user: null,
-  stores: [],
-  activeStoreId: null,
-  setSession: (payload) =>
-    set({
-      accessToken: payload.accessToken,
-      user: payload.user,
-      stores: payload.stores,
-      activeStoreId: payload.stores[0]?.id ?? null
-    }),
-  setActiveStoreId: (activeStoreId) => set({ activeStoreId }),
-  clear: () =>
-    set({ accessToken: null, user: null, stores: [], activeStoreId: null })
-}));
+import { api, queryClient } from "./api/client";
+import { authHeader, useAuthStore } from "./stores/auth";
+import { extractErrorMessage } from "./utils/errors";
+import { formatSalePrice } from "./utils/formatting";
+import {
+  catalogQueryKeys,
+  purchasingQueryKeys,
+  logisticsQueryKeys,
+  inventoryQueryKeys,
+  financeQueryKeys,
+  dashboardQueryKeys,
+  reportQueryKeys
+} from "./queryKeys";
+import type { Category, Product } from "./types/catalog";
+import type { Supplier, PurchaseOrder } from "./types/purchasing";
+import { useCategories, useProducts } from "./hooks/useCatalog";
 
 const loginSchema = z.object({
   email: z.string().email("Informe um e-mail válido"),
@@ -184,31 +68,6 @@ const productSchema = z.object({
   markup: z.coerce.number().min(25, "Markup mínimo de 25%"),
   peso: z.coerce.number().min(0).optional()
 });
-
-type Category = {
-  id: string;
-  nome: string;
-  slug: string;
-  descricao?: string | null;
-  ordem: number;
-  ativo: boolean;
-};
-type Product = {
-  id: string;
-  codigo: number;
-  nome: string;
-  slug: string;
-  descricao?: string | null;
-  precoVenda: string;
-  markup: string;
-  ativo: boolean;
-  categoria: Category;
-};
-
-function authHeader() {
-  const token = useAuthStore.getState().accessToken;
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
 
 async function loadSession() {
   try {
@@ -333,43 +192,6 @@ export function LoginPage() {
       </Card>
     </Box>
   );
-}
-
-function useCatalogContext() {
-  const { activeStoreId, accessToken } = useAuthStore();
-  const enabled = Boolean(activeStoreId && accessToken);
-  const headers = () => ({ ...authHeader(), "x-store-id": activeStoreId! });
-  return { activeStoreId, enabled, headers };
-}
-
-function useCategories() {
-  const { activeStoreId, enabled, headers } = useCatalogContext();
-  const categoriesQuery = useQuery<Category[]>({
-    queryKey: catalogQueryKeys.categories(activeStoreId),
-    enabled,
-    queryFn: async () =>
-      (await api.get("/categories", { headers: headers() })).data.items ?? []
-  });
-  return {
-    categories: categoriesQuery.data ?? [],
-    categoriesError: categoriesQuery.error,
-    categoriesLoading: categoriesQuery.isLoading
-  };
-}
-
-function useProducts() {
-  const { activeStoreId, enabled, headers } = useCatalogContext();
-  const productsQuery = useQuery<Product[]>({
-    queryKey: catalogQueryKeys.products(activeStoreId),
-    enabled,
-    queryFn: async () =>
-      (await api.get("/products", { headers: headers() })).data.items ?? []
-  });
-  return {
-    products: productsQuery.data ?? [],
-    productsError: productsQuery.error,
-    productsLoading: productsQuery.isLoading
-  };
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -975,15 +797,6 @@ function OperacaoPage() {
   );
 }
 
-type Supplier = { id: string; nome: string; ativo: boolean };
-type PurchaseOrder = {
-  id: string;
-  numeroPedido: string;
-  status: string;
-  subtotal: string;
-  total: string;
-  fornecedor: Supplier;
-};
 function SuppliersPage() {
   const store = useAuthStore((s) => s.activeStoreId),
     client = useQueryClient();

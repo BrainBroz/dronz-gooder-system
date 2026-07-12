@@ -5,20 +5,22 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import {
   AppRoutes,
+  LogisticsPage,
+  InventoryPage,
+  FinancePage,
+  ReportsPage
+} from "../src/app";
+import { queryClient } from "../src/api/client";
+import {
   catalogQueryKeys,
-  formatSalePrice,
   purchasingQueryKeys,
   logisticsQueryKeys,
   inventoryQueryKeys,
   financeQueryKeys,
   dashboardQueryKeys,
-  reportQueryKeys,
-  LogisticsPage,
-  InventoryPage,
-  FinancePage,
-  ReportsPage,
-  queryClient
-} from "../src/app";
+  reportQueryKeys
+} from "../src/queryKeys";
+import { formatSalePrice } from "../src/utils/formatting";
 import { ContentCard } from "../src/components/ui/ContentCard";
 import { PageContainer } from "../src/components/ui/PageContainer";
 import { PageHeader } from "../src/components/ui/PageHeader";
