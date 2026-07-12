@@ -191,8 +191,10 @@ export async function entradaDefinitiva(
 
     if (itens.length === 0) throw new AppError(409, "no_items");
 
-    const temDivergencia = itens.some((i) => i.quantidadeRejeitada > 0);
-    if (temDivergencia) throw new AppError(409, "items_with_divergence");
+    const temApta = itens.some(
+      (i) => i.quantidadeRecebida - i.quantidadeRejeitada - i.quantidadeJaIncorporada > 0
+    );
+    if (!temApta) throw new AppError(409, "no_apt_quantity");
 
     const entradaExistente = await tx.estoqueEntrada.findFirst({
       where: { lojaId, viagemId: d.viagemId, malaId: d.malaId }
@@ -218,14 +220,16 @@ export async function entradaDefinitiva(
     });
 
     for (const item of itens) {
-      if (item.quantidadeRecebida > 0) {
+      const quantidadeApta = item.quantidadeRecebida - item.quantidadeRejeitada - item.quantidadeJaIncorporada;
+
+      if (quantidadeApta > 0) {
         const stock = await tx.estoque.upsert({
           where: { lojaId_produtoId: { lojaId, produtoId: item.produtoId } },
-          update: { quantidadeFisica: { increment: item.quantidadeRecebida } },
+          update: { quantidadeFisica: { increment: quantidadeApta } },
           create: {
             lojaId,
             produtoId: item.produtoId,
-            quantidadeFisica: item.quantidadeRecebida
+            quantidadeFisica: quantidadeApta
           }
         });
 
@@ -237,12 +241,17 @@ export async function entradaDefinitiva(
             recebimentoId: item.recebimentoId,
             tipo: "ENTRY",
             motivo: "PURCHASE_RECEIPT",
-            quantidade: item.quantidadeRecebida,
-            quantidadeAnterior: stock.quantidadeFisica - item.quantidadeRecebida,
+            quantidade: quantidadeApta,
+            quantidadeAnterior: stock.quantidadeFisica - quantidadeApta,
             quantidadePosterior: stock.quantidadeFisica,
             responsavelId: userId,
-            observacoes: `Entrada definitiva de ${item.quantidadeRecebida} unidades`
+            observacoes: `Entrada parcial de ${quantidadeApta} unidades (recebidas: ${item.quantidadeRecebida}, rejeitadas: ${item.quantidadeRejeitada})`
           }
+        });
+
+        await tx.recebimentoItem.update({
+          where: { id: item.id },
+          data: { quantidadeJaIncorporada: { increment: quantidadeApta } }
         });
       }
     }

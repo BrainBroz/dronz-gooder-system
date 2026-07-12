@@ -644,22 +644,23 @@ model Recebimento {
 }
 
 model RecebimentoItem {
-  id                  String           @id @default(cuid())
-  lojaId              String
-  recebimentoId       String
-  pedidoCompraItemId  String
-  produtoId           String
-  quantidadeEsperada  Int
-  quantidadeRecebida  Int              @default(0)
-  quantidadeRejeitada Int              @default(0)
-  condicao            CondicaoProduto?
-  observacoes         String?
-  createdAt           DateTime         @default(now())
-  updatedAt           DateTime         @updatedAt
-  loja                Loja             @relation(fields: [lojaId], references: [id], onDelete: Restrict)
-  recebimento         Recebimento      @relation(fields: [recebimentoId, lojaId], references: [id, lojaId], onDelete: Cascade)
-  pedidoItem          PedidoCompraItem @relation(fields: [pedidoCompraItemId, lojaId], references: [id, lojaId], onDelete: Restrict)
-  produto             Produto          @relation(fields: [produtoId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  id                          String           @id @default(cuid())
+  lojaId                      String
+  recebimentoId               String
+  pedidoCompraItemId          String
+  produtoId                   String
+  quantidadeEsperada          Int
+  quantidadeRecebida          Int              @default(0)
+  quantidadeRejeitada         Int              @default(0)
+  quantidadeJaIncorporada     Int              @default(0)
+  condicao                    CondicaoProduto?
+  observacoes                 String?
+  createdAt                   DateTime         @default(now())
+  updatedAt                   DateTime         @updatedAt
+  loja                        Loja             @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  recebimento                 Recebimento      @relation(fields: [recebimentoId, lojaId], references: [id, lojaId], onDelete: Cascade)
+  pedidoItem                  PedidoCompraItem @relation(fields: [pedidoCompraItemId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  produto                     Produto          @relation(fields: [produtoId, lojaId], references: [id, lojaId], onDelete: Restrict)
 
   @@unique([recebimentoId, pedidoCompraItemId])
   @@index([lojaId, produtoId])

@@ -201,4 +201,163 @@ describe("Batch 3.4 — Entrada Definitiva no Estoque", () => {
       expect(primeiro.body.id).toBe(segundo.body.id);
     }
   });
+
+  it("permite entrada parcial mesmo com rejeição", async () => {
+    const { app, d, h } = await session();
+    const viagem = await prisma.viagem.findFirst({
+      where: { lojaId: d.id, status: "ARRIVED_BRAZIL" }
+    });
+    const mala = await prisma.mala.findFirst({
+      where: { lojaId: d.id, viagemId: viagem?.id }
+    });
+
+    if (viagem && mala) {
+      const recebimento = await prisma.recebimento.findFirst({
+        where: { lojaId: d.id, malaId: mala.id }
+      });
+
+      if (recebimento) {
+        await prisma.recebimentoItem.updateMany({
+          where: { recebimentoId: recebimento.id },
+          data: { quantidadeRejeitada: 1 }
+        });
+
+        const entrada = await request(app)
+          .post("/receiving/entrada-definitiva")
+          .set(h(d.id))
+          .send({
+            viagemId: viagem.id,
+            malaId: mala.id,
+            confirmadoEm: new Date()
+          });
+
+        expect(entrada.status).toBe(200);
+        expect(entrada.body.status).toBe("COMPLETED");
+      }
+    }
+  });
+
+  it("calcula quantidadeApta corretamente (recebida - rejeitada - jaIncorporada)", async () => {
+    const { app, d, h } = await session();
+    const viagem = await prisma.viagem.findFirst({
+      where: { lojaId: d.id, status: "ARRIVED_BRAZIL" }
+    });
+    const mala = await prisma.mala.findFirst({
+      where: { lojaId: d.id, viagemId: viagem?.id }
+    });
+
+    if (viagem && mala) {
+      const recebimento = await prisma.recebimento.findFirst({
+        where: { lojaId: d.id, malaId: mala.id }
+      });
+
+      if (recebimento) {
+        const item = await prisma.recebimentoItem.findFirst({
+          where: { recebimentoId: recebimento.id }
+        });
+
+        if (item) {
+          await prisma.recebimentoItem.update({
+            where: { id: item.id },
+            data: {
+              quantidadeRecebida: 10,
+              quantidadeRejeitada: 2
+            }
+          });
+
+          await request(app)
+            .post("/receiving/entrada-definitiva")
+            .set(h(d.id))
+            .send({
+              viagemId: viagem.id,
+              malaId: mala.id,
+              confirmadoEm: new Date()
+            });
+
+          const itemAfter = await prisma.recebimentoItem.findUnique({
+            where: { id: item.id }
+          });
+
+          expect(itemAfter?.quantidadeJaIncorporada).toBe(8);
+        }
+      }
+    }
+  });
+
+  it("bloqueia entrada quando nenhuma quantidade apta", async () => {
+    const { app, d, h } = await session();
+    const viagem = await prisma.viagem.findFirst({
+      where: { lojaId: d.id, status: "ARRIVED_BRAZIL" }
+    });
+    const mala = await prisma.mala.findFirst({
+      where: { lojaId: d.id, viagemId: viagem?.id }
+    });
+
+    if (viagem && mala) {
+      const recebimento = await prisma.recebimento.findFirst({
+        where: { lojaId: d.id, malaId: mala.id }
+      });
+
+      if (recebimento) {
+        await prisma.recebimentoItem.updateMany({
+          where: { recebimentoId: recebimento.id },
+          data: { quantidadeRecebida: 0 }
+        });
+
+        const entrada = await request(app)
+          .post("/receiving/entrada-definitiva")
+          .set(h(d.id))
+          .send({
+            viagemId: viagem.id,
+            malaId: mala.id,
+            confirmadoEm: new Date()
+          });
+
+        expect(entrada.status).toBe(409);
+      }
+    }
+  });
+
+  it("preserva quantidadeJaIncorporada após múltiplas entradas", async () => {
+    const { app, d, h } = await session();
+    const viagem = await prisma.viagem.findFirst({
+      where: { lojaId: d.id, status: "ARRIVED_BRAZIL" }
+    });
+    const mala = await prisma.mala.findFirst({
+      where: { lojaId: d.id, viagemId: viagem?.id }
+    });
+
+    if (viagem && mala) {
+      const recebimento = await prisma.recebimento.findFirst({
+        where: { lojaId: d.id, malaId: mala.id }
+      });
+
+      if (recebimento) {
+        const item = await prisma.recebimentoItem.findFirst({
+          where: { recebimentoId: recebimento.id }
+        });
+
+        if (item) {
+          await prisma.recebimentoItem.update({
+            where: { id: item.id },
+            data: { quantidadeRecebida: 10 }
+          });
+
+          await request(app)
+            .post("/receiving/entrada-definitiva")
+            .set(h(d.id))
+            .send({
+              viagemId: viagem.id,
+              malaId: mala.id,
+              confirmadoEm: new Date()
+            });
+
+          const itemAfter1 = await prisma.recebimentoItem.findUnique({
+            where: { id: item.id }
+          });
+          expect(itemAfter1?.quantidadeJaIncorporada).toBe(10);
+        }
+      }
+    }
+  });
 });
