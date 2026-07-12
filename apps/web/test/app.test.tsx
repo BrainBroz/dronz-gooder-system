@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import React from "react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { AppRoutes, FinancePage } from "../src/app";
+import { AppRoutes } from "../src/app";
 import { CategoriesPage } from "../src/pages/CategoriesPage";
 import { SuppliersPage } from "../src/pages/SuppliersPage";
 import { PurchaseOrdersPage } from "../src/pages/PurchaseOrdersPage";
@@ -11,6 +11,7 @@ import { ReportsPage } from "../src/pages/ReportsPage";
 import { ProductsPage } from "../src/pages/ProductsPage";
 import { LogisticsPage } from "../src/pages/LogisticsPage";
 import { InventoryPage } from "../src/pages/InventoryPage";
+import { FinancePage } from "../src/pages/FinancePage";
 import { queryClient } from "../src/api/client";
 import {
   catalogQueryKeys,
