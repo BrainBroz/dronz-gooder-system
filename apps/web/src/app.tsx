@@ -15,8 +15,7 @@ import {
   TextField,
   Toolbar,
   Typography,
-  ThemeProvider,
-  createTheme
+  ThemeProvider
 } from "@mui/material";
 import { Controller, useForm } from "react-hook-form";
 import { create } from "zustand";
@@ -29,6 +28,10 @@ import {
   useQuery,
   useQueryClient
 } from "@tanstack/react-query";
+import { ContentCard } from "./components/ui/ContentCard";
+import { PageContainer } from "./components/ui/PageContainer";
+import { PageHeader } from "./components/ui/PageHeader";
+import { appTheme } from "./theme";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
 export const api = axios.create({ baseURL: API_URL, withCredentials: true });
@@ -160,12 +163,6 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ accessToken: null, user: null, stores: [], activeStoreId: null })
 }));
 
-const theme = createTheme({
-  palette: {
-    mode: "dark",
-    background: { default: "#0d1117", paper: "#161b27" }
-  }
-});
 const loginSchema = z.object({
   email: z.string().email("Informe um e-mail válido"),
   password: z.string().min(1, "Senha obrigatória")
@@ -923,46 +920,58 @@ function OperacaoPage() {
         })
       ).data
   });
+  const indicators = [
+    { label: "Pedidos", value: summary.data?.orders.count ?? 0 },
+    {
+      label: "Estoque disponível",
+      value: summary.data?.inventory.available ?? 0
+    },
+    { label: "Viagens abertas", value: summary.data?.openTrips ?? 0 },
+    {
+      label: "Recebimentos pendentes",
+      value: summary.data?.pendingReceiving ?? 0
+    }
+  ];
   return (
-    <Box p={3}>
-      <Stack gap={2}>
-        <Typography variant="h4">Operação</Typography>
-        <Typography>
-          Loja ativa: {activeStore?.nome ?? "Selecione uma loja"}
-        </Typography>
+    <PageContainer>
+      <Stack gap={{ xs: 2.5, md: 3.5 }}>
+        <PageHeader
+          eyebrow="Visão geral"
+          title="Operação"
+          description={`Loja ativa: ${activeStore?.nome ?? "Selecione uma loja"}`}
+        />
         {summary.isLoading && <Typography>Carregando...</Typography>}
         {summary.isError && (
-          <Typography>Falha ao carregar indicadores</Typography>
+          <Typography color="error.main">
+            Falha ao carregar indicadores
+          </Typography>
         )}
-        <Card>
-          <CardContent>
-            <Typography>Pedidos</Typography>
-            <Typography>{summary.data?.orders.count ?? 0}</Typography>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <Typography>Estoque disponível</Typography>
-            <Typography>{summary.data?.inventory.available ?? 0}</Typography>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <Typography>Viagens abertas</Typography>
-            <Typography>{summary.data?.openTrips ?? 0}</Typography>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <Typography>Recebimentos pendentes</Typography>
-            <Typography>{summary.data?.pendingReceiving ?? 0}</Typography>
-          </CardContent>
-        </Card>
-        <Typography>
-          Indicadores calculados somente com dados reais da loja ativa.
-        </Typography>
+        <Box
+          display="grid"
+          gridTemplateColumns={{ xs: "1fr", sm: "repeat(2, 1fr)" }}
+          gap={2}
+        >
+          {indicators.map((indicator) => (
+            <ContentCard key={indicator.label}>
+              <Typography color="text.secondary" variant="body2">
+                {indicator.label}
+              </Typography>
+              <Typography fontSize="2rem" fontWeight={700} lineHeight={1.1} mt={1}>
+                {indicator.value}
+              </Typography>
+            </ContentCard>
+          ))}
+        </Box>
+        <ContentCard
+          title="Dados da operação"
+          description="Indicadores calculados somente com dados reais da loja ativa."
+        >
+          <Typography color="text.secondary" variant="body2">
+            Os módulos operacionais permanecem disponíveis na navegação principal.
+          </Typography>
+        </ContentCard>
       </Stack>
-    </Box>
+    </PageContainer>
   );
 }
 
@@ -2212,7 +2221,7 @@ export function NotFoundPage() {
 export function AppRoutes() {
   return (
     <QueryClientProvider client={queryClient}>
-      <ThemeProvider theme={theme}>
+      <ThemeProvider theme={appTheme}>
         <CssBaseline />
         <Routes>
           <Route path="/" element={<Navigate to="/operacao" replace />} />

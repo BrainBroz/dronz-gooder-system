@@ -19,8 +19,28 @@ import {
   ReportsPage,
   queryClient
 } from "../src/app";
+import { ContentCard } from "../src/components/ui/ContentCard";
+import { PageContainer } from "../src/components/ui/PageContainer";
+import { PageHeader } from "../src/components/ui/PageHeader";
+import { appTheme, visualTokens } from "../src/theme";
 
 describe("web app", () => {
+  it("aplica a fundação visual oficial em componentes compartilhados", () => {
+    const html = renderToStaticMarkup(
+      <PageContainer>
+        <PageHeader title="Operação" description="Loja ativa: Dronz" />
+        <ContentCard title="Dados da operação">Conteúdo real</ContentCard>
+      </PageContainer>
+    );
+
+    expect(html).toContain("Operação");
+    expect(html).toContain("Loja ativa: Dronz");
+    expect(html).toContain("Dados da operação");
+    expect(visualTokens.dronz).toBe("#a78bfa");
+    expect(visualTokens.gooder).toBe("#2dd4bf");
+    expect(appTheme.palette.background.default).toBe(visualTokens.bg);
+  });
+
   it("redireciona a raiz para o fluxo autenticado", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter initialEntries={["/"]}>
