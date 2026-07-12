@@ -1,281 +1,129 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
 import { PrismaClient } from "@prisma/client";
+import { createOperationalFixture } from "./helpers/operational-fixture";
 
-process.env.DATABASE_URL =
-  process.env.DATABASE_TEST_URL ??
-  "postgresql://postgres:postgres@localhost:5432/dronz_gooder_test?schema=public";
+process.env.DATABASE_URL = process.env.DATABASE_TEST_URL ?? "postgresql://postgres:postgres@localhost:5432/dronz_gooder_test?schema=public";
 process.env.WEB_ORIGIN = "http://localhost:5173";
 process.env.JWT_ACCESS_SECRET = "change-me-access";
 process.env.JWT_REFRESH_SECRET = "change-me-refresh";
 process.env.JWT_ACCESS_EXPIRES_IN = "15m";
 process.env.JWT_REFRESH_EXPIRES_IN = "30d";
-
 const prisma = new PrismaClient();
 let createApp: typeof import("../src/app").createApp;
+let fixture: Awaited<ReturnType<typeof createOperationalFixture>> | undefined;
+beforeAll(async () => ({ createApp } = await import("../src/app")));
+afterEach(async () => { await fixture?.cleanup(); fixture = undefined; });
+afterAll(() => prisma.$disconnect());
 
-beforeAll(async () => {
-  ({ createApp } = await import("../src/app"));
-});
-
-beforeEach(async () => {
-  // Reset any test data
-});
-
-afterAll(async () => {
-  await prisma.$disconnect();
-});
-
-async function session() {
+async function context() {
   const app = createApp();
-  const login = await request(app)
-    .post("/auth/login")
-    .send({ email: "admin@example.com", password: "change-me" });
-  const d = login.body.stores.find((x: { slug: string }) => x.slug === "dronz");
-  const h = (id: string) => ({
-    Authorization: `Bearer ${login.body.accessToken}`,
-    "x-store-id": id
-  });
-  return { app, d, h };
+  const login = await request(app).post("/auth/login").send({ email: "admin@example.com", password: "change-me" });
+  const store = login.body.stores.find((item: { slug: string }) => item.slug === "dronz");
+  fixture = await createOperationalFixture(prisma, store.id);
+  const headers = { Authorization: `Bearer ${login.body.accessToken}`, "x-store-id": store.id };
+  return { app, store, data: fixture, headers };
 }
 
 describe("Batch 3.1 — Complementação da Logística", () => {
-  it("atualiza viajante (nome, email, telefone, observacoes, ativo)", async () => {
-    const { app, d, h } = await session();
-    const traveler = await prisma.viajante.findFirst({
-      where: { lojaId: d.id }
+  it("atualiza viajante", async () => {
+    const { app, data, headers } = await context();
+    const result = await request(app).patch(`/logistics/travelers/${data.traveler.id}`).set(headers).send({
+      nome: "João Atualizado", email: "joao@example.com", telefone: "21999999999", observacoes: "Atualizado"
     });
-
-    if (traveler) {
-      const updated = await request(app)
-        .patch(`/logistics/travelers/${traveler.id}`)
-        .set(h(d.id))
-        .send({
-          nome: "João Atualizado",
-          email: "joao@example.com",
-          telefone: "21999999999",
-          observacoes: "Atualizado em teste"
-        });
-
-      expect(updated.status).toBe(200);
-      expect(updated.body.nome).toBe("João Atualizado");
-      expect(updated.body.email).toBe("joao@example.com");
-    }
+    expect(result.status).toBe(200);
+    expect(result.body.nome).toBe("João Atualizado");
+    expect(result.body.email).toBe("joao@example.com");
   });
 
-  it("desativa viajante (ativo=false)", async () => {
-    const { app, d, h } = await session();
-    const traveler = await prisma.viajante.findFirst({
-      where: { lojaId: d.id, ativo: true }
-    });
-
-    if (traveler) {
-      const deactivated = await request(app)
-        .patch(`/logistics/travelers/${traveler.id}`)
-        .set(h(d.id))
-        .send({ ativo: false });
-
-      expect(deactivated.status).toBe(200);
-      expect(deactivated.body.ativo).toBe(false);
-    }
+  it("desativa viajante", async () => {
+    const { app, data, headers } = await context();
+    const result = await request(app).patch(`/logistics/travelers/${data.traveler.id}`).set(headers).send({ ativo: false });
+    expect(result.status).toBe(200);
+    expect(result.body.ativo).toBe(false);
   });
 
-  it("deleta viajante apenas se não tem viagens", async () => {
-    const { app, d, h } = await session();
-    const travelers = await prisma.viajante.findMany({
-      where: { lojaId: d.id },
-      include: { viagens: true }
-    });
-    const travellerWithoutTrips = travelers.find((t) => t.viagens.length === 0);
-
-    if (travellerWithoutTrips) {
-      const deleted = await request(app)
-        .delete(`/logistics/travelers/${travellerWithoutTrips.id}`)
-        .set(h(d.id));
-
-      expect(deleted.status).toBe(200);
-
-      const verify = await prisma.viajante.findUnique({
-        where: { id: travellerWithoutTrips.id }
-      });
-      expect(verify).toBeNull();
-    }
+  it("deleta viajante sem viagens", async () => {
+    const { app, store, headers } = await context();
+    const traveler = await prisma.viajante.create({ data: { lojaId: store.id, nome: "Sem viagem" } });
+    const result = await request(app).delete(`/logistics/travelers/${traveler.id}`).set(headers);
+    expect(result.status).toBe(200);
+    expect(await prisma.viajante.findUnique({ where: { id: traveler.id } })).toBeNull();
   });
 
-  it("bloqueia deleção de viajante com viagens", async () => {
-    const { app, d, h } = await session();
-    const travelers = await prisma.viajante.findMany({
-      where: { lojaId: d.id },
-      include: { viagens: true }
-    });
-    const travellerWithTrips = travelers.find((t) => t.viagens.length > 0);
-
-    if (travellerWithTrips) {
-      const deleted = await request(app)
-        .delete(`/logistics/travelers/${travellerWithTrips.id}`)
-        .set(h(d.id));
-
-      expect(deleted.status).toBe(409);
-    }
+  it("bloqueia deleção de viajante com viagem", async () => {
+    const { app, data, headers } = await context();
+    const result = await request(app).delete(`/logistics/travelers/${data.traveler.id}`).set(headers);
+    expect(result.status).toBe(409);
   });
 
-  it("atualiza viagem (datas, origem, destino, observacoes) apenas se PLANNED", async () => {
-    const { app, d, h } = await session();
-    const trip = await prisma.viagem.findFirst({
-      where: { lojaId: d.id, status: "PLANNED" }
+  it("atualiza viagem PLANNED", async () => {
+    const { app, data, headers } = await context();
+    await prisma.viagem.update({ where: { id: data.trip.id }, data: { status: "PLANNED" } });
+    const result = await request(app).patch(`/logistics/trips/${data.trip.id}`).set(headers).send({
+      origem: "Nova York", destino: "Rio de Janeiro", observacoes: "Atualizada"
     });
-
-    if (trip) {
-      const updated = await request(app)
-        .patch(`/logistics/trips/${trip.id}`)
-        .set(h(d.id))
-        .send({
-          origem: "Nova York",
-          destino: "Rio de Janeiro",
-          observacoes: "Trip atualizado em teste"
-        });
-
-      expect(updated.status).toBe(200);
-      expect(updated.body.origem).toBe("Nova York");
-      expect(updated.body.destino).toBe("Rio de Janeiro");
-    }
+    expect(result.status).toBe(200);
+    expect(result.body.origem).toBe("Nova York");
+    expect(result.body.destino).toBe("Rio de Janeiro");
   });
 
-  it("bloqueia atualização de viagem se não está PLANNED", async () => {
-    const { app, d, h } = await session();
-    const trip = await prisma.viagem.findFirst({
-      where: { lojaId: d.id, status: { not: "PLANNED" } }
-    });
-
-    const updated = await request(app)
-      .patch(`/logistics/trips/${trip.id}`)
-      .set(h(d.id))
-      .send({ origem: "Outro lugar" });
-
-    expect(updated.status).toBe(409);
+  it("bloqueia atualização de viagem fora de PLANNED", async () => {
+    const { app, data, headers } = await context();
+    const result = await request(app).patch(`/logistics/trips/${data.trip.id}`).set(headers).send({ origem: "Outro lugar" });
+    expect(result.status).toBe(409);
   });
 
-  it("deleta viagem apenas se PLANNED", async () => {
-    const { app, d, h } = await session();
-    const trip = await prisma.viagem.findFirst({
-      where: { lojaId: d.id, status: "PLANNED" }
-    });
-
-    if (trip) {
-      const deleted = await request(app)
-        .delete(`/logistics/trips/${trip.id}`)
-        .set(h(d.id));
-
-      expect(deleted.status).toBe(200);
-
-      const verify = await prisma.viagem.findUnique({
-        where: { id: trip.id }
-      });
-      expect(verify).toBeNull();
-    }
+  it("deleta viagem PLANNED sem dependências", async () => {
+    const { app, store, data, headers } = await context();
+    const trip = await prisma.viagem.create({ data: {
+      lojaId: store.id, viajanteId: data.traveler.id, origem: "Miami", destino: "Brasil",
+      partidaEm: new Date(Date.now() + 86_400_000), chegadaPrevistaEm: new Date(Date.now() + 172_800_000), status: "PLANNED"
+    } });
+    const result = await request(app).delete(`/logistics/trips/${trip.id}`).set(headers);
+    expect(result.status).toBe(200);
+    expect(await prisma.viagem.findUnique({ where: { id: trip.id } })).toBeNull();
   });
 
-  it("atualiza mala (código, limitePesoKg, observacoes) apenas se PLANNING", async () => {
-    const { app, d, h } = await session();
-    const mala = await prisma.mala.findFirst({
-      where: { lojaId: d.id, status: "PLANNING" }
+  it("atualiza mala em planejamento", async () => {
+    const { app, data, headers } = await context();
+    const result = await request(app).patch(`/logistics/suitcases/${data.bag.id}`).set(headers).send({
+      codigo: `UPDATED-${data.bag.id}`, limitePesoKg: 20, observacoes: "Atualizada"
     });
-
-    if (mala) {
-      const updated = await request(app)
-        .patch(`/logistics/suitcases/${mala.id}`)
-        .set(h(d.id))
-        .send({
-          codigo: "MALA-ATUALIZADA",
-          limitePesoKg: 20,
-          observacoes: "Mala atualizada"
-        });
-
-      expect(updated.status).toBe(200);
-      expect(updated.body.codigo).toBe("MALA-ATUALIZADA");
-      expect(Number(updated.body.limitePesoKg)).toBe(20);
-    }
+    expect(result.status).toBe(200);
+    expect(Number(result.body.limitePesoKg)).toBe(20);
   });
 
-  it("deleta mala apenas se PLANNING e sem alocações", async () => {
-    const { app, d, h } = await session();
-    const mala = await prisma.mala.findFirst({
-      where: { lojaId: d.id, status: "PLANNING" },
-      include: { alocacoes: true }
-    });
-
-    if (mala && mala.alocacoes.length === 0) {
-      const deleted = await request(app)
-        .delete(`/logistics/suitcases/${mala.id}`)
-        .set(h(d.id));
-
-      expect(deleted.status).toBe(200);
-
-      const verify = await prisma.mala.findUnique({
-        where: { id: mala.id }
-      });
-      expect(verify).toBeNull();
-    }
+  it("deleta mala em planejamento sem alocações", async () => {
+    const { app, store, data, headers } = await context();
+    const bag = await prisma.mala.create({ data: { lojaId: store.id, viagemId: data.trip.id, codigo: `EMPTY-${data.bag.id}` } });
+    const result = await request(app).delete(`/logistics/suitcases/${bag.id}`).set(headers);
+    expect(result.status).toBe(200);
+    expect(await prisma.mala.findUnique({ where: { id: bag.id } })).toBeNull();
   });
 
-  it("atualiza volume (código, taraKg) apenas se mala está PLANNING", async () => {
-    const { app, d, h } = await session();
-    const mala = await prisma.mala.findFirst({
-      where: { lojaId: d.id, status: "PLANNING" },
-      include: { volumes: true }
+  it("atualiza volume de mala em planejamento", async () => {
+    const { app, data, headers } = await context();
+    const result = await request(app).patch(`/logistics/suitcases/${data.bag.id}/volumes/${data.volume.id}`).set(headers).send({
+      codigo: `UPDATED-${data.volume.id}`, taraKg: 0.8
     });
-
-    if (mala && mala.volumes.length > 0) {
-      const vol = mala.volumes[0];
-      const updated = await request(app)
-        .patch(`/logistics/suitcases/${mala.id}/volumes/${vol.id}`)
-        .set(h(d.id))
-        .send({ codigo: "VOL-ATUALIZADO", taraKg: 0.8 });
-
-      expect(updated.status).toBe(200);
-      expect(updated.body.codigo).toBe("VOL-ATUALIZADO");
-    }
+    expect(result.status).toBe(200);
+    expect(Number(result.body.taraKg)).toBe(0.8);
   });
 
-  it("deleta alocação apenas se mala está PLANNING", async () => {
-    const { app, d, h } = await session();
-    const alocacao = await prisma.alocacaoMala.findFirst({
-      where: { lojaId: d.id, mala: { status: "PLANNING" } },
-      include: { mala: true }
-    });
-
-    if (alocacao) {
-      const deleted = await request(app)
-        .delete(`/logistics/allocations/${alocacao.id}`)
-        .set(h(d.id));
-
-      expect(deleted.status).toBe(200);
-
-      const verify = await prisma.alocacaoMala.findUnique({
-        where: { id: alocacao.id }
-      });
-      expect(verify).toBeNull();
-    }
+  it("deleta alocação de mala em planejamento", async () => {
+    const { app, data, headers } = await context();
+    const result = await request(app).delete(`/logistics/allocations/${data.allocation.id}`).set(headers);
+    expect(result.status).toBe(200);
+    expect(await prisma.alocacaoMala.findUnique({ where: { id: data.allocation.id } })).toBeNull();
   });
 
-  it("bloqueia operações após imutabilidade (checkpoint)", async () => {
-    const { app, d, h } = await session();
-    const mala = await prisma.mala.findFirst({
-      where: { lojaId: d.id, status: { not: "PLANNING" } }
-    });
-
-    if (mala) {
-      const updateMala = await request(app)
-        .patch(`/logistics/suitcases/${mala.id}`)
-        .set(h(d.id))
-        .send({ codigo: "NOVO" });
-
-      const deleteMala = await request(app)
-        .delete(`/logistics/suitcases/${mala.id}`)
-        .set(h(d.id));
-
-      expect(updateMala.status).toBe(409);
-      expect(deleteMala.status).toBe(409);
-    }
+  it("bloqueia mutação da mala após checkpoint", async () => {
+    const { app, data, headers } = await context();
+    await prisma.mala.update({ where: { id: data.bag.id }, data: { status: "CLOSED" } });
+    const update = await request(app).patch(`/logistics/suitcases/${data.bag.id}`).set(headers).send({ codigo: "NOVO" });
+    const remove = await request(app).delete(`/logistics/suitcases/${data.bag.id}`).set(headers);
+    expect(update.status).toBe(409);
+    expect(remove.status).toBe(409);
   });
 });

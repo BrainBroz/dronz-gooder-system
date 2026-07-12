@@ -14,7 +14,7 @@ import { purchasingQueryKeys } from "../queryKeys";
 import type { Supplier, PurchaseOrder } from "../types/purchasing";
 import { useProducts } from "../hooks/useCatalog";
 
-export function PurchaseOrdersPage() {
+function PurchaseOrdersContent() {
   const store = useAuthStore((s) => s.activeStoreId);
   const client = useQueryClient();
   const { products } = useProducts();
@@ -95,10 +95,6 @@ export function PurchaseOrdersPage() {
       form.reset();
     }
   });
-  React.useEffect(() => {
-    form.reset();
-    createOrder.reset();
-  }, [store, form, createOrder]);
   return (
     <PageContainer>
       <Stack gap={{ xs: 2.5, md: 3.5 }}>
@@ -126,8 +122,8 @@ export function PurchaseOrdersPage() {
                     label="Fornecedor"
                     sx={{ minWidth: 180 }}
                   >
-                    {suppliers.data
-                      ?.filter((s) => s.ativo)
+                    {(suppliers.data ?? [])
+                      .filter((s) => s.ativo)
                       .map((s) => (
                         <MenuItem key={s.id} value={s.id}>
                           {s.nome}
@@ -208,4 +204,9 @@ export function PurchaseOrdersPage() {
       </Stack>
     </PageContainer>
   );
+}
+
+export function PurchaseOrdersPage() {
+  const store = useAuthStore((state) => state.activeStoreId);
+  return <PurchaseOrdersContent key={store} />;
 }

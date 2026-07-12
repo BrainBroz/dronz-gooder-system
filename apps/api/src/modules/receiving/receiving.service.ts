@@ -180,6 +180,17 @@ export async function entradaDefinitiva(
     });
     if (!checkpointBrasil) throw new AppError(409, "missing_checkpoint_brasil");
 
+    const entradaExistente = await tx.estoqueEntrada.findFirst({
+      where: { lojaId, viagemId: d.viagemId, malaId: d.malaId }
+    });
+
+    if (entradaExistente) {
+      if (entradaExistente.status === "COMPLETED") {
+        return entradaExistente;
+      }
+      throw new AppError(409, "entrada_already_processing");
+    }
+
     const itens = await tx.recebimentoItem.findMany({
       where: {
         recebimento: {
@@ -195,17 +206,6 @@ export async function entradaDefinitiva(
       (i) => i.quantidadeRecebida - i.quantidadeRejeitada - i.quantidadeJaIncorporada > 0
     );
     if (!temApta) throw new AppError(409, "no_apt_quantity");
-
-    const entradaExistente = await tx.estoqueEntrada.findFirst({
-      where: { lojaId, viagemId: d.viagemId, malaId: d.malaId }
-    });
-
-    if (entradaExistente) {
-      if (entradaExistente.status === "COMPLETED") {
-        return entradaExistente;
-      }
-      throw new AppError(409, "entrada_already_processing");
-    }
 
     const entrada = await tx.estoqueEntrada.create({
       data: {

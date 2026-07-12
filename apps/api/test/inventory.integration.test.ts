@@ -1,6 +1,7 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
 import { PrismaClient } from "@prisma/client";
+import { createOperationalFixture } from "./helpers/operational-fixture";
 process.env.DATABASE_URL =
   process.env.DATABASE_TEST_URL ??
   "postgresql://postgres:postgres@localhost:5432/dronz_gooder_test?schema=public";
@@ -14,17 +15,10 @@ let createApp: typeof import("../src/app").createApp;
 beforeAll(async () => {
   ({ createApp } = await import("../src/app"));
 });
-beforeEach(async () => {
-  await prisma.movimentacaoEstoque.deleteMany();
-  await prisma.recebimentoItem.deleteMany();
-  await prisma.recebimento.deleteMany();
-  await prisma.estoque.updateMany({
-    data: { quantidadeFisica: 0, quantidadeReservada: 0 }
-  });
-  await prisma.viagem.updateMany({
-    data: { status: "OPEN_FOR_ALLOCATION", chegadaRealEm: null }
-  });
-  await prisma.mala.updateMany({ data: { status: "PLANNING" } });
+let fixture: Awaited<ReturnType<typeof createOperationalFixture>> | undefined;
+afterEach(async () => {
+  await fixture?.cleanup();
+  fixture = undefined;
 });
 afterAll(async () => {
   await prisma.$disconnect();
@@ -48,12 +42,8 @@ const headers = (token: string, id: string) => ({
 describe("receiving and inventory", () => {
   it("bloqueia antes do Brasil e confirma entrada atômica após chegada", async () => {
     const { app, token, dronz } = await session();
-    const trip = await prisma.viagem.findFirstOrThrow({
-      where: { lojaId: dronz.id }
-    });
-    const bag = await prisma.mala.findFirstOrThrow({
-      where: { lojaId: dronz.id }
-    });
+    fixture = await createOperationalFixture(prisma, dronz.id);
+    const { trip, bag } = fixture;
     expect(
       (
         await request(app)
@@ -75,9 +65,11 @@ describe("receiving and inventory", () => {
       .set(headers(token, dronz.id))
       .send({ viagemId: trip.id, malaId: bag.id });
     expect(created.status).toBe(200);
-    const detail = (
-      await request(app).get("/receiving").set(headers(token, dronz.id))
-    ).body[0];
+    const detail = await prisma.recebimento.findUniqueOrThrow({
+      where: { id: created.body.id },
+      include: { itens: true }
+    });
+    expect(detail.itens).toHaveLength(1);
     await prisma.recebimentoItem.update({
       where: { id: detail.itens[0].id },
       data: { quantidadeEsperada: 2 }
@@ -116,12 +108,11 @@ describe("receiving and inventory", () => {
   });
   it("reserva, libera, baixa e isola lojas", async () => {
     const { app, token, dronz, gooder } = await session();
-    const stock = await prisma.estoque.findFirstOrThrow({
-      where: { lojaId: dronz.id }
-    });
-    await prisma.estoque.update({
-      where: { id: stock.id },
-      data: { quantidadeFisica: 3 }
+    fixture = await createOperationalFixture(prisma, dronz.id);
+    const stock = await prisma.estoque.upsert({
+      where: { lojaId_produtoId: { lojaId: dronz.id, produtoId: fixture.product.id } },
+      create: { lojaId: dronz.id, produtoId: fixture.product.id, quantidadeFisica: 3 },
+      update: { quantidadeFisica: 3, quantidadeReservada: 0 }
     });
     const move = (tipo: string, motivo: string, q = 1, observacoes?: string) =>
       request(app)

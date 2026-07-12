@@ -1,6 +1,7 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
 import { PrismaClient } from "@prisma/client";
+import { createOperationalFixture } from "./helpers/operational-fixture";
 process.env.DATABASE_URL =
   process.env.DATABASE_TEST_URL ??
   "postgresql://postgres:postgres@localhost:5432/dronz_gooder_test?schema=public";
@@ -14,15 +15,10 @@ let createApp: typeof import("../src/app").createApp;
 beforeAll(async () => {
   ({ createApp } = await import("../src/app"));
 });
-beforeEach(async () => {
-  await prisma.recebimentoMiami.deleteMany();
-  await prisma.pedidoCompraItem.updateMany({
-    data: { quantidadeRecebidaMiami: 0 }
-  });
-  await prisma.pedidoCompra.updateMany({
-    where: { numeroPedido: { startsWith: "SEED-" } },
-    data: { status: "DRAFT" }
-  });
+let fixture: Awaited<ReturnType<typeof createOperationalFixture>> | undefined;
+afterEach(async () => {
+  await fixture?.cleanup();
+  fixture = undefined;
 });
 afterAll(() => prisma.$disconnect());
 async function s() {
@@ -44,13 +40,15 @@ const h = (t: string, id: string) => ({
 describe("international logistics", () => {
   it("isola lojas, omite documento e calcula conteúdo mais tara", async () => {
     const { app, t, d, g } = await s();
+    fixture = await createOperationalFixture(prisma, d.id);
     const travelers = await request(app)
       .get("/logistics/travelers")
       .set(h(t, d.id));
     expect(travelers.status).toBe(200);
-    expect(travelers.body[0].documento).toBeUndefined();
-    const bags = await request(app).get("/logistics/suitcases").set(h(t, d.id));
-    const bag = bags.body[0];
+    const traveler = travelers.body.find((item: { id: string }) => item.id === fixture?.traveler.id);
+    expect(traveler).toBeTruthy();
+    expect(traveler.documento).toBeUndefined();
+    const bag = fixture.bag;
     const weight = await request(app)
       .get(`/logistics/suitcases/${bag.id}/weight`)
       .set(h(t, d.id));
@@ -67,8 +65,8 @@ describe("international logistics", () => {
   });
   it("valida transições e confirmação Miami sem gerar estoque", async () => {
     const { app, t, d } = await s();
-    const trip = (await request(app).get("/logistics/trips").set(h(t, d.id)))
-      .body[0];
+    fixture = await createOperationalFixture(prisma, d.id);
+    const { trip, item } = fixture;
     expect(
       (
         await request(app)
@@ -77,13 +75,6 @@ describe("international logistics", () => {
           .send({ status: "ARRIVED_BRAZIL" })
       ).status
     ).toBe(409);
-    const item = await prisma.pedidoCompraItem.findFirstOrThrow({
-      where: { lojaId: d.id }
-    });
-    await prisma.pedidoCompraItem.update({
-      where: { id: item.id },
-      data: { quantidade: 2 }
-    });
     const partial = await request(app)
       .post("/logistics/miami-confirmations")
       .set(h(t, d.id))
@@ -116,9 +107,5 @@ describe("international logistics", () => {
         })
       ).status
     ).toBe("RECEIVED_MIAMI");
-    await prisma.pedidoCompraItem.update({
-      where: { id: item.id },
-      data: { quantidade: item.quantidade }
-    });
   });
 });

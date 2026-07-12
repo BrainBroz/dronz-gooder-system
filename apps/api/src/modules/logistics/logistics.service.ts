@@ -416,7 +416,6 @@ export async function confirmParaguai(
     if (!mala) throw new AppError(404, "not_found");
     const checkpoint = await tx.checkpointParaguai.create({
       data: {
-        id: `cp-py-${Date.now()}`,
         lojaId,
         viagemId: d.viagemId,
         malaId: d.malaId,
@@ -452,7 +451,6 @@ export async function confirmBrasil(
     if (!mala) throw new AppError(404, "not_found");
     const checkpoint = await tx.checkpointBrasil.create({
       data: {
-        id: `cp-br-${Date.now()}`,
         lojaId,
         viagemId: d.viagemId,
         malaId: d.malaId,

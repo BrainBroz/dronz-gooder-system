@@ -22,7 +22,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { appTheme } from "./theme";
 import { api, queryClient } from "./api/client";
-import { authHeader, useAuthStore } from "./stores/auth";
+import { useAuthStore } from "./stores/auth";
 import { extractErrorMessage } from "./utils/errors";
 import { DashboardPage } from "./pages/DashboardPage";
 import { CategoriesPage } from "./pages/CategoriesPage";
@@ -39,20 +39,12 @@ const loginSchema = z.object({
   password: z.string().min(1, "Senha obrigatória")
 });
 
-async function loadSession() {
+export async function loadSession() {
   try {
     const refreshed = await api.post("/auth/refresh");
-    useAuthStore.getState().setSession({
-      accessToken: refreshed.data.accessToken,
-      user: useAuthStore.getState().user ?? {
-        id: "",
-        name: "",
-        email: "",
-        active: true
-      },
-      stores: useAuthStore.getState().stores
+    const response = await api.get("/auth/me", {
+      headers: { Authorization: `Bearer ${refreshed.data.accessToken}` }
     });
-    const response = await api.get("/auth/me", { headers: authHeader() });
     useAuthStore.getState().setSession({
       accessToken: refreshed.data.accessToken,
       user: response.data.user,
@@ -69,7 +61,7 @@ async function loadSession() {
   }
 }
 
-function AuthGate({ children }: { children: React.ReactNode }) {
+export function AuthGate({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = React.useState(false);
   const accessToken = useAuthStore((state) => state.accessToken);
   React.useEffect(() => {
@@ -164,15 +156,20 @@ export function LoginPage() {
   );
 }
 
-function Shell({ children }: { children: React.ReactNode }) {
+export function Shell({ children }: { children: React.ReactNode }) {
   const { user, stores, activeStoreId, setActiveStoreId, clear } =
     useAuthStore();
   const navigate = useNavigate();
   const logout = async () => {
-    await api.post("/auth/logout");
-    queryClient.clear();
-    clear();
-    navigate("/login");
+    try {
+      await api.post("/auth/logout");
+    } catch {
+      // A intenção de sair deve encerrar a sessão local mesmo sem resposta da API.
+    } finally {
+      queryClient.clear();
+      clear();
+      navigate("/login");
+    }
   };
   return (
     <Box sx={{ display: "flex" }}>
