@@ -553,14 +553,6 @@ enum EstoqueEntradaStatus {
   REJECTED
 }
 
-enum CondicaoProduto {
-  NEW
-  NEW_TERCEIRO
-  USED
-  USED_NO_CABLES
-  OPEN_BOX
-}
-
 enum TipoDivergenciaMiami {
   CORRETO
   FALTANTE
@@ -653,7 +645,6 @@ model RecebimentoItem {
   quantidadeRecebida          Int              @default(0)
   quantidadeRejeitada         Int              @default(0)
   quantidadeJaIncorporada     Int              @default(0)
-  condicao                    CondicaoProduto?
   observacoes                 String?
   createdAt                   DateTime         @default(now())
   updatedAt                   DateTime         @updatedAt
