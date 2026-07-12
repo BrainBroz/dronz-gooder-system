@@ -490,7 +490,13 @@ export async function confirmBrasil(
     const paraguay = await tx.checkpointParaguai.findFirst({
       where: { lojaId, viagemId: d.viagemId, malaId: d.malaId, supersededAt: null }
     });
-    assertBrazilTransition(viagem, mala, Boolean(paraguay));
+    const paraguayProjection = paraguay ? await tx.projecaoOperacional.findUnique({
+      where: { lojaId_entity_entityId: { lojaId, entity: "CheckpointParaguai", entityId: paraguay.id } }
+    }) : null;
+    const effectiveParaguay = paraguay ? {
+      tipoDivergencia: (paraguayProjection?.state as { tipoDivergencia?: string } | null)?.tipoDivergencia ?? paraguay.tipoDivergencia
+    } : null;
+    assertBrazilTransition(viagem, mala, effectiveParaguay);
     const checkpoint = await tx.checkpointBrasil.create({
       data: {
         lojaId,

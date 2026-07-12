@@ -191,7 +191,7 @@ model EventoCorretivo {
   entity            String
   entityId          String
   originalEventId   String
-  correctionType    String
+  correctionType    TipoCorrecaoOperacional
   reason            String
   beforeData        Json
   afterData         Json
@@ -204,6 +204,26 @@ model EventoCorretivo {
   @@index([lojaId, entity, entityId, createdAt])
   @@index([originalEventId])
   @@index([correlationId])
+}
+
+enum TipoCorrecaoOperacional {
+  DIVERGENCIA
+  AJUSTE_RECEBIMENTO
+  STOCK_COMPENSATION
+}
+
+model ProjecaoOperacional {
+  id        String   @id @default(cuid())
+  lojaId    String
+  entity    String
+  entityId  String
+  state     Json
+  version   Int      @default(1)
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@unique([lojaId, entity, entityId])
+  @@index([lojaId, entity, updatedAt])
 }
 
 model Categoria {
@@ -635,6 +655,15 @@ enum TipoDivergenciaBrasil {
   LACRE_ROMPIDO
 }
 
+enum TipoDivergenciaRecebimento {
+  CORRETO
+  FALTA
+  EXCESSO
+  AVARIA
+  ITEM_INCORRETO
+  OUTRO
+}
+
 enum DespesaCategoria {
   PROLABORE
   OPERACIONAL
@@ -698,6 +727,8 @@ model RecebimentoItem {
   quantidadeRejeitada         Int              @default(0)
   quantidadeJaIncorporada     Int              @default(0)
   observacoes                 String?
+  tipoDivergencia             TipoDivergenciaRecebimento @default(CORRETO)
+  divergenciaResolvida        Boolean                     @default(true)
   createdAt                   DateTime         @default(now())
   updatedAt                   DateTime         @updatedAt
   loja                        Loja             @relation(fields: [lojaId], references: [id], onDelete: Restrict)
@@ -768,7 +799,10 @@ model MovimentacaoEstoque {
   estoque             Estoque                   @relation(fields: [estoqueId, lojaId], references: [id, lojaId], onDelete: Restrict)
   recebimento         Recebimento?              @relation(fields: [recebimentoId, lojaId], references: [id, lojaId], onDelete: Restrict)
   responsavel         Usuario                   @relation(fields: [responsavelId], references: [id], onDelete: Restrict)
+  movimentoOriginal   MovimentacaoEstoque?      @relation("MovimentoCompensacao", fields: [movimentoOriginalId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  compensacoes        MovimentacaoEstoque[]     @relation("MovimentoCompensacao")
 
+  @@unique([id, lojaId])
   @@index([lojaId, produtoId, createdAt])
   @@index([lojaId, tipo])
   @@index([movimentoOriginalId])

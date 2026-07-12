@@ -137,11 +137,16 @@ describe("UI-3C backend", () => {
     await arrive(data);
     const original = await request(app).post("/logistics/checkpoint-brasil").set(headers()).send({ viagemId: data.trip.id, malaId: data.bag.id, confirmadoEm: new Date().toISOString(), tipoDivergencia: "CORRETO" });
     const correction = await request(app).post("/operations/corrections").set(headers(undefined, randomUUID())).send({
-      entity: "CheckpointBrasil", originalEventId: original.body.id, correctionType: "DIVERGENCE", reason: "Avaria constatada", after: { tipoDivergencia: "AVARIA" }
+      entity: "CheckpointBrasil", originalEventId: original.body.id, correctionType: "DIVERGENCIA", reason: "Avaria constatada", after: { tipoDivergencia: "AVARIA" }
     });
     expect(correction.status).toBe(200);
     expect((await prisma.checkpointBrasil.findUniqueOrThrow({ where: { id: original.body.id } })).tipoDivergencia).toBe("CORRETO");
     expect((await prisma.eventoCorretivo.findUniqueOrThrow({ where: { id: correction.body.id } })).originalEventId).toBe(original.body.id);
+    const projected = await request(app).get("/operations/brazil/candidates").set(headers());
+    const candidate = projected.body.find((entry: { id: string }) => entry.id === data.bag.id);
+    expect(candidate.status).toBe("DIVERGENT");
+    expect(candidate.allowedActions).toEqual([]);
+    expect(candidate.checkpoint.tipoDivergencia).toBe("AVARIA");
   });
 
   it("read model de Brasil informa bloqueio e depois ação permitida", async () => {
@@ -176,6 +181,10 @@ describe("UI-3C backend", () => {
       iniciadoEm: new Date(), concluidoEm: new Date(), confirmadoPorId: data.admin.id,
       itens: { create: { pedidoCompraItemId: data.item.id, produtoId: data.product.id, quantidadeEsperada: 2, quantidadeRecebida: 2 } }
     } });
+    await prisma.recebimentoMiami.create({ data: {
+      lojaId: data.bag.lojaId, pedidoCompraItemId: data.item.id, quantidadeRecebida: 2,
+      recebidoEm: new Date(), confirmadoPorId: data.admin.id
+    } });
     const candidates = await request(app).get("/operations/definitive-entry/candidates").set(headers());
     const candidate = candidates.body.find((entry: { id: string }) => entry.id === receipt.id);
     expect(candidate.impactQuantity).toBe(2);
@@ -187,7 +196,7 @@ describe("UI-3C backend", () => {
     const data = await fixture();
     await arrive(data);
     const checkpoint = await prisma.checkpointBrasil.create({ data: { lojaId: data.bag.lojaId, viagemId: data.trip.id, malaId: data.bag.id, confirmadoPorId: data.admin.id, confirmadoEm: new Date() } });
-    const stock = await prisma.estoque.create({ data: { lojaId: data.bag.lojaId, produtoId: data.product.id, quantidadeFisica: 5 } });
+    const stock = await prisma.estoque.create({ data: { lojaId: data.bag.lojaId, produtoId: data.product.id, quantidadeFisica: 15 } });
     const originalMovement = await prisma.movimentacaoEstoque.create({ data: {
       lojaId: data.bag.lojaId, produtoId: data.product.id, estoqueId: stock.id, tipo: "ENTRY", motivo: "PURCHASE_RECEIPT",
       quantidade: 5, quantidadeAnterior: 0, quantidadePosterior: 5, responsavelId: data.admin.id
@@ -197,9 +206,111 @@ describe("UI-3C backend", () => {
       after: { tipoDivergencia: "AVARIA" }, adjustments: [{ productId: data.product.id, quantityDelta: -2, originalMovementId: originalMovement.id }]
     });
     expect(correction.status).toBe(200);
-    expect((await prisma.estoque.findUniqueOrThrow({ where: { id: stock.id } })).quantidadeFisica).toBe(3);
+    expect((await prisma.estoque.findUniqueOrThrow({ where: { id: stock.id } })).quantidadeFisica).toBe(13);
     const movement = await prisma.movimentacaoEstoque.findFirstOrThrow({ where: { movimentoOriginalId: originalMovement.id } });
     expect(movement.tipo).toBe("ADJUSTMENT_NEGATIVE");
-    expect(movement.quantidadePosterior).toBe(3);
+    expect(movement.quantidadePosterior).toBe(13);
+    const excessive = await request(app).post("/operations/corrections").set(headers(undefined, randomUUID())).send({
+      entity: "CheckpointBrasil", originalEventId: checkpoint.id, correctionType: "STOCK_COMPENSATION", reason: "Tentativa acima do original",
+      after: { tipoDivergencia: "AVARIA" }, adjustments: [{ productId: data.product.id, quantityDelta: -4, originalMovementId: originalMovement.id }]
+    });
+    expect(excessive.status).toBe(409);
+    expect(excessive.body.error).toBe("correction_exceeds_original");
+    const remaining = await request(app).post("/operations/corrections").set(headers(undefined, randomUUID())).send({
+      entity: "CheckpointBrasil", originalEventId: checkpoint.id, correctionType: "STOCK_COMPENSATION", reason: "Compensação restante",
+      after: { tipoDivergencia: "AVARIA" }, adjustments: [{ productId: data.product.id, quantityDelta: -3, originalMovementId: originalMovement.id }]
+    });
+    expect(remaining.status).toBe(200);
+    expect((await prisma.estoque.findUniqueOrThrow({ where: { id: stock.id } })).quantidadeFisica).toBe(10);
+  });
+
+  it("serializa compensações concorrentes sem ultrapassar o movimento original", async () => {
+    const { app, headers } = await session();
+    const data = await fixture();
+    await arrive(data);
+    const checkpoint = await prisma.checkpointBrasil.create({ data: { lojaId: data.bag.lojaId, viagemId: data.trip.id, malaId: data.bag.id, confirmadoPorId: data.admin.id, confirmadoEm: new Date() } });
+    const stock = await prisma.estoque.create({ data: { lojaId: data.bag.lojaId, produtoId: data.product.id, quantidadeFisica: 15 } });
+    const originalMovement = await prisma.movimentacaoEstoque.create({ data: {
+      lojaId: data.bag.lojaId, produtoId: data.product.id, estoqueId: stock.id, tipo: "ENTRY", motivo: "PURCHASE_RECEIPT",
+      quantidade: 5, quantidadeAnterior: 10, quantidadePosterior: 15, responsavelId: data.admin.id
+    } });
+    const send = () => request(app).post("/operations/corrections").set(headers(undefined, randomUUID())).send({
+      entity: "CheckpointBrasil", originalEventId: checkpoint.id, correctionType: "STOCK_COMPENSATION", reason: "Compensação concorrente",
+      after: { tipoDivergencia: "AVARIA" }, adjustments: [{ productId: data.product.id, quantityDelta: -4, originalMovementId: originalMovement.id }]
+    });
+    const responses = await Promise.all([send(), send()]);
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+    expect(await prisma.movimentacaoEstoque.count({ where: { movimentoOriginalId: originalMovement.id, tipo: "ADJUSTMENT_NEGATIVE" } })).toBe(1);
+  });
+
+  it("restringe overview e histórico do perfil Miami ao próprio escopo", async () => {
+    const store = await prisma.loja.findUniqueOrThrow({ where: { slug: "dronz" } });
+    const profile = await prisma.perfil.findUniqueOrThrow({ where: { code: "CHECKPOINT_MIAMI" } });
+    const email = `miami-${randomUUID()}@example.com`;
+    const user = await prisma.usuario.create({ data: {
+      name: "Miami", email, passwordHash: await bcrypt.hash("change-me", 12),
+      lojas: { create: { lojaId: store.id } }, perfis: { create: { perfilId: profile.id } }
+    } });
+    users.push(user.id);
+    const { app, headers } = await session(email);
+    const overview = await request(app).get("/operations/overview").set(headers());
+    expect(Object.keys(overview.body.totals).every((key) => key.startsWith("miami"))).toBe(true);
+    expect((await request(app).get("/operations/brazil/candidates").set(headers())).status).toBe(403);
+    expect((await request(app).get("/operations/history").query({ entity: "EstoqueEntrada" }).set(headers())).status).toBe(403);
+  });
+
+  it("não oferece ação quando a mesma policy rejeitaria a transição", async () => {
+    const { app, headers } = await session();
+    const data = await fixture("MIAMI_PARAGUAI_BRASIL");
+    const blocked = await request(app).get("/operations/paraguay/candidates").set(headers());
+    expect(blocked.body.find((entry: { id: string }) => entry.id === data.bag.id).allowedActions).toEqual([]);
+    const payload = { viagemId: data.trip.id, malaId: data.bag.id, confirmadoEm: new Date().toISOString() };
+    expect((await request(app).post("/logistics/checkpoint-paraguai").set(headers()).send(payload)).body.error).toBe("invalid_transition");
+    await prisma.viagem.update({ where: { id: data.trip.id }, data: { status: "IN_TRANSIT" } });
+    await prisma.mala.update({ where: { id: data.bag.id }, data: { status: "CHECKED_IN" } });
+    const ready = await request(app).get("/operations/paraguay/candidates").set(headers());
+    expect(ready.body.find((entry: { id: string }) => entry.id === data.bag.id).allowedActions).toContain("CONFIRM_PARAGUAY");
+    expect((await request(app).post("/logistics/checkpoint-paraguai").set(headers()).send(payload)).status).toBe(200);
+  });
+
+  it("faz rollback integral quando a auditoria obrigatória falha", async () => {
+    const { app, headers } = await session();
+    const data = await fixture();
+    await arrive(data);
+    const key = randomUUID();
+    const { setAuditFailureForTests } = await import("../src/modules/operations/operations.persistence");
+    setAuditFailureForTests((input) => input.idempotencyKey === key);
+    try {
+      const response = await request(app).post("/logistics/checkpoint-brasil").set(headers(undefined, key)).send({
+        viagemId: data.trip.id, malaId: data.bag.id, confirmadoEm: new Date().toISOString()
+      });
+      expect(response.status).toBe(500);
+    } finally {
+      setAuditFailureForTests();
+    }
+    expect(await prisma.checkpointBrasil.count({ where: { malaId: data.bag.id, supersededAt: null } })).toBe(0);
+  });
+
+  it("expõe divergência tipada de recebimento e bloqueia entrada enquanto não resolvida", async () => {
+    const { app, headers } = await session();
+    const data = await fixture();
+    await arrive(data);
+    await prisma.checkpointBrasil.create({ data: {
+      lojaId: data.bag.lojaId, viagemId: data.trip.id, malaId: data.bag.id,
+      confirmadoPorId: data.admin.id, confirmadoEm: new Date()
+    } });
+    const receiving = await request(app).post("/receiving").set(headers()).send({ viagemId: data.trip.id, malaId: data.bag.id });
+    const detail = await request(app).get(`/operations/receiving/${receiving.body.id}`).set(headers());
+    const itemId = detail.body.itens[0].id;
+    const confirmation = await request(app).post(`/receiving/${receiving.body.id}/items/${itemId}/confirm`).set(headers()).send({
+      quantidadeRecebida: 0, quantidadeRejeitada: 2, tipoDivergencia: "AVARIA", observacoes: "Avaria confirmada"
+    });
+    expect(confirmation.status).toBe(200);
+    const updated = await request(app).get(`/operations/receiving/${receiving.body.id}`).set(headers());
+    expect(updated.body.itens[0].tipoDivergencia).toBe("AVARIA");
+    expect(updated.body.itens[0].divergenciaResolvida).toBe(false);
+    const entry = await request(app).get("/operations/definitive-entry/candidates").set(headers());
+    expect(entry.body.find((candidate: { id: string }) => candidate.id === receiving.body.id).blockedReasons)
+      .toContainEqual(expect.objectContaining({ code: "DIVERGENCE_UNRESOLVED" }));
   });
 });

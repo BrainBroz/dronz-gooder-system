@@ -48,7 +48,8 @@ receivingRouter.post(
       .object({
         quantidadeRecebida: z.number().int().min(0),
         quantidadeRejeitada: z.number().int().min(0),
-        observacoes: z.string().optional()
+        observacoes: z.string().optional(),
+        tipoDivergencia: z.enum(["CORRETO", "FALTA", "EXCESSO", "AVARIA", "ITEM_INCORRETO", "OUTRO"]).default("CORRETO")
       })
       .strict()
       .safeParse(r.body);

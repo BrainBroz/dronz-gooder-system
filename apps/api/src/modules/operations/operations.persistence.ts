@@ -9,6 +9,26 @@ const requestHash = (payload: unknown) =>
 const json = (value: unknown): Prisma.InputJsonValue =>
   JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 
+type AuditInput = {
+  usuarioId: string;
+  lojaId: string;
+  permissionCode: string;
+  action: string;
+  entity: string;
+  entityId: string;
+  correlationId: string;
+  idempotencyKey?: string;
+  reason?: string;
+  before?: unknown;
+  after?: unknown;
+};
+
+let auditFailureForTests: ((input: AuditInput) => boolean) | undefined;
+export function setAuditFailureForTests(predicate?: (input: AuditInput) => boolean) {
+  if (process.env.NODE_ENV !== "test") throw new Error("test hook unavailable outside tests");
+  auditFailureForTests = predicate;
+}
+
 export async function idempotentMutation<T>(input: {
   lojaId: string;
   operation: string;
@@ -67,19 +87,8 @@ export async function idempotentMutation<T>(input: {
   }
 }
 
-export async function audit(tx: Prisma.TransactionClient, input: {
-  usuarioId: string;
-  lojaId: string;
-  permissionCode: string;
-  action: string;
-  entity: string;
-  entityId: string;
-  correlationId: string;
-  idempotencyKey?: string;
-  reason?: string;
-  before?: unknown;
-  after?: unknown;
-}) {
+export async function audit(tx: Prisma.TransactionClient, input: AuditInput) {
+  if (auditFailureForTests?.(input)) throw new Error("forced audit failure");
   await tx.auditLog.create({
     data: {
       usuarioId: input.usuarioId,

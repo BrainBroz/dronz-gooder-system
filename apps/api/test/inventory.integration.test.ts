@@ -60,6 +60,10 @@ describe("receiving and inventory", () => {
       where: { id: bag.id },
       data: { status: "ARRIVED_BRAZIL" }
     });
+    await prisma.checkpointBrasil.create({ data: {
+      lojaId: dronz.id, viagemId: trip.id, malaId: bag.id,
+      confirmadoPorId: fixture.admin.id, confirmadoEm: new Date()
+    } });
     const created = await request(app)
       .post("/receiving")
       .set(headers(token, dronz.id))
@@ -91,10 +95,6 @@ describe("receiving and inventory", () => {
     await prisma.recebimentoMiami.create({ data: {
       lojaId: dronz.id, pedidoCompraItemId: fixture.item.id, quantidadeRecebida: 2,
       recebidoEm: new Date(), confirmadoPorId: fixture.admin.id
-    } });
-    await prisma.checkpointBrasil.create({ data: {
-      lojaId: dronz.id, viagemId: trip.id, malaId: bag.id,
-      confirmadoPorId: fixture.admin.id, confirmadoEm: new Date()
     } });
     const entry = await request(app).post("/receiving/entrada-definitiva")
       .set(headers(token, dronz.id))
