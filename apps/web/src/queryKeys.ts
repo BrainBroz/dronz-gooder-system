@@ -9,7 +9,9 @@ export const purchasingQueryKeys = {
 export const logisticsQueryKeys = {
   travelers: (id: string | null) => ["travelers", id] as const,
   trips: (id: string | null) => ["trips", id] as const,
-  suitcases: (id: string | null) => ["suitcases", id] as const
+  suitcases: (id: string | null) => ["suitcases", id] as const,
+  suitcaseWeight: (storeId: string | null, malaId: string | null) =>
+    ["suitcase-weight", storeId, malaId] as const
 };
 export const inventoryQueryKeys = {
   stock: (id: string | null) => ["inventory", id] as const,

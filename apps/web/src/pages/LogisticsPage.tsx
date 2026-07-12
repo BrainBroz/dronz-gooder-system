@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Button, Card, CardContent, MenuItem, Stack, TextField, Typography } from "@mui/material";
 import { useForm } from "react-hook-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -5,6 +6,7 @@ import { ContentCard } from "../components/ui/ContentCard";
 import { PageContainer } from "../components/ui/PageContainer";
 import { PageHeader } from "../components/ui/PageHeader";
 import { MutationStatus } from "../components/ui/MutationStatus";
+import { SuitcaseWeightPanel } from "../components/SuitcaseWeightPanel";
 import { api } from "../api/client";
 import { authHeader, useAuthStore } from "../stores/auth";
 import { logisticsQueryKeys } from "../queryKeys";
@@ -13,6 +15,8 @@ export function LogisticsPage() {
   const store = useAuthStore((s) => s.activeStoreId),
     headers = { ...authHeader(), "x-store-id": store };
   const client = useQueryClient();
+  const [selectedMalaId, setSelectedMalaId] = useState<string | null>(null);
+  const [resetForStoreId, setResetForStoreId] = useState(store);
   const travelerForm = useForm<{ nome: string; email: string }>({
     defaultValues: { nome: "", email: "" }
   });
@@ -90,6 +94,12 @@ export function LogisticsPage() {
       });
     }
   });
+  // Descarta a mala selecionada ao trocar de loja (evita exibir peso de
+  // uma mala de outra loja).
+  if (store !== resetForStoreId) {
+    setResetForStoreId(store);
+    setSelectedMalaId(null);
+  }
   return (
     <PageContainer>
       <Stack gap={{ xs: 2.5, md: 3.5 }}>
@@ -247,11 +257,15 @@ export function LogisticsPage() {
                     Limite {b.limitePesoKg} kg · {b.volumes.length} volume(s) ·{" "}
                     {b.alocacoes.length} alocação(ões)
                   </Typography>
+                  <Button onClick={() => setSelectedMalaId(b.id)}>
+                    Ver peso
+                  </Button>
                 </CardContent>
               </Card>
             )
           )}
         </ContentCard>
+        <SuitcaseWeightPanel malaId={selectedMalaId} />
       </Stack>
     </PageContainer>
   );
