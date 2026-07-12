@@ -10,6 +10,7 @@ import {
   FinancePage,
   ReportsPage
 } from "../src/app";
+import { CategoriesPage } from "../src/pages/CategoriesPage";
 import { queryClient } from "../src/api/client";
 import {
   catalogQueryKeys,
@@ -121,6 +122,7 @@ describe("web app", () => {
     ).not.toEqual(reportQueryKeys.report("d", "inventory", "", ""));
   });
   it.each([
+    [CategoriesPage, "Categorias"],
     [LogisticsPage, "Adicionar viajante"],
     [InventoryPage, "Registrar movimento"],
     [FinancePage, "Registrar pagamento"],
