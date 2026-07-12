@@ -17,7 +17,7 @@ Este documento congela o modelo-alvo de Compras Unificadas e da UI-3C. Ele não 
 4. código e schema atuais, como evidência do comportamento existente;
 5. documentos históricos.
 
-Decisões técnicas estão fechadas. Decisões de produto não inferíveis estão na seção 35 e bloqueiam somente os batches indicados.
+Decisões técnicas e P-01 a P-07 estão fechadas. P-08 permanece pendência exclusiva do Product Owner, não bloqueadora para o Batch 3, conforme a seção 35.
 
 Fora deste contrato: Vendas, tracking automático, integrações de pagamento, e-mail, QR Code, PDF e alterações em `calcSimulacao`.
 
@@ -110,10 +110,10 @@ UNIQUE (plataforma, contaExternaId, externalOrderIdNormalizado)
 ### 5.2 Ausência de ID confiável
 
 - importação integrada sem `externalOrderId` é rejeitada e mantida como erro de importação, sem criar compra incompleta;
-- importação manual exige um identificador manual explícito, único dentro da conta manual;
-- o sistema não gera silenciosamente um número aleatório que pareça proveniente da plataforma.
-
-A política de UX para esse identificador manual é decisão P-06.
+- importação manual usa `plataforma=MANUAL`, origem/conta manual explícita, ID técnico interno e uma referência digitada pelo usuário;
+- a referência é exibível e pesquisável, mas não é globalmente única;
+- idempotência usa chave técnica própria e nunca depende somente da referência informada;
+- o sistema não gera silenciosamente um número aleatório que pareça proveniente de uma plataforma externa.
 
 ## 6. Plataformas
 
@@ -230,7 +230,8 @@ quantidadeMaterializadaLoja <= quantidadeAtribuidaLoja
 - recebimento parcial não altera a atribuição; é estado downstream;
 - redução da quantidade elegível abaixo do já materializado cria divergência crítica;
 - antes da materialização, redução exige ajuste transacional das atribuições ou revisão;
-- após materialização, correção ocorre por cancelamento/ajuste operacional auditado, nunca editando o pedido silenciosamente.
+- após materialização e antes de downstream, correção ocorre por cancelamento/ajuste operacional transacional e auditado;
+- após qualquer efeito downstream, correção ocorre somente por evento corretivo e compensação, nunca por exclusão ou edição silenciosa do pedido.
 
 ## 11. Atribuição
 
@@ -266,7 +267,7 @@ Concorrência: A lê saldo 10 e atribui 6; B, com a versão antiga, tenta 5. O p
 
 Permissões separadas: revisar, atribuir e materializar. A mesma pessoa pode executar atribuição e materialização somente se possuir ambas; segregação obrigatória de pessoas não foi confirmada.
 
-Após materialização, a atribuição daquela loja fica bloqueada. Correção exige fluxo operacional/cancelamento conforme P-04 e P-07.
+Após materialização, a atribuição daquela loja fica bloqueada. Antes de qualquer efeito downstream, cancelamento ou redução do pedido operacional pode ocorrer transacionalmente, com auditoria. Após recebimento, logística, checkpoint, estoque ou outro efeito downstream, exclusão simples é proibida: a correção exige evento corretivo e movimentos compensatórios, preservando pedido e histórico.
 
 ## 12. Mapping de produto
 
@@ -317,7 +318,7 @@ MATERIALIZADA
 | COM_DIVERGENCIA | identidade/quantidade/mapping exige decisão | corrigir; materialização bloqueada |
 | CANCELADA | cancelamento pré-materialização | somente consulta/correção autorizada |
 
-`COM_DIVERGENCIA` e `CANCELADA` prevalecem sobre estados derivados. Uma compra pode permanecer parcialmente atribuída indefinidamente. Materialização parcial por loja é tratada em P-02.
+`COM_DIVERGENCIA` e `CANCELADA` prevalecem sobre estados derivados. Uma compra pode permanecer parcialmente atribuída indefinidamente. A parcela pronta de uma loja pode ser materializada mesmo que outra loja ainda tenha pendências ou restem quantidades não atribuídas; a compra permanece apresentada como parcialmente processada.
 
 ## 14. Materialização
 
@@ -349,7 +350,7 @@ A operação ocorre em uma transação serializável curta: valida versões, cri
 - Mapping ausente: retorna 409 e não cria pedido parcial acidental.
 - Timeout após commit: retry com mesma chave retorna o resultado persistido.
 
-Materialização de uma loja não exige que a outra esteja pronta se P-02 aprovar materialização por loja independente.
+Materialização é independente por loja: uma loja pronta não aguarda a outra nem o fim do saldo pendente. A operação permanece idempotente por compra+loja e a UI deve indicar explicitamente o processamento parcial.
 
 ## 15. Isolamento e autorização
 
@@ -369,7 +370,7 @@ Materialização de uma loja não exige que a outra esteja pronta se P-02 aprova
 - pedido materializado só expõe sua própria loja e referências externas mínimas necessárias;
 - um usuário de uma única loja não recebe a parcela atribuída à outra.
 
-Quem visualiza toda a staging é decisão P-01. Até a decisão, somente `SUPER_ADMIN` vinculado às duas lojas é candidato; isso não deve ser implementado como regra definitiva.
+A staging global completa é acessível somente por `SUPER_ADMIN` ou pelo perfil global dedicado a Compras Unificadas, ambos com permissões globais específicas. Usuários comuns restritos a uma loja não acessam a staging completa; após atribuição/materialização, veem apenas os dados operacionais autorizados da própria loja.
 
 ## 16. Máquina normativa UI-3C
 
@@ -394,7 +395,7 @@ Estado comercial de `PedidoCompra`, estado logístico de `Viagem/Mala`, estado d
 | Miami parcial | pedido `CONFIRMED` ou parcial; saldo > 0 | `RecebimentoMiami`; pedido parcial | excesso, loja/permissão, key com payload diferente |
 | Miami completo | todos os itens integralmente confirmados | pedido `RECEIVED_MIAMI` | confirmação repetida retorna evento; não soma novamente |
 | Consolidação | Miami completo; viagem aberta; mala em planejamento | alocação e depois mala fechada | peso ausente/excedido, item de outra loja |
-| Paraguai | rota aplicável; mala/viagem em estado permitido | `CheckpointParaguai` válido ou divergente | P-03, duplicidade, divergência bloqueadora |
+| Paraguai | rota declara Paraguai obrigatório; mala/viagem em estado permitido | `CheckpointParaguai` válido ou divergente | duplicidade, divergência bloqueadora |
 | Brasil | viagem chegada; mala associada; checkpoint anterior aplicável | `CheckpointBrasil` | fora de ordem, cross-store, duplicidade |
 | Recebimento | Brasil válido | `Recebimento` aberto | um ativo por viagem+mala+loja |
 | Conferência | recebimento aberto; item elegível | confirmação imutável; progresso atualizado | quantidade inválida, item externo, replay divergente |
@@ -429,7 +430,7 @@ Pré-condições propostas: viagem e mala da loja, rota marcada como aplicável 
 
 Divergências atuais preservadas: `CORRETO`, `MALA_AUSENTE`, `VOLUME_AUSENTE`, `ITEM_NAO_LOCALIZADO`, `QUANTIDADE_DIVERGENTE`, `AVARIA`, `ITEM_EXTRA`, `CHECKPOINT_PARCIAL`.
 
-Checkpoint válido libera a próxima transição. Divergência bloqueadora mantém ação seguinte indisponível até resolução/correção. A aplicabilidade por rota e a obrigatoriedade são decisão P-03.
+Cada rota declara seus checkpoints obrigatórios. Checkpoint Paraguai válido libera a próxima transição somente nas rotas que o exigem. Nas demais, Paraguai é `NAO_APLICAVEL`, nunca `PENDENTE`. Divergência bloqueadora mantém a ação seguinte indisponível até resolução/correção.
 
 ## 19. Brasil
 
@@ -458,11 +459,11 @@ Regras:
 - faltante permanece pendente ou fecha com divergência autorizada;
 - excesso/item inesperado não entra automaticamente no estoque;
 - avaria/rejeição não compõe quantidade apta;
-- entrada definitiva exige Brasil, checkpoints aplicáveis e conferência concluída;
+- entrada definitiva exige chegada ao Brasil, todos os checkpoints declarados obrigatórios pela rota e conferência concluída;
 - quantidade apta = recebida − rejeitada − já incorporada;
 - repetição retorna a mesma `EstoqueEntrada` concluída;
 - estoque só muda aqui, nunca em Miami, Paraguai, Brasil ou mera abertura de recebimento;
-- reabertura após entrada exige processo corretivo e P-04.
+- após entrada definitiva não há reabertura nem edição silenciosa: somente evento corretivo autorizado e movimento compensatório auditável.
 
 O comportamento atual que cria `ENTRY` durante confirmação de item conflita com esta regra-alvo e deverá ser migrado no Batch 3, com teste de não duplicação.
 
@@ -478,11 +479,11 @@ Evento confirmado é imutável. `EventoCorretivo` conceitual contém:
 - timestamp UTC;
 - impacto/reprocessamento e status.
 
-Somente `CHECKPOINT_CORRIGIR` permite solicitar correção. Campos de identidade, loja e ator original nunca são editados. Correção pode invalidar uma projeção e gerar nova transição, mas preserva os eventos originais. Se houver checkpoint posterior, recebimento ou estoque consumado, a correção não é automática: bloqueia-se o fluxo e aplica-se P-04. Estoque consumado só muda por movimento compensatório auditável.
+Somente `CHECKPOINT_CORRIGIR` permite solicitar correção. Campos de identidade, loja e ator original nunca são editados. Correção pode invalidar uma projeção e gerar nova transição, mas preserva os eventos originais. Se houver checkpoint posterior, recebimento ou estoque consumado, a correção não é automática: o fluxo é bloqueado, registra-se evento corretivo com motivo, e qualquer saldo consumado muda somente por movimento compensatório auditável.
 
 ## 22. Permissões e RBAC
 
-Estado atual: somente `SYSTEM_ADMIN` existe no seed e as rotas comerciais validam autenticação/vínculo, sem autorização por código. `docs/domain-contracts.md` diz “não criar RBAC novo”, enquanto este contrato exige RBAC específico; conflito registrado em P-05.
+Estado atual: somente `SYSTEM_ADMIN` existe no seed e as rotas comerciais validam autenticação/vínculo, sem autorização por código. Fica aprovada a matriz granular abaixo para staging, mappings e checkpoints. Ela supera a regra de `docs/domain-contracts.md` que impedia novos códigos de permissão exclusivamente nesses fluxos; não autoriza criação indiscriminada de permissões fora deste contrato.
 
 Matriz-alvo:
 
@@ -755,38 +756,50 @@ Pedido Operacional confirmado
 
 ## 34. Riscos e critérios de aceite dos próximos batches
 
-Riscos principais: migração de atribuições ambíguas, autorização global inexistente, duplicação de estoque entre confirmação e entrada definitiva, checkpoints sem read models/RBAC e divergência de aplicabilidade do Paraguai.
+Riscos principais: migração de atribuições ambíguas, implementação ainda inexistente da autorização global, duplicação de estoque entre confirmação e entrada definitiva e checkpoints ainda sem read models/RBAC. A aplicabilidade do Paraguai está resolvida por rota; o Batch 3 deverá migrar a exigência universal atual sem perder histórico.
 
-Batch 3 só pode iniciar após P-03 e P-05. Batch 5 só pode iniciar após P-01, P-02, P-06 e P-07. Critério comum: schema/migrations reproduzíveis, contratos tenant-safe, auditoria, idempotência, concorrência e testes PostgreSQL reais.
+P-03 e P-05 estão fechadas e não bloqueiam mais o Batch 3. P-01, P-02, P-06 e P-07 estão fechadas e não bloqueiam o desenho do Batch 5. Critério comum: schema/migrations reproduzíveis, contratos tenant-safe, auditoria, idempotência, concorrência e testes PostgreSQL reais.
 
-## 35. Decisões bloqueadoras de produto
+## 35. Decisões de produto aprovadas
 
-| ID | Decisão | Opções | Recomendação | Impacto | Bloqueia |
-|---|---|---|---|---|---|
-| P-01 | Quem vê staging global? | somente SUPER_ADMIN; perfil global dedicado; usuários de uma loja com visão parcial | perfil global dedicado, SUPER_ADMIN incluído; usuário de loja vê apenas operação materializada | privacidade cross-store | Batch 5/6 |
-| P-02 | Materialização por loja pode ocorrer enquanto outra parcela está pendente? | exigir compra integral; permitir por loja pronta | permitir por loja pronta, preservando saldo pendente | velocidade e estados parciais | Batch 5/6 |
-| P-03 | Quando Paraguai é obrigatório? | sempre; nunca; por rota configurada | por rota configurada; legado atual marcado aplicável até revisão | máquina UI-3C e entrada definitiva | Batch 3/4 |
-| P-04 | Correção após estoque definitivo | somente movimento compensatório; reabrir recebimento; ambos com aprovação | movimento compensatório + evento corretivo; nunca editar saldo/evento | patrimônio e auditoria | Batch 3/4 |
-| P-05 | Ativar RBAC granular agora apesar de `domain-contracts.md` proibir RBAC novo? | manter vínculo apenas; adotar matriz deste contrato | adotar matriz; atualizar a regra anterior | segurança e perfis operacionais | Batch 3/4/5/6 |
-| P-06 | Identificador de compra manual | digitado pelo operador; sequência interna; ambos | exigir referência digitada e gerar ID interno separado | deduplicação manual | Batch 5/6 |
-| P-07 | Cancelamento/redução após materialização | bloquear; cancelar pedido se sem downstream; ajuste corretivo se downstream | cancelar se seguro, senão evento/ajuste operacional | estoque/logística/financeiro | Batch 5/6 |
-| P-08 | Limite computável de “quinta de manhã” | 09:00; 12:00; apenas período sem atraso | manter período até PO definir hora; não gerar atraso horário | alertas do Dashboard | Batch 7, não Batch 3 |
+| ID | Decisão normativa | Impacto de implementação | Status |
+|---|---|---|---|
+| P-01 | Staging completa somente para `SUPER_ADMIN` e perfil global dedicado a Compras Unificadas, com permissões globais; usuários comuns veem apenas operação da loja autorizada. | RBAC global no Batch 5/6 | APROVADA |
+| P-02 | Materialização independente por loja pronta, mesmo com outra loja incompleta ou saldo pendente; UI apresenta processamento parcial. | estados e idempotência no Batch 5/6 | APROVADA |
+| P-03 | Cada rota declara checkpoints obrigatórios; Paraguai é exigido somente quando aplicável e, nas demais rotas, fica `NAO_APLICAVEL`. | máquina UI-3C no Batch 3/4 | APROVADA |
+| P-04 | Após entrada definitiva, correção somente por evento corretivo e movimento compensatório, com motivo, permissão e histórico imutável. | correções no Batch 3/4 | APROVADA |
+| P-05 | RBAC granular aprovado para staging, mappings, Miami, Paraguai, Brasil, recebimento, entrada definitiva e correções. | supera a proibição anterior somente nesses fluxos | APROVADA |
+| P-06 | Compra manual usa ID técnico, `MANUAL`, origem/conta manual, referência pesquisável não globalmente única e chave técnica de idempotência. | identidade no Batch 5/6 | APROVADA |
+| P-07 | Antes de downstream, cancelamento/ajuste transacional auditado; depois, somente correção e compensação sem apagar histórico. | lifecycle no Batch 5/6 | APROVADA |
+| P-08 | “Quinta-feira de manhã” permanece janela não computável até o Product Owner definir início, fim, timezone e efeito de alerta ou bloqueio. | bloqueia somente alerta horário correspondente no Batch 7 | PENDENTE NÃO BLOQUEADORA PARA BATCH 3 |
 
-Quantidade inteira está fechada tecnicamente para Produtos físicos. Fallback de linha externa está fechado por fingerprint versionado com revisão de ambiguidades. Nenhuma outra decisão técnica essencial permanece aberta.
+Quantidade inteira está fechada tecnicamente para Produtos físicos. Fallback de linha externa está fechado por fingerprint versionado com revisão de ambiguidades. Nenhuma decisão técnica essencial permanece aberta.
 
 ## 36. Resolução explícita de conflitos
 
 1. `AGENTS.md` diz que toda entidade comercial preserva `lojaId`; a staging é exceção funcional confirmada: entidades globais não possuem loja, mas atribuições e operação preservam destino. O princípio de isolamento continua absoluto após materialização.
 2. `domain-contracts.md` permite `ENTRY` a cada confirmação de recebimento; este contrato exige estoque apenas na entrada definitiva. O Batch 3 deve consolidar uma única fonte de entrada para impedir duplicidade.
-3. `domain-contracts.md` proíbe RBAC novo; este contrato necessita permissões específicas. P-05 exige decisão explícita.
-4. Código atual exige Paraguai em toda entrada definitiva; o modelo desejado fala em checkpoint intermediário aplicável. P-03 resolve.
+3. `domain-contracts.md` proíbe RBAC novo; P-05 supera essa regra exclusivamente para as permissões granulares listadas neste contrato.
+4. Código atual exige Paraguai em toda entrada definitiva; P-03 determina que a exigência seja derivada dos checkpoints obrigatórios da rota, usando `NAO_APLICAVEL` fora dela.
 5. `FLUXOS_OPERACIONAIS_V1.md` chama compras/logística de futuras; é histórico da fundação e está superado pelo código e `domain-contracts.md`.
 6. `GAPS_E_DIVERGENCIAS_V2.md` confirma perfil Miami e ocultação financeira; isso foi incorporado à matriz-alvo.
 
-## 37. Status do contrato
+## 37. Lacunas do briefing fora dos Batches 3–7
+
+O briefing-fonte integral não foi localizado no repositório, no histórico pesquisável nem nos arquivos fornecidos. A única fonte disponível é uma enumeração resumida de temas no pedido de revisão. Por isso, a cobertura detalhada está em `docs/MATRIZ_COBERTURA_BRIEFING_V1.md`; itens sem requisito verificável permanecem `NÃO LOCALIZADO` e não são incorporados por suposição.
+
+| Batch futuro proposto | Objetivo | Dependências | Risco | Prioridade | Aceite mínimo |
+|---|---|---|---|---|---|
+| Integrações de compras | Conectores de plataforma/conta e ingestão automatizada | contrato do Batch 5, arquitetura de segredos | alto | posterior | importação idempotente, auditada e sem segredo em domínio |
+| Documentos e evidências | Armazenar comprovantes e evidências com autorização | storage S3, política de retenção | médio | posterior | upload tenant-safe, metadados e auditoria |
+| Pagamentos e conciliação | Evoluir pagamentos manuais para integrações aprovadas | arquitetura financeira e providers | alto | posterior | reconciliação idempotente e segregada por loja |
+| Tracking automático e alertas | Consumir eventos de transportadoras e gerar alertas | contas externas, timezone e P-08 quando aplicável | alto | posterior | eventos fora de ordem tratados e alertas auditáveis |
+| Responsabilidades operacionais | Vincular papéis a atividades sem hardcode de pessoas | definição formal do Product Owner | médio | posterior | RBAC por função, nenhuma regra baseada em nome pessoal |
+
+## 38. Status do contrato
 
 Parte técnica: completa e pronta para implementação.
 
-Parte de produto: bloqueada pelas decisões P-01 a P-07 nos batches indicados. P-08 bloqueia apenas alertas horários do Batch 7.
+P-01 a P-07 estão aprovadas e incorporadas. P-08 permanece decisão exclusiva do Product Owner, mas não bloqueia o Batch 3 nem qualquer endpoint que não calcule atraso por horário de quinta-feira.
 
-Até essas decisões serem aprovadas, nenhum agente deve implementar schema, API ou UI correspondente por suposição.
+Gate documental: Batch 3 liberado. Batch 5 possui decisões essenciais fechadas, sujeito ao gate normal de conclusão dos Batches 3 e 4 e à estratégia segura de migration.
