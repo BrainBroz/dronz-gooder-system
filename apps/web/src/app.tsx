@@ -19,15 +19,12 @@ import {
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { ContentCard } from "./components/ui/ContentCard";
-import { PageContainer } from "./components/ui/PageContainer";
-import { PageHeader } from "./components/ui/PageHeader";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { appTheme } from "./theme";
 import { api, queryClient } from "./api/client";
 import { authHeader, useAuthStore } from "./stores/auth";
 import { extractErrorMessage } from "./utils/errors";
-import { dashboardQueryKeys } from "./queryKeys";
+import { DashboardPage } from "./pages/DashboardPage";
 import { CategoriesPage } from "./pages/CategoriesPage";
 import { SuppliersPage } from "./pages/SuppliersPage";
 import { PurchaseOrdersPage } from "./pages/PurchaseOrdersPage";
@@ -234,73 +231,6 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
-function OperacaoPage() {
-  const { stores, activeStoreId } = useAuthStore();
-  const activeStore = stores.find((store) => store.id === activeStoreId);
-  const summary = useQuery({
-    queryKey: dashboardQueryKeys.summary(activeStoreId),
-    enabled: !!activeStoreId,
-    queryFn: async () =>
-      (
-        await api.get("/analytics/dashboard", {
-          headers: { ...authHeader(), "x-store-id": activeStoreId }
-        })
-      ).data
-  });
-  const indicators = [
-    { label: "Pedidos", value: summary.data?.orders.count ?? 0 },
-    {
-      label: "Estoque disponível",
-      value: summary.data?.inventory.available ?? 0
-    },
-    { label: "Viagens abertas", value: summary.data?.openTrips ?? 0 },
-    {
-      label: "Recebimentos pendentes",
-      value: summary.data?.pendingReceiving ?? 0
-    }
-  ];
-  return (
-    <PageContainer>
-      <Stack gap={{ xs: 2.5, md: 3.5 }}>
-        <PageHeader
-          eyebrow="Visão geral"
-          title="Operação"
-          description={`Loja ativa: ${activeStore?.nome ?? "Selecione uma loja"}`}
-        />
-        {summary.isLoading && <Typography>Carregando...</Typography>}
-        {summary.isError && (
-          <Typography color="error.main">
-            Falha ao carregar indicadores
-          </Typography>
-        )}
-        <Box
-          display="grid"
-          gridTemplateColumns={{ xs: "1fr", sm: "repeat(2, 1fr)" }}
-          gap={2}
-        >
-          {indicators.map((indicator) => (
-            <ContentCard key={indicator.label}>
-              <Typography color="text.secondary" variant="body2">
-                {indicator.label}
-              </Typography>
-              <Typography fontSize="2rem" fontWeight={700} lineHeight={1.1} mt={1}>
-                {indicator.value}
-              </Typography>
-            </ContentCard>
-          ))}
-        </Box>
-        <ContentCard
-          title="Dados da operação"
-          description="Indicadores calculados somente com dados reais da loja ativa."
-        >
-          <Typography color="text.secondary" variant="body2">
-            Os módulos operacionais permanecem disponíveis na navegação principal.
-          </Typography>
-        </ContentCard>
-      </Stack>
-    </PageContainer>
-  );
-}
 
 export function NotFoundPage() {
   return <div>404</div>;
@@ -319,7 +249,7 @@ export function AppRoutes() {
             element={
               <AuthGate>
                 <Shell>
-                  <OperacaoPage />
+                  <DashboardPage />
                 </Shell>
               </AuthGate>
             }

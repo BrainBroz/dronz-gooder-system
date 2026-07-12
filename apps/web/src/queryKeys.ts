@@ -25,6 +25,18 @@ export const dashboardQueryKeys = {
   summary: (id: string | null) => ["dashboard", id] as const
 };
 export const reportQueryKeys = {
-  report: (id: string | null, type: string, from: string, to: string) =>
-    ["report", id, type, from, to] as const
+  report: (
+    id: string | null,
+    type: string,
+    from?: Date | string,
+    to?: Date | string,
+    status?: string
+  ) => [
+    "report",
+    id,
+    type,
+    typeof from === "string" ? from : from?.toISOString(),
+    typeof to === "string" ? to : to?.toISOString(),
+    status
+  ] as const
 };
