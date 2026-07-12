@@ -1,3 +1,4 @@
+import React from "react";
 import { Button, Card, CardContent, MenuItem, Stack, TextField, Typography } from "@mui/material";
 import { useForm } from "react-hook-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -124,6 +125,13 @@ export function InventoryPage() {
       ),
     onSuccess: refreshInventory
   });
+  React.useEffect(() => {
+    movementForm.reset();
+    receiptForm.reset();
+    move.reset();
+    createReceipt.reset();
+    confirmReceipt.reset();
+  }, [store, movementForm, receiptForm, move, createReceipt, confirmReceipt]);
 
   return (
     <PageContainer>

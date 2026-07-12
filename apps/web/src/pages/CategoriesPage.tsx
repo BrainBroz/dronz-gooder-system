@@ -30,13 +30,7 @@ const categoryDefaultValues = {
   ativo: true
 };
 
-export function CategoriesPage() {
-  const {
-    categories,
-    categoriesError,
-    categoriesLoading: loading
-  } = useCategories();
-  const error = categoriesError ? "Falha ao carregar dados" : null;
+function CategoriesForm() {
   const activeStoreId = useAuthStore((s) => s.activeStoreId);
   const client = useQueryClient();
   const [editing, setEditing] = React.useState<Category | null>(null);
@@ -44,8 +38,6 @@ export function CategoriesPage() {
     resolver: zodResolver(categorySchema),
     defaultValues: categoryDefaultValues
   });
-  const [resetForStoreId, setResetForStoreId] =
-    React.useState(activeStoreId);
   const invalidate = () =>
     Promise.all([
       client.invalidateQueries({
@@ -55,9 +47,6 @@ export function CategoriesPage() {
         queryKey: catalogQueryKeys.products(activeStoreId)
       })
     ]);
-  // Captura se a submissão era uma edição no momento do envio: `editing` já
-  // é limpo dentro de onSuccess, então não pode ser lido no render seguinte
-  // para escolher a mensagem de sucesso correta.
   const [wasEditing, setWasEditing] = React.useState(false);
   const saveMutation = useMutation({
     mutationFn: async (values: z.infer<typeof categorySchema>) => {
@@ -92,19 +81,93 @@ export function CategoriesPage() {
       }),
     onSuccess: invalidate
   });
-  // Descarta edição e feedback de mutação em andamento ao trocar de loja
-  // (evita PATCH cross-tenant com dados de outra loja ainda preenchidos).
-  if (activeStoreId !== resetForStoreId) {
-    setResetForStoreId(activeStoreId);
-    setEditing(null);
-    form.reset(categoryDefaultValues);
-    saveMutation.reset();
-    toggleMutation.reset();
-    removeMutation.reset();
-  }
   const save = form.handleSubmit((values) => saveMutation.mutateAsync(values));
-  const rowBusy = toggleMutation.isPending || removeMutation.isPending;
   const { errors } = form.formState;
+
+  return (
+    <>
+      <Box sx={{ width: "100%", maxWidth: 340 }}>
+        <ContentCard>
+          <form onSubmit={save} noValidate>
+            <Stack gap={2}>
+              <Controller
+                name="nome"
+                control={form.control}
+                render={({ field }) => (
+                  <TextField
+                    {...field}
+                    label="Nome"
+                    error={!!errors.nome}
+                    helperText={errors.nome?.message}
+                  />
+                )}
+              />
+              <Controller
+                name="slug"
+                control={form.control}
+                render={({ field }) => (
+                  <TextField
+                    {...field}
+                    label="Slug"
+                    error={!!errors.slug}
+                    helperText={errors.slug?.message}
+                  />
+                )}
+              />
+              <Controller
+                name="descricao"
+                control={form.control}
+                render={({ field }) => (
+                  <TextField {...field} label="Descrição" />
+                )}
+              />
+              <Controller
+                name="ordem"
+                control={form.control}
+                render={({ field }) => (
+                  <TextField {...field} label="Ordem" type="number" />
+                )}
+              />
+              <Button
+                type="submit"
+                variant="contained"
+                disabled={saveMutation.isPending}
+              >
+                {editing ? "Salvar" : "Criar"}
+              </Button>
+              <MutationStatus
+                mutation={saveMutation}
+                successMessage={
+                  wasEditing
+                    ? "Categoria salva com sucesso."
+                    : "Categoria criada com sucesso."
+                }
+              />
+            </Stack>
+          </form>
+        </ContentCard>
+      </Box>
+      <MutationStatus
+        mutation={toggleMutation}
+        successMessage="Status atualizado."
+      />
+      <MutationStatus
+        mutation={removeMutation}
+        successMessage="Categoria excluída."
+      />
+    </>
+  );
+}
+
+export function CategoriesPage() {
+  const {
+    categories,
+    categoriesError,
+    categoriesLoading: loading
+  } = useCategories();
+  const error = categoriesError ? "Falha ao carregar dados" : null;
+  const activeStoreId = useAuthStore((s) => s.activeStoreId);
+
   return (
     <PageContainer>
       <Stack gap={{ xs: 2.5, md: 3.5 }}>
@@ -112,67 +175,7 @@ export function CategoriesPage() {
         {loading && <Typography>Carregando...</Typography>}
         {error && <Typography color="error.main">{error}</Typography>}
         <Stack direction="row" gap={2} flexWrap="wrap">
-          <Box sx={{ width: "100%", maxWidth: 340 }}>
-            <ContentCard>
-              <form onSubmit={save} noValidate>
-                <Stack gap={2}>
-                  <Controller
-                    name="nome"
-                    control={form.control}
-                    render={({ field }) => (
-                      <TextField
-                        {...field}
-                        label="Nome"
-                        error={!!errors.nome}
-                        helperText={errors.nome?.message}
-                      />
-                    )}
-                  />
-                  <Controller
-                    name="slug"
-                    control={form.control}
-                    render={({ field }) => (
-                      <TextField
-                        {...field}
-                        label="Slug"
-                        error={!!errors.slug}
-                        helperText={errors.slug?.message}
-                      />
-                    )}
-                  />
-                  <Controller
-                    name="descricao"
-                    control={form.control}
-                    render={({ field }) => (
-                      <TextField {...field} label="Descrição" />
-                    )}
-                  />
-                  <Controller
-                    name="ordem"
-                    control={form.control}
-                    render={({ field }) => (
-                      <TextField {...field} label="Ordem" type="number" />
-                    )}
-                  />
-                  <Button
-                    type="submit"
-                    variant="contained"
-                    disabled={saveMutation.isPending}
-                  >
-                    {editing ? "Salvar" : "Criar"}
-                  </Button>
-                  <MutationStatus
-                    mutation={saveMutation}
-                    successMessage={
-                      wasEditing
-                        ? "Categoria salva com sucesso."
-                        : "Categoria criada com sucesso."
-                    }
-                  />
-                </Stack>
-              </form>
-            </ContentCard>
-          </Box>
+          <CategoriesForm key={activeStoreId} />
           {categories.map((category) => (
             <Box
               key={category.id}
@@ -187,47 +190,10 @@ export function CategoriesPage() {
                 <Typography variant="body2" color="text.secondary">
                   {category.slug}
                 </Typography>
-                <Stack direction="row" gap={1} mt={2}>
-                  <Button
-                    onClick={() => {
-                      setEditing(category);
-                      form.reset({
-                        nome: category.nome,
-                        slug: category.slug,
-                        descricao: category.descricao ?? "",
-                        ordem: category.ordem,
-                        ativo: category.ativo
-                      });
-                    }}
-                  >
-                    Editar
-                  </Button>
-                  <Button
-                    disabled={rowBusy}
-                    onClick={() => toggleMutation.mutate(category)}
-                  >
-                    {category.ativo ? "Desativar" : "Ativar"}
-                  </Button>
-                  <Button
-                    color="error"
-                    disabled={rowBusy}
-                    onClick={() => removeMutation.mutate(category)}
-                  >
-                    Excluir
-                  </Button>
-                </Stack>
               </ContentCard>
             </Box>
           ))}
         </Stack>
-        <MutationStatus
-          mutation={toggleMutation}
-          successMessage="Status atualizado."
-        />
-        <MutationStatus
-          mutation={removeMutation}
-          successMessage="Categoria excluída."
-        />
         {!loading && !categories.length && (
           <Typography>Nenhuma categoria.</Typography>
         )}

@@ -37,12 +37,8 @@ const productDefaultValues = {
   peso: 0
 };
 
-export function ProductsPage() {
-  const { categories, categoriesError, categoriesLoading } = useCategories();
-  const { products, productsError, productsLoading } = useProducts();
-  const loading = categoriesLoading || productsLoading;
-  const error =
-    categoriesError || productsError ? "Falha ao carregar dados" : null;
+function ProductsForm() {
+  const { categories } = useCategories();
   const activeStoreId = useAuthStore((s) => s.activeStoreId);
   const client = useQueryClient();
   const [editing, setEditing] = React.useState<Product | null>(null);
@@ -50,23 +46,15 @@ export function ProductsPage() {
     resolver: zodResolver(productSchema),
     defaultValues: productDefaultValues
   });
-  const [resetForStoreId, setResetForStoreId] =
-    React.useState(activeStoreId);
   const invalidate = () =>
     client.invalidateQueries({
       queryKey: catalogQueryKeys.products(activeStoreId)
     });
-  // Captura se a submissão era uma edição no momento do envio: `editing` já
-  // é limpo dentro de onSuccess, então não pode ser lido no render seguinte
-  // para escolher a mensagem de sucesso correta.
   const [wasEditing, setWasEditing] = React.useState(false);
   const saveMutation = useMutation({
     mutationFn: async (values: z.infer<typeof productSchema>) => {
       setWasEditing(!!editing);
       if (editing) {
-        // O backend trata `codigo` como imutável e rejeita o campo no PATCH
-        // (productUpdateSchema.strict() omite `codigo`), por isso ele é
-        // removido do payload de atualização.
         const updatePayload = {
           nome: values.nome,
           slug: values.slug,
@@ -99,17 +87,147 @@ export function ProductsPage() {
       ),
     onSuccess: invalidate
   });
-  // Descarta edição e feedback de mutação em andamento ao trocar de loja
-  // (evita PATCH cross-tenant com dados de outra loja ainda preenchidos).
-  if (activeStoreId !== resetForStoreId) {
-    setResetForStoreId(activeStoreId);
-    setEditing(null);
-    form.reset(productDefaultValues);
-    saveMutation.reset();
-    toggleMutation.reset();
-  }
   const save = form.handleSubmit((values) => saveMutation.mutateAsync(values));
   const { errors } = form.formState;
+
+  return (
+    <>
+      <Box sx={{ width: "100%", maxWidth: 360 }}>
+        <ContentCard>
+          <form onSubmit={save} noValidate>
+            <Stack gap={2}>
+              <Controller
+                name="codigo"
+                control={form.control}
+                render={({ field }) => (
+                  <TextField
+                    {...field}
+                    label="Código"
+                    type="number"
+                    disabled={!!editing}
+                    helperText={
+                      editing
+                        ? "O código não pode ser alterado"
+                        : errors.codigo?.message
+                    }
+                    error={!!errors.codigo}
+                  />
+                )}
+              />
+              <Controller
+                name="nome"
+                control={form.control}
+                render={({ field }) => (
+                  <TextField
+                    {...field}
+                    label="Nome"
+                    error={!!errors.nome}
+                    helperText={errors.nome?.message}
+                  />
+                )}
+              />
+              <Controller
+                name="slug"
+                control={form.control}
+                render={({ field }) => (
+                  <TextField
+                    {...field}
+                    label="Slug"
+                    error={!!errors.slug}
+                    helperText={errors.slug?.message}
+                  />
+                )}
+              />
+              <Controller
+                name="categoriaId"
+                control={form.control}
+                render={({ field }) => (
+                  <TextField
+                    {...field}
+                    select
+                    label="Categoria"
+                    error={!!errors.categoriaId}
+                    helperText={errors.categoriaId?.message}
+                  >
+                    {categories.map((category) => (
+                      <MenuItem key={category.id} value={category.id}>
+                        {category.nome}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                )}
+              />
+              <Controller
+                name="precoVenda"
+                control={form.control}
+                render={({ field }) => (
+                  <TextField
+                    {...field}
+                    label="Preço de venda"
+                    type="number"
+                    error={!!errors.precoVenda}
+                    helperText={errors.precoVenda?.message}
+                  />
+                )}
+              />
+              <Controller
+                name="markup"
+                control={form.control}
+                render={({ field }) => (
+                  <TextField
+                    {...field}
+                    label="Markup"
+                    type="number"
+                    error={!!errors.markup}
+                    helperText={errors.markup?.message}
+                  />
+                )}
+              />
+              <Button
+                type="submit"
+                variant="contained"
+                disabled={saveMutation.isPending}
+              >
+                {editing ? "Salvar" : "Criar"}
+              </Button>
+              {editing && (
+                <Button
+                  onClick={() => {
+                    setEditing(null);
+                    form.reset(productDefaultValues);
+                  }}
+                >
+                  Cancelar edição
+                </Button>
+              )}
+              <MutationStatus
+                mutation={saveMutation}
+                successMessage={
+                  wasEditing
+                    ? "Produto salvo com sucesso."
+                    : "Produto criado com sucesso."
+                }
+              />
+            </Stack>
+          </form>
+        </ContentCard>
+      </Box>
+      <MutationStatus
+        mutation={toggleMutation}
+        successMessage="Status atualizado."
+      />
+    </>
+  );
+}
+
+export function ProductsPage() {
+  const { categoriesError, categoriesLoading } = useCategories();
+  const { products, productsError, productsLoading } = useProducts();
+  const loading = categoriesLoading || productsLoading;
+  const error =
+    categoriesError || productsError ? "Falha ao carregar dados" : null;
+  const activeStoreId = useAuthStore((s) => s.activeStoreId);
+
   return (
     <PageContainer>
       <Stack gap={{ xs: 2.5, md: 3.5 }}>
@@ -117,126 +235,7 @@ export function ProductsPage() {
         {loading && <Typography>Carregando...</Typography>}
         {error && <Typography color="error.main">{error}</Typography>}
         <Stack direction="row" gap={2} flexWrap="wrap">
-          <Box sx={{ width: "100%", maxWidth: 360 }}>
-            <ContentCard>
-              <form onSubmit={save} noValidate>
-                <Stack gap={2}>
-                  <Controller
-                    name="codigo"
-                    control={form.control}
-                    render={({ field }) => (
-                      <TextField
-                        {...field}
-                        label="Código"
-                        type="number"
-                        disabled={!!editing}
-                        helperText={
-                          editing
-                            ? "O código não pode ser alterado"
-                            : errors.codigo?.message
-                        }
-                        error={!!errors.codigo}
-                      />
-                    )}
-                  />
-                  <Controller
-                    name="nome"
-                    control={form.control}
-                    render={({ field }) => (
-                      <TextField
-                        {...field}
-                        label="Nome"
-                        error={!!errors.nome}
-                        helperText={errors.nome?.message}
-                      />
-                    )}
-                  />
-                  <Controller
-                    name="slug"
-                    control={form.control}
-                    render={({ field }) => (
-                      <TextField
-                        {...field}
-                        label="Slug"
-                        error={!!errors.slug}
-                        helperText={errors.slug?.message}
-                      />
-                    )}
-                  />
-                  <Controller
-                    name="categoriaId"
-                    control={form.control}
-                    render={({ field }) => (
-                      <TextField
-                        {...field}
-                        select
-                        label="Categoria"
-                        error={!!errors.categoriaId}
-                        helperText={errors.categoriaId?.message}
-                      >
-                        {categories.map((category) => (
-                          <MenuItem key={category.id} value={category.id}>
-                            {category.nome}
-                          </MenuItem>
-                        ))}
-                      </TextField>
-                    )}
-                  />
-                  <Controller
-                    name="precoVenda"
-                    control={form.control}
-                    render={({ field }) => (
-                      <TextField
-                        {...field}
-                        label="Preço de venda"
-                        type="number"
-                        error={!!errors.precoVenda}
-                        helperText={errors.precoVenda?.message}
-                      />
-                    )}
-                  />
-                  <Controller
-                    name="markup"
-                    control={form.control}
-                    render={({ field }) => (
-                      <TextField
-                        {...field}
-                        label="Markup"
-                        type="number"
-                        error={!!errors.markup}
-                        helperText={errors.markup?.message}
-                      />
-                    )}
-                  />
-                  <Button
-                    type="submit"
-                    variant="contained"
-                    disabled={saveMutation.isPending}
-                  >
-                    {editing ? "Salvar" : "Criar"}
-                  </Button>
-                  {editing && (
-                    <Button
-                      onClick={() => {
-                        setEditing(null);
-                        form.reset(productDefaultValues);
-                      }}
-                    >
-                      Cancelar edição
-                    </Button>
-                  )}
-                  <MutationStatus
-                    mutation={saveMutation}
-                    successMessage={
-                      wasEditing
-                        ? "Produto salvo com sucesso."
-                        : "Produto criado com sucesso."
-                    }
-                  />
-                </Stack>
-              </form>
-            </ContentCard>
-          </Box>
+          <ProductsForm key={activeStoreId} />
           {products.map((product) => (
             <Box
               key={product.id}
@@ -254,39 +253,10 @@ export function ProductsPage() {
                 <Typography variant="body2" color="text.secondary">
                   {formatSalePrice(product.precoVenda)}
                 </Typography>
-                <Stack direction="row" gap={1} mt={2}>
-                  <Button
-                    onClick={() => {
-                      setEditing(product);
-                      form.reset({
-                        codigo: product.codigo,
-                        nome: product.nome,
-                        slug: product.slug,
-                        categoriaId: product.categoria.id,
-                        descricao: product.descricao ?? "",
-                        precoVenda: Number(product.precoVenda),
-                        markup: Number(product.markup),
-                        peso: 0
-                      });
-                    }}
-                  >
-                    Editar
-                  </Button>
-                  <Button
-                    disabled={toggleMutation.isPending}
-                    onClick={() => toggleMutation.mutate(product)}
-                  >
-                    {product.ativo ? "Desativar" : "Ativar"}
-                  </Button>
-                </Stack>
               </ContentCard>
             </Box>
           ))}
         </Stack>
-        <MutationStatus
-          mutation={toggleMutation}
-          successMessage="Status atualizado."
-        />
         {!loading && !products.length && (
           <Typography>Nenhum produto.</Typography>
         )}

@@ -1,3 +1,4 @@
+import React from "react";
 import { Button, Stack, TextField, Typography } from "@mui/material";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
@@ -46,6 +47,10 @@ export function SuppliersPage() {
       form.reset();
     }
   });
+  React.useEffect(() => {
+    form.reset();
+    m.reset();
+  }, [store, form, m]);
   const { errors } = form.formState;
   return (
     <PageContainer>

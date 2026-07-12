@@ -1,3 +1,4 @@
+import React from "react";
 import { Button, MenuItem, Stack, TextField, Typography } from "@mui/material";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
@@ -94,6 +95,10 @@ export function PurchaseOrdersPage() {
       form.reset();
     }
   });
+  React.useEffect(() => {
+    form.reset();
+    createOrder.reset();
+  }, [store, form, createOrder]);
   return (
     <PageContainer>
       <Stack gap={{ xs: 2.5, md: 3.5 }}>

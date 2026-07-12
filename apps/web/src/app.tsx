@@ -173,6 +173,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
   const logout = async () => {
     await api.post("/auth/logout");
+    queryClient.clear();
     clear();
     navigate("/login");
   };

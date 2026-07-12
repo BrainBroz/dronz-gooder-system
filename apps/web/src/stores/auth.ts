@@ -21,18 +21,21 @@ export type AuthState = {
   clear: () => void;
 };
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   accessToken: null,
   user: null,
   stores: [],
   activeStoreId: null,
-  setSession: (payload) =>
+  setSession: (payload) => {
+    const current = get();
+    const isValidStore = payload.stores.some((s) => s.id === current.activeStoreId);
     set({
       accessToken: payload.accessToken,
       user: payload.user,
       stores: payload.stores,
-      activeStoreId: payload.stores[0]?.id ?? null
-    }),
+      activeStoreId: isValidStore ? current.activeStoreId : payload.stores[0]?.id ?? null
+    });
+  },
   setActiveStoreId: (activeStoreId) => set({ activeStoreId }),
   clear: () =>
     set({ accessToken: null, user: null, stores: [], activeStoreId: null })
