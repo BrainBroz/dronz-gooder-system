@@ -47,6 +47,7 @@ import type { Product } from "./types/catalog";
 import type { Supplier, PurchaseOrder } from "./types/purchasing";
 import { useCategories, useProducts } from "./hooks/useCatalog";
 import { CategoriesPage } from "./pages/CategoriesPage";
+import { SuppliersPage } from "./pages/SuppliersPage";
 
 const loginSchema = z.object({
   email: z.string().email("Informe um e-mail válido"),
@@ -584,95 +585,6 @@ function OperacaoPage() {
   );
 }
 
-function SuppliersPage() {
-  const store = useAuthStore((s) => s.activeStoreId),
-    client = useQueryClient();
-  const q = useQuery<Supplier[]>({
-    queryKey: purchasingQueryKeys.suppliers(store),
-    enabled: !!store,
-    queryFn: async () =>
-      (
-        await api.get("/suppliers", {
-          headers: { ...authHeader(), "x-store-id": store }
-        })
-      ).data.items
-  });
-  const form = useForm({
-    resolver: zodResolver(
-      z.object({
-        nome: z.string().min(1),
-        moedaPadrao: z.string().regex(/^[A-Z]{3}$/)
-      })
-    ),
-    defaultValues: { nome: "", moedaPadrao: "USD" }
-  });
-  const m = useMutation({
-    mutationFn: (v: { nome: string; moedaPadrao: string }) =>
-      api.post("/suppliers", v, {
-        headers: { ...authHeader(), "x-store-id": store }
-      }),
-    onSuccess: async () => {
-      await client.invalidateQueries({
-        queryKey: purchasingQueryKeys.suppliers(store)
-      });
-      form.reset();
-    }
-  });
-  const { errors } = form.formState;
-  return (
-    <Box p={3}>
-      <Typography variant="h4">Fornecedores</Typography>
-      <form onSubmit={form.handleSubmit((v) => m.mutateAsync(v))} noValidate>
-        <Stack direction="row" gap={2} my={2} flexWrap="wrap">
-          <Controller
-            name="nome"
-            control={form.control}
-            render={({ field }) => (
-              <TextField
-                {...field}
-                label="Nome"
-                error={!!errors.nome}
-                helperText={errors.nome?.message}
-              />
-            )}
-          />
-          <Controller
-            name="moedaPadrao"
-            control={form.control}
-            render={({ field }) => (
-              <TextField
-                {...field}
-                label="Moeda"
-                error={!!errors.moedaPadrao}
-                helperText={errors.moedaPadrao?.message}
-              />
-            )}
-          />
-          <Button type="submit" disabled={m.isPending}>
-            Criar
-          </Button>
-        </Stack>
-        <MutationStatus
-          mutation={m}
-          successMessage="Fornecedor criado com sucesso."
-        />
-      </form>
-      {q.isLoading && <Typography>Carregando...</Typography>}
-      {q.isError && <Typography>Falha ao carregar dados</Typography>}
-      {q.data?.map((s) => (
-        <Card key={s.id}>
-          <CardContent>
-            <Typography>{s.nome}</Typography>
-            <Typography>{s.ativo ? "Ativo" : "Inativo"}</Typography>
-          </CardContent>
-        </Card>
-      ))}
-      {!q.isLoading && !q.data?.length && (
-        <Typography>Nenhum fornecedor.</Typography>
-      )}
-    </Box>
-  );
-}
 function PurchaseOrdersPage() {
   const store = useAuthStore((s) => s.activeStoreId);
   const client = useQueryClient();
