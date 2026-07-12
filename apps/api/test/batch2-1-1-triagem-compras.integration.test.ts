@@ -188,4 +188,150 @@ describe("Batch 2.1.1 — Triagem de Compras", () => {
       }
     }
   });
+
+  it("atribuição parcial sem ultrapassar quantidade", async () => {
+    const { app, d, h } = await session();
+    const order = await prisma.pedidoCompra.findFirst({
+      where: { lojaId: d.id, id: { not: "seed-order-dronz" } }
+    });
+    const item = await prisma.pedidoCompraItem.findFirst({
+      where: { pedidoCompraId: order?.id }
+    });
+
+    if (order && item) {
+      await prisma.atribuicaoItem.deleteMany({
+        where: { pedidoCompraItemId: item.id }
+      });
+
+      const partial = await request(app)
+        .post(`/purchase-orders/${order.id}/items/${item.id}/atribuir`)
+        .set(h(d.id))
+        .send({
+          lojaId: d.id,
+          quantidade: Math.max(1, Math.floor(item.quantidade / 2))
+        });
+      expect(partial.status).toBe(200);
+
+      const total = await prisma.atribuicaoItem.aggregate({
+        _sum: { quantidade: true },
+        where: { pedidoCompraItemId: item.id }
+      });
+
+      expect((total._sum.quantidade || 0) <= item.quantidade).toBe(true);
+    }
+  });
+
+  it("atribuição é registrada e rastreável", async () => {
+    const { app, d, h } = await session();
+    const order = await prisma.pedidoCompra.findFirst({
+      where: { lojaId: d.id, id: { not: "seed-order-dronz" } }
+    });
+    const item = await prisma.pedidoCompraItem.findFirst({
+      where: { pedidoCompraId: order?.id }
+    });
+
+    if (order && item) {
+      await prisma.atribuicaoItem.deleteMany({
+        where: { pedidoCompraItemId: item.id }
+      });
+
+      const atrib = await request(app)
+        .post(`/purchase-orders/${order.id}/items/${item.id}/atribuir`)
+        .set(h(d.id))
+        .send({
+          lojaId: d.id,
+          quantidade: 1
+        });
+
+      expect(atrib.status).toBe(200);
+      expect(atrib.body.pedidoCompraItemId).toBe(item.id);
+      expect(atrib.body.lojaId).toBe(d.id);
+      expect(atrib.body.quantidade).toBe(1);
+    }
+  });
+
+  it("soma de atribuições não ultrapassa total do item", async () => {
+    const { d } = await session();
+    const order = await prisma.pedidoCompra.findFirst({
+      where: { lojaId: d.id }
+    });
+
+    if (order) {
+      const items = await prisma.pedidoCompraItem.findMany({
+        where: { pedidoCompraId: order.id }
+      });
+
+      for (const item of items.slice(0, 1)) {
+        const atribs = await prisma.atribuicaoItem.findMany({
+          where: { pedidoCompraItemId: item.id }
+        });
+
+        const totalAtribuido = atribs.reduce((sum, a) => sum + a.quantidade, 0);
+        expect(totalAtribuido <= item.quantidade).toBe(true);
+      }
+    }
+  });
+
+  it("bloqueia atribuição que ultrapassa quantidade total", async () => {
+    const { app, d, h } = await session();
+    const order = await prisma.pedidoCompra.findFirst({
+      where: { lojaId: d.id }
+    });
+    const item = await prisma.pedidoCompraItem.findFirst({
+      where: { pedidoCompraId: order?.id }
+    });
+
+    if (order && item) {
+      const result = await request(app)
+        .post(`/purchase-orders/${order.id}/items/${item.id}/atribuir`)
+        .set(h(d.id))
+        .send({
+          lojaId: d.id,
+          quantidade: item.quantidade + 1
+        });
+
+      expect(result.status).toBe(400);
+    }
+  });
+
+  it("usuário de loja vê apenas atribuições de sua loja", async () => {
+    const { app, d, g, h } = await session();
+    const order = await prisma.pedidoCompra.findFirst({
+      where: { lojaId: d.id }
+    });
+    const item = await prisma.pedidoCompraItem.findFirst({
+      where: { pedidoCompraId: order?.id }
+    });
+
+    if (order && item && g) {
+      await prisma.atribuicaoItem.deleteMany({
+        where: { pedidoCompraItemId: item.id }
+      });
+
+      await request(app)
+        .post(`/purchase-orders/${order.id}/items/${item.id}/atribuir`)
+        .set(h(d.id))
+        .send({
+          lojaId: d.id,
+          quantidade: 1
+        });
+
+      await request(app)
+        .post(`/purchase-orders/${order.id}/items/${item.id}/atribuir`)
+        .set(h(g.id))
+        .send({
+          lojaId: g.id,
+          quantidade: 1
+        });
+
+      const dronzList = await request(app)
+        .get(`/purchase-orders/${order.id}/atribuicoes`)
+        .set(h(d.id));
+
+      expect(dronzList.status).toBe(200);
+      expect(
+        dronzList.body.every((a: { lojaId: string }) => a.lojaId === d.id)
+      ).toBe(true);
+    }
+  });
 });
