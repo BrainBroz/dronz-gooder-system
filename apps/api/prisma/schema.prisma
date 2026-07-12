@@ -40,6 +40,7 @@ model Loja {
   custosPedido         CustoPedido[]
   simulacoesViagem     SimulacaoViagem[]
   atribuicoes          AtribuicaoItem[]
+  comprasImportadas    CompraImportada[]
 }
 
 model Usuario {
@@ -243,6 +244,51 @@ model Fornecedor {
   @@index([lojaId, nome])
 }
 
+enum StatusAtribuicao {
+  PENDENTE_ATRIBUICAO
+  PARCIALMENTE_ATRIBUIDA
+  ATRIBUIDA
+  IGNORADA
+  DUPLICADA
+}
+
+model CompraImportada {
+  id                String             @id @default(cuid())
+  lojaId            String?
+  fornecedorId      String
+  numeroPedido      String
+  quantidade        Int
+  moeda             String             @default("USD")
+  statusAtribuicao  StatusAtribuicao   @default(PENDENTE_ATRIBUICAO)
+  observacao        String?
+  importadaEm       DateTime           @default(now())
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  loja              Loja?              @relation(fields: [lojaId], references: [id], onDelete: SetNull)
+  itens             CompraImportadaItem[] @relation("compraImportadaItens")
+  atribuicoes       AtribuicaoItem[]
+  pedidosOperacionais PedidoCompra[]
+
+  @@unique([fornecedorId, numeroPedido])
+  @@index([statusAtribuicao])
+  @@index([importadaEm])
+  @@index([lojaId])
+}
+
+model CompraImportadaItem {
+  id                    String           @id @default(cuid())
+  compraImportadaId     String
+  quantidade            Int
+  observacao            String?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  compraImportada       CompraImportada  @relation("compraImportadaItens", fields: [compraImportadaId], references: [id], onDelete: Cascade)
+
+  @@index([compraImportadaId])
+}
+
 model PedidoCompra {
   id             String             @id @default(cuid())
   lojaId         String
@@ -256,21 +302,25 @@ model PedidoCompra {
   imposto        Decimal            @default(0) @db.Decimal(12, 2)
   subtotal       Decimal            @default(0) @db.Decimal(12, 2)
   total          Decimal            @default(0) @db.Decimal(12, 2)
-  observacoes    String?
-  canceladoEm    DateTime?
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
-  loja           Loja               @relation(fields: [lojaId], references: [id], onDelete: Restrict)
-  fornecedor     Fornecedor         @relation(fields: [fornecedorId, lojaId], references: [id, lojaId], onDelete: Restrict)
-  itens          PedidoCompraItem[]
-  pagamentos     Pagamento[]
-  custo          CustoPedido?
+  observacoes       String?
+  canceladoEm       DateTime?
+  compraImportadaId String?
+  statusAtribuicao  StatusAtribuicao   @default(PENDENTE_ATRIBUICAO)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  loja              Loja               @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  fornecedor        Fornecedor         @relation(fields: [fornecedorId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  compraImportada   CompraImportada?   @relation(fields: [compraImportadaId], references: [id], onDelete: SetNull)
+  itens             PedidoCompraItem[]
+  pagamentos        Pagamento[]
+  custo             CustoPedido?
 
   @@unique([lojaId, fornecedorId, numeroPedido])
   @@unique([id, lojaId])
   @@index([lojaId, status])
   @@index([lojaId, fornecedorId])
   @@index([lojaId, dataCompra])
+  @@index([compraImportadaId])
 }
 
 model PedidoCompraItem {
@@ -868,20 +918,24 @@ model SimulacaoViagemParametro {
 }
 
 model AtribuicaoItem {
-  id                 String           @id @default(cuid())
-  pedidoCompraItemId String
-  lojaId             String
-  quantidade         Int
-  atribuidoPorId     String
-  atribuidoEm        DateTime         @default(now())
-  observacao         String?
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
+  id                        String           @id @default(cuid())
+  compraImportadaId         String?
+  pedidoCompraItemId        String?
+  lojaId                    String
+  quantidade                Int
+  atribuidoPorId            String
+  atribuidoEm               DateTime         @default(now())
+  observacao                String?
+  createdAt                 DateTime         @default(now())
+  updatedAt                 DateTime         @updatedAt
 
-  pedidoCompraItem   PedidoCompraItem @relation(fields: [pedidoCompraItemId, lojaId], references: [id, lojaId], onDelete: Cascade)
-  loja               Loja             @relation(fields: [lojaId], references: [id], onDelete: Restrict)
-  atribuidoPor       Usuario          @relation(fields: [atribuidoPorId], references: [id], onDelete: Restrict)
+  compraImportada           CompraImportada? @relation(fields: [compraImportadaId], references: [id], onDelete: Cascade)
+  pedidoCompraItem          PedidoCompraItem? @relation(fields: [pedidoCompraItemId, lojaId], references: [id, lojaId], onDelete: SetNull)
+  loja                      Loja             @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  atribuidoPor              Usuario          @relation(fields: [atribuidoPorId], references: [id], onDelete: Restrict)
 
+  @@unique([compraImportadaId, lojaId])
   @@unique([pedidoCompraItemId, lojaId])
   @@index([lojaId, atribuidoEm])
+  @@index([compraImportadaId])
 }
