@@ -66,6 +66,67 @@ export const reportQueryKeys = {
 export const formatSalePrice = (value: string) =>
   Number(value) === 0 ? "A definir" : value;
 
+const KNOWN_ERROR_MESSAGES: Record<string, string> = {
+  bad_request: "Dados inválidos. Verifique os campos e tente novamente.",
+  conflict: "Já existe um registro com esses dados.",
+  not_found: "Registro não encontrado.",
+  forbidden: "Você não tem permissão para esta ação."
+};
+const STATUS_FALLBACK_MESSAGES: Record<number, string> = {
+  400: "Dados inválidos. Verifique os campos e tente novamente.",
+  403: "Você não tem permissão para esta ação.",
+  404: "Registro não encontrado.",
+  409: "Já existe um registro com esses dados."
+};
+export function extractErrorMessage(error: unknown): string {
+  if (axios.isAxiosError(error)) {
+    const code = error.response?.data?.error;
+    if (typeof code === "string" && KNOWN_ERROR_MESSAGES[code]) {
+      return KNOWN_ERROR_MESSAGES[code];
+    }
+    const status = error.response?.status;
+    if (status && STATUS_FALLBACK_MESSAGES[status]) {
+      return STATUS_FALLBACK_MESSAGES[status];
+    }
+  }
+  return "Falha na operação. Tente novamente.";
+}
+type MinimalMutationState = {
+  isPending: boolean;
+  isError: boolean;
+  isSuccess: boolean;
+  error: unknown;
+};
+function MutationStatus({
+  mutation,
+  successMessage,
+  loadingMessage = "Salvando..."
+}: {
+  mutation: MinimalMutationState;
+  successMessage: string;
+  loadingMessage?: string;
+}) {
+  if (mutation.isPending)
+    return (
+      <Typography variant="body2" color="text.secondary" role="status">
+        {loadingMessage}
+      </Typography>
+    );
+  if (mutation.isError)
+    return (
+      <Typography variant="body2" color="error" role="alert">
+        {extractErrorMessage(mutation.error)}
+      </Typography>
+    );
+  if (mutation.isSuccess)
+    return (
+      <Typography variant="body2" color="success.main" role="status">
+        {successMessage}
+      </Typography>
+    );
+  return null;
+}
+
 type Store = { id: string; slug: string; nome: string };
 type AuthUser = { id: string; name: string; email: string; active: boolean };
 type AuthState = {
@@ -110,20 +171,20 @@ const loginSchema = z.object({
   password: z.string().min(1, "Senha obrigatória")
 });
 const categorySchema = z.object({
-  nome: z.string().min(1),
-  slug: z.string().min(1),
+  nome: z.string().min(1, "Nome obrigatório"),
+  slug: z.string().min(1, "Slug obrigatório"),
   descricao: z.string().optional(),
   ordem: z.coerce.number().int().default(0),
   ativo: z.boolean().optional()
 });
 const productSchema = z.object({
-  codigo: z.coerce.number().int().min(1),
-  nome: z.string().min(1),
-  slug: z.string().min(1),
-  categoriaId: z.string().min(1),
+  codigo: z.coerce.number().int().min(1, "Código obrigatório"),
+  nome: z.string().min(1, "Nome obrigatório"),
+  slug: z.string().min(1, "Slug obrigatório"),
+  categoriaId: z.string().min(1, "Selecione uma categoria"),
   descricao: z.string().optional(),
-  precoVenda: z.coerce.number().min(0),
-  markup: z.coerce.number().min(25),
+  precoVenda: z.coerce.number().min(0, "Preço inválido"),
+  markup: z.coerce.number().min(25, "Markup mínimo de 25%"),
   peso: z.coerce.number().min(0).optional()
 });
 
@@ -212,20 +273,26 @@ export function LoginPage() {
         stores: response.data.stores
       });
       navigate("/operacao");
-    } catch {
-      setError("password", { message: "Credenciais inválidas" });
+    } catch (error) {
+      setError("root", { message: extractErrorMessage(error) });
     }
   });
   return (
     <Box
-      sx={{ minHeight: "100vh", display: "grid", placeItems: "center", p: 2 }}
+      sx={{
+        minHeight: "100vh",
+        display: "grid",
+        placeItems: "center",
+        p: 2,
+        boxSizing: "border-box"
+      }}
     >
-      <Card sx={{ width: 380 }}>
+      <Card sx={{ width: "100%", maxWidth: 380 }}>
         <CardContent>
           <Typography variant="h5" mb={2}>
             Entrar
           </Typography>
-          <form onSubmit={onSubmit}>
+          <form onSubmit={onSubmit} noValidate>
             <Stack gap={2}>
               <Controller
                 name="email"
@@ -233,7 +300,9 @@ export function LoginPage() {
                 render={({ field }) => (
                   <TextField
                     {...field}
+                    type="email"
                     label="E-mail"
+                    fullWidth
                     error={!!errors.email}
                     helperText={errors.email?.message}
                   />
@@ -247,13 +316,19 @@ export function LoginPage() {
                     {...field}
                     type="password"
                     label="Senha"
+                    fullWidth
                     error={!!errors.password}
                     helperText={errors.password?.message}
                   />
                 )}
               />
+              {errors.root?.message && (
+                <Typography variant="body2" color="error" role="alert">
+                  {errors.root.message}
+                </Typography>
+              )}
               <Button type="submit" variant="contained" disabled={isSubmitting}>
-                Entrar
+                {isSubmitting ? "Entrando..." : "Entrar"}
               </Button>
             </Stack>
           </form>
@@ -311,7 +386,6 @@ function Shell({ children }: { children: React.ReactNode }) {
   };
   return (
     <Box sx={{ display: "flex" }}>
-      <CssBaseline />
       <Drawer variant="permanent">
         <Box p={2}>
           <Typography variant="h6">Dronz & Gooder</Typography>
@@ -367,6 +441,13 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
+const categoryDefaultValues = {
+  nome: "",
+  slug: "",
+  descricao: "",
+  ordem: 0,
+  ativo: true
+};
 function CategoriesPage() {
   const {
     categories,
@@ -379,8 +460,10 @@ function CategoriesPage() {
   const [editing, setEditing] = React.useState<Category | null>(null);
   const form = useForm({
     resolver: zodResolver(categorySchema),
-    defaultValues: { nome: "", slug: "", descricao: "", ordem: 0, ativo: true }
+    defaultValues: categoryDefaultValues
   });
+  const [resetForStoreId, setResetForStoreId] =
+    React.useState(activeStoreId);
   const invalidate = () =>
     Promise.all([
       client.invalidateQueries({
@@ -390,19 +473,25 @@ function CategoriesPage() {
         queryKey: catalogQueryKeys.products(activeStoreId)
       })
     ]);
+  // Captura se a submissão era uma edição no momento do envio: `editing` já
+  // é limpo dentro de onSuccess, então não pode ser lido no render seguinte
+  // para escolher a mensagem de sucesso correta.
+  const [wasEditing, setWasEditing] = React.useState(false);
   const saveMutation = useMutation({
-    mutationFn: async (values: z.infer<typeof categorySchema>) =>
-      editing
+    mutationFn: async (values: z.infer<typeof categorySchema>) => {
+      setWasEditing(!!editing);
+      return editing
         ? api.patch(`/categories/${editing.id}`, values, {
             headers: { ...authHeader(), "x-store-id": activeStoreId }
           })
         : api.post("/categories", values, {
             headers: { ...authHeader(), "x-store-id": activeStoreId }
-          }),
+          });
+    },
     onSuccess: async () => {
       await invalidate();
       setEditing(null);
-      form.reset();
+      form.reset(categoryDefaultValues);
     }
   });
   const toggleMutation = useMutation({
@@ -421,7 +510,19 @@ function CategoriesPage() {
       }),
     onSuccess: invalidate
   });
+  // Descarta edição e feedback de mutação em andamento ao trocar de loja
+  // (evita PATCH cross-tenant com dados de outra loja ainda preenchidos).
+  if (activeStoreId !== resetForStoreId) {
+    setResetForStoreId(activeStoreId);
+    setEditing(null);
+    form.reset(categoryDefaultValues);
+    saveMutation.reset();
+    toggleMutation.reset();
+    removeMutation.reset();
+  }
   const save = form.handleSubmit((values) => saveMutation.mutateAsync(values));
+  const rowBusy = toggleMutation.isPending || removeMutation.isPending;
+  const { errors } = form.formState;
   return (
     <Box p={3}>
       <Typography variant="h4" mb={2}>
@@ -432,17 +533,31 @@ function CategoriesPage() {
       <Stack direction="row" gap={2} flexWrap="wrap">
         <Card sx={{ width: 340 }}>
           <CardContent>
-            <form onSubmit={save}>
+            <form onSubmit={save} noValidate>
               <Stack gap={2}>
                 <Controller
                   name="nome"
                   control={form.control}
-                  render={({ field }) => <TextField {...field} label="Nome" />}
+                  render={({ field }) => (
+                    <TextField
+                      {...field}
+                      label="Nome"
+                      error={!!errors.nome}
+                      helperText={errors.nome?.message}
+                    />
+                  )}
                 />
                 <Controller
                   name="slug"
                   control={form.control}
-                  render={({ field }) => <TextField {...field} label="Slug" />}
+                  render={({ field }) => (
+                    <TextField
+                      {...field}
+                      label="Slug"
+                      error={!!errors.slug}
+                      helperText={errors.slug?.message}
+                    />
+                  )}
                 />
                 <Controller
                   name="descricao"
@@ -458,9 +573,21 @@ function CategoriesPage() {
                     <TextField {...field} label="Ordem" type="number" />
                   )}
                 />
-                <Button type="submit" variant="contained">
+                <Button
+                  type="submit"
+                  variant="contained"
+                  disabled={saveMutation.isPending}
+                >
                   {editing ? "Salvar" : "Criar"}
                 </Button>
+                <MutationStatus
+                  mutation={saveMutation}
+                  successMessage={
+                    wasEditing
+                      ? "Categoria salva com sucesso."
+                      : "Categoria criada com sucesso."
+                  }
+                />
               </Stack>
             </form>
           </CardContent>
@@ -488,11 +615,15 @@ function CategoriesPage() {
                 >
                   Editar
                 </Button>
-                <Button onClick={() => toggleMutation.mutate(category)}>
+                <Button
+                  disabled={rowBusy}
+                  onClick={() => toggleMutation.mutate(category)}
+                >
                   {category.ativo ? "Desativar" : "Ativar"}
                 </Button>
                 <Button
                   color="error"
+                  disabled={rowBusy}
                   onClick={() => removeMutation.mutate(category)}
                 >
                   Excluir
@@ -502,6 +633,14 @@ function CategoriesPage() {
           </Card>
         ))}
       </Stack>
+      <MutationStatus
+        mutation={toggleMutation}
+        successMessage="Status atualizado."
+      />
+      <MutationStatus
+        mutation={removeMutation}
+        successMessage="Categoria excluída."
+      />
       {!loading && !categories.length && (
         <Typography mt={2}>Nenhuma categoria.</Typography>
       )}
@@ -509,6 +648,16 @@ function CategoriesPage() {
   );
 }
 
+const productDefaultValues = {
+  codigo: 301,
+  nome: "",
+  slug: "",
+  categoriaId: "",
+  descricao: "",
+  precoVenda: 0,
+  markup: 25,
+  peso: 0
+};
 function ProductsPage() {
   const { categories, categoriesError, categoriesLoading } = useCategories();
   const { products, productsError, productsLoading } = useProducts();
@@ -520,34 +669,46 @@ function ProductsPage() {
   const [editing, setEditing] = React.useState<Product | null>(null);
   const form = useForm({
     resolver: zodResolver(productSchema),
-    defaultValues: {
-      codigo: 301,
-      nome: "",
-      slug: "",
-      categoriaId: "",
-      descricao: "",
-      precoVenda: 0,
-      markup: 25,
-      peso: 0
-    }
+    defaultValues: productDefaultValues
   });
+  const [resetForStoreId, setResetForStoreId] =
+    React.useState(activeStoreId);
   const invalidate = () =>
     client.invalidateQueries({
       queryKey: catalogQueryKeys.products(activeStoreId)
     });
+  // Captura se a submissão era uma edição no momento do envio: `editing` já
+  // é limpo dentro de onSuccess, então não pode ser lido no render seguinte
+  // para escolher a mensagem de sucesso correta.
+  const [wasEditing, setWasEditing] = React.useState(false);
   const saveMutation = useMutation({
-    mutationFn: async (values: z.infer<typeof productSchema>) =>
-      editing
-        ? api.patch(`/products/${editing.id}`, values, {
-            headers: { ...authHeader(), "x-store-id": activeStoreId }
-          })
-        : api.post("/products", values, {
-            headers: { ...authHeader(), "x-store-id": activeStoreId }
-          }),
+    mutationFn: async (values: z.infer<typeof productSchema>) => {
+      setWasEditing(!!editing);
+      if (editing) {
+        // O backend trata `codigo` como imutável e rejeita o campo no PATCH
+        // (productUpdateSchema.strict() omite `codigo`), por isso ele é
+        // removido do payload de atualização.
+        const updatePayload = {
+          nome: values.nome,
+          slug: values.slug,
+          categoriaId: values.categoriaId,
+          descricao: values.descricao,
+          precoVenda: values.precoVenda,
+          markup: values.markup,
+          peso: values.peso
+        };
+        return api.patch(`/products/${editing.id}`, updatePayload, {
+          headers: { ...authHeader(), "x-store-id": activeStoreId }
+        });
+      }
+      return api.post("/products", values, {
+        headers: { ...authHeader(), "x-store-id": activeStoreId }
+      });
+    },
     onSuccess: async () => {
       await invalidate();
       setEditing(null);
-      form.reset();
+      form.reset(productDefaultValues);
     }
   });
   const toggleMutation = useMutation({
@@ -559,7 +720,17 @@ function ProductsPage() {
       ),
     onSuccess: invalidate
   });
+  // Descarta edição e feedback de mutação em andamento ao trocar de loja
+  // (evita PATCH cross-tenant com dados de outra loja ainda preenchidos).
+  if (activeStoreId !== resetForStoreId) {
+    setResetForStoreId(activeStoreId);
+    setEditing(null);
+    form.reset(productDefaultValues);
+    saveMutation.reset();
+    toggleMutation.reset();
+  }
   const save = form.handleSubmit((values) => saveMutation.mutateAsync(values));
+  const { errors } = form.formState;
   return (
     <Box p={3}>
       <Typography variant="h4" mb={2}>
@@ -570,30 +741,61 @@ function ProductsPage() {
       <Stack direction="row" gap={2} flexWrap="wrap">
         <Card sx={{ width: 360 }}>
           <CardContent>
-            <form onSubmit={save}>
+            <form onSubmit={save} noValidate>
               <Stack gap={2}>
                 <Controller
                   name="codigo"
                   control={form.control}
                   render={({ field }) => (
-                    <TextField {...field} label="Código" type="number" />
+                    <TextField
+                      {...field}
+                      label="Código"
+                      type="number"
+                      disabled={!!editing}
+                      helperText={
+                        editing
+                          ? "O código não pode ser alterado"
+                          : errors.codigo?.message
+                      }
+                      error={!!errors.codigo}
+                    />
                   )}
                 />
                 <Controller
                   name="nome"
                   control={form.control}
-                  render={({ field }) => <TextField {...field} label="Nome" />}
+                  render={({ field }) => (
+                    <TextField
+                      {...field}
+                      label="Nome"
+                      error={!!errors.nome}
+                      helperText={errors.nome?.message}
+                    />
+                  )}
                 />
                 <Controller
                   name="slug"
                   control={form.control}
-                  render={({ field }) => <TextField {...field} label="Slug" />}
+                  render={({ field }) => (
+                    <TextField
+                      {...field}
+                      label="Slug"
+                      error={!!errors.slug}
+                      helperText={errors.slug?.message}
+                    />
+                  )}
                 />
                 <Controller
                   name="categoriaId"
                   control={form.control}
                   render={({ field }) => (
-                    <TextField {...field} select label="Categoria">
+                    <TextField
+                      {...field}
+                      select
+                      label="Categoria"
+                      error={!!errors.categoriaId}
+                      helperText={errors.categoriaId?.message}
+                    >
                       {categories.map((category) => (
                         <MenuItem key={category.id} value={category.id}>
                           {category.nome}
@@ -610,6 +812,8 @@ function ProductsPage() {
                       {...field}
                       label="Preço de venda"
                       type="number"
+                      error={!!errors.precoVenda}
+                      helperText={errors.precoVenda?.message}
                     />
                   )}
                 />
@@ -617,12 +821,40 @@ function ProductsPage() {
                   name="markup"
                   control={form.control}
                   render={({ field }) => (
-                    <TextField {...field} label="Markup" type="number" />
+                    <TextField
+                      {...field}
+                      label="Markup"
+                      type="number"
+                      error={!!errors.markup}
+                      helperText={errors.markup?.message}
+                    />
                   )}
                 />
-                <Button type="submit" variant="contained">
+                <Button
+                  type="submit"
+                  variant="contained"
+                  disabled={saveMutation.isPending}
+                >
                   {editing ? "Salvar" : "Criar"}
                 </Button>
+                {editing && (
+                  <Button
+                    onClick={() => {
+                      setEditing(null);
+                      form.reset(productDefaultValues);
+                    }}
+                  >
+                    Cancelar edição
+                  </Button>
+                )}
+                <MutationStatus
+                  mutation={saveMutation}
+                  successMessage={
+                    wasEditing
+                      ? "Produto salvo com sucesso."
+                      : "Produto criado com sucesso."
+                  }
+                />
               </Stack>
             </form>
           </CardContent>
@@ -656,7 +888,10 @@ function ProductsPage() {
                 >
                   Editar
                 </Button>
-                <Button onClick={() => toggleMutation.mutate(product)}>
+                <Button
+                  disabled={toggleMutation.isPending}
+                  onClick={() => toggleMutation.mutate(product)}
+                >
                   {product.ativo ? "Desativar" : "Ativar"}
                 </Button>
               </Stack>
@@ -664,6 +899,10 @@ function ProductsPage() {
           </Card>
         ))}
       </Stack>
+      <MutationStatus
+        mutation={toggleMutation}
+        successMessage="Status atualizado."
+      />
       {!loading && !products.length && (
         <Typography mt={2}>Nenhum produto.</Typography>
       )}
@@ -770,23 +1009,44 @@ function SuppliersPage() {
       form.reset();
     }
   });
+  const { errors } = form.formState;
   return (
     <Box p={3}>
       <Typography variant="h4">Fornecedores</Typography>
-      <form onSubmit={form.handleSubmit((v) => m.mutateAsync(v))}>
-        <Stack direction="row" gap={2} my={2}>
+      <form onSubmit={form.handleSubmit((v) => m.mutateAsync(v))} noValidate>
+        <Stack direction="row" gap={2} my={2} flexWrap="wrap">
           <Controller
             name="nome"
             control={form.control}
-            render={({ field }) => <TextField {...field} label="Nome" />}
+            render={({ field }) => (
+              <TextField
+                {...field}
+                label="Nome"
+                error={!!errors.nome}
+                helperText={errors.nome?.message}
+              />
+            )}
           />
           <Controller
             name="moedaPadrao"
             control={form.control}
-            render={({ field }) => <TextField {...field} label="Moeda" />}
+            render={({ field }) => (
+              <TextField
+                {...field}
+                label="Moeda"
+                error={!!errors.moedaPadrao}
+                helperText={errors.moedaPadrao?.message}
+              />
+            )}
           />
-          <Button type="submit">Criar</Button>
+          <Button type="submit" disabled={m.isPending}>
+            Criar
+          </Button>
         </Stack>
+        <MutationStatus
+          mutation={m}
+          successMessage="Fornecedor criado com sucesso."
+        />
       </form>
       {q.isLoading && <Typography>Carregando...</Typography>}
       {q.isError && <Typography>Falha ao carregar dados</Typography>}
@@ -954,8 +1214,14 @@ function PurchaseOrdersPage() {
               <TextField {...field} type="number" label="Desconto" />
             )}
           />
-          <Button type="submit">Criar pedido</Button>
+          <Button type="submit" disabled={createOrder.isPending}>
+            Criar pedido
+          </Button>
         </Stack>
+        <MutationStatus
+          mutation={createOrder}
+          successMessage="Pedido criado com sucesso."
+        />
       </form>
       <Typography my={2}>
         Fornecedores disponíveis:{" "}
@@ -1090,6 +1356,10 @@ export function LogisticsPage() {
           Adicionar viajante
         </Button>
       </Stack>
+      <MutationStatus
+        mutation={createTraveler}
+        successMessage="Viajante adicionado."
+      />
       {travelers.data?.map(
         (v: { id: string; nome: string; ativo: boolean }) => (
           <Card key={v.id}>
@@ -1144,8 +1414,11 @@ export function LogisticsPage() {
           InputLabelProps={{ shrink: true }}
           {...tripForm.register("chegadaPrevistaEm", { required: true })}
         />
-        <Button type="submit">Criar viagem</Button>
+        <Button type="submit" disabled={createTrip.isPending}>
+          Criar viagem
+        </Button>
       </Stack>
+      <MutationStatus mutation={createTrip} successMessage="Viagem criada." />
       {trips.data?.map(
         (t: {
           id: string;
@@ -1193,11 +1466,11 @@ export function LogisticsPage() {
           label="Código"
           {...bagForm.register("codigo", { required: true })}
         />
-        <Button type="submit">Criar mala</Button>
+        <Button type="submit" disabled={createBag.isPending}>
+          Criar mala
+        </Button>
       </Stack>
-      {(createTraveler.isError || createTrip.isError || createBag.isError) && (
-        <Typography color="error">Não foi possível salvar.</Typography>
-      )}
+      <MutationStatus mutation={createBag} successMessage="Mala criada." />
       {bags.data?.map(
         (b: {
           id: string;
@@ -1402,8 +1675,11 @@ export function InventoryPage() {
           label="Observação"
           {...movementForm.register("observacoes")}
         />
-        <Button type="submit">Registrar movimento</Button>
+        <Button type="submit" disabled={move.isPending}>
+          Registrar movimento
+        </Button>
       </Stack>
+      <MutationStatus mutation={move} successMessage="Movimento registrado." />
       {stock.data?.map(
         (item: {
           id: string;
@@ -1487,8 +1763,14 @@ export function InventoryPage() {
               </MenuItem>
             ))}
         </TextField>
-        <Button type="submit">Iniciar recebimento</Button>
+        <Button type="submit" disabled={createReceipt.isPending}>
+          Iniciar recebimento
+        </Button>
       </Stack>
+      <MutationStatus
+        mutation={createReceipt}
+        successMessage="Recebimento iniciado."
+      />
       {receiving.data?.map(
         (item: {
           id: string;
@@ -1523,6 +1805,7 @@ export function InventoryPage() {
                     </Typography>
                     {remaining > 0 && (
                       <Button
+                        disabled={confirmReceipt.isPending}
                         onClick={() =>
                           confirmReceipt.mutate({
                             receiptId: item.id,
@@ -1541,9 +1824,10 @@ export function InventoryPage() {
           </Card>
         )
       )}
-      {(move.isError || createReceipt.isError || confirmReceipt.isError) && (
-        <Typography color="error">Operação não concluída.</Typography>
-      )}
+      <MutationStatus
+        mutation={confirmReceipt}
+        successMessage="Item confirmado."
+      />
     </Box>
   );
 }
@@ -1706,8 +1990,14 @@ export function FinancePage() {
           InputLabelProps={{ shrink: true }}
           {...exchangeForm.register("cotadoEm")}
         />
-        <Button type="submit">Registrar câmbio</Button>
+        <Button type="submit" disabled={exchange.isPending}>
+          Registrar câmbio
+        </Button>
       </Stack>
+      <MutationStatus
+        mutation={exchange}
+        successMessage="Câmbio registrado."
+      />
       <Stack
         component="form"
         direction={{ xs: "column", md: "row" }}
@@ -1758,8 +2048,14 @@ export function FinancePage() {
           label="Valor"
           {...paymentForm.register("valor", { valueAsNumber: true, min: 0.01 })}
         />
-        <Button type="submit">Registrar pagamento</Button>
+        <Button type="submit" disabled={payment.isPending}>
+          Registrar pagamento
+        </Button>
       </Stack>
+      <MutationStatus
+        mutation={payment}
+        successMessage="Pagamento registrado."
+      />
       <Stack
         component="form"
         direction={{ xs: "column", md: "row" }}
@@ -1803,11 +2099,11 @@ export function FinancePage() {
             min: 0
           })}
         />
-        <Button type="submit">Calcular custos</Button>
+        <Button type="submit" disabled={costs.isPending}>
+          Calcular custos
+        </Button>
       </Stack>
-      {(exchange.isError || payment.isError || costs.isError) && (
-        <Typography color="error">Não foi possível registrar.</Typography>
-      )}
+      <MutationStatus mutation={costs} successMessage="Custos calculados." />
       {payments.isLoading && <Typography>Carregando...</Typography>}
       {payments.isError && <Typography>Falha ao carregar dados</Typography>}
       {payments.data?.map(
@@ -1917,6 +2213,7 @@ export function AppRoutes() {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider theme={theme}>
+        <CssBaseline />
         <Routes>
           <Route path="/" element={<Navigate to="/operacao" replace />} />
           <Route path="/login" element={<LoginPage />} />
