@@ -64,7 +64,9 @@ CsvBuyerAdapter ────────────┼─ NormalizedBuyerPurcha
 ManualBuyerAdapter ─────────┘
 ```
 
-O Batch 9 define o contrato normativo comum antes de qualquer adapter. Ele preserva evidências independentes, reconciliação, aprovação humana, atribuição quantitativa e visão mensal. Amazon Business, eBay e e-mail serão implementados em batches separados, sem transformar uma fonte em autoridade absoluta e sem materialização automática.
+O Batch 9 define o contrato normativo comum antes de qualquer adapter. O fluxo oficial é fonte → evidência imutável → normalização → reconciliação → candidato → aprovação humana → `CompraImportada` → atribuição quantitativa → materialização explícita. Amazon Business, eBay e e-mail serão implementados em batches separados, sem transformar uma fonte em autoridade absoluta e sem materialização automática.
+
+Evidências preservam origem, identidade, hash, versão, correlação, confiança de extração e classificação de sensibilidade. Mudanças externas criam eventos imutáveis e atualizam uma projeção reconstruível; não se adota event sourcing genérico. `ConfiancaConciliacao` é calculada no backend, explicável e versionada, e serve apenas para priorizar/reduzir ruído de revisão. Nunca substitui aprovação humana nem decide loja, conflito ou materialização.
 
 ## 2. Pesquisa oficial
 
@@ -275,13 +277,15 @@ Critérios obrigatórios: autorização verificável, minimização de dados, id
 
 ## 13. Limitações e gates seguintes
 
-- Batch 9: contrato normativo multicanal de Buyer Purchase Ingestion.
-- Batch 10: Amazon Business Reporting API.
-- Batch 11: eBay buyer por `GetMyeBayBuying`.
+- Batch 9: contrato buyer, evidências e painel mensal.
+- Batch 10: Amazon Business Buyer Integration.
+- Batch 11: eBay Buyer Integration.
 - Batch 12: e-mail autorizado e reconciliação multicanal.
-- Batch 13: migração da planilha e painel mensal.
-- Batch 14: consolidação operacional de envios, pacotes e trackings.
-- Batch 15: motor independente de tracking e transportadoras.
-- Batches 16–18: Financeiro/conciliação, Vendas/baixa patrimonial e Analytics avançado.
+- Batch 13: painel mensal e migração da planilha histórica.
+- Batch 14: consolidação de remessas, pacotes e tracking.
+- Batch 15: motor de tracking e alertas.
+- Batches 16–18: Financeiro/conciliação, Vendas/baixa patrimonial e Analytics.
+
+O painel mensal do Batch 13 é um read model dinâmico, derivado das compras aprovadas, itens, atribuições, materializações e eventos. Não cria base paralela. A planilha histórica permanece em operação paralela até importação, reconciliação, comparação de totais e aceite formal.
 
 O Batch 9 é exclusivamente documental. Nenhum adapter seguinte está iniciado. Adapters seller Amazon/eBay permanecem adiados até existir necessidade específica de importar vendas recebidas. Amazon Business e eBay buyer são trilhas distintas dentro do mesmo contrato de evidências e exigem confirmação externa antes da implementação.

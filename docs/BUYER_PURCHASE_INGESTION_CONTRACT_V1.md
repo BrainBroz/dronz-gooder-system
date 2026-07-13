@@ -17,9 +17,9 @@ O objetivo é transformar dados externos incompletos ou repetidos em uma única 
 Princípio obrigatório:
 
 ```text
-fonte externa → evidência imutável → correlação/reconciliação
-→ aprovação humana → atribuição quantitativa por loja
-→ materialização explícita no domínio já existente
+fonte externa → evidência imutável → normalização → reconciliação
+→ candidato → aprovação humana → CompraImportada
+→ atribuição quantitativa por loja → materialização explícita
 ```
 
 ## 2. Decisões definitivas
@@ -51,13 +51,16 @@ fonte externa → evidência imutável → correlação/reconciliação
 
 ### 3.1 Tipos de fonte
 
-- `AMAZON_BUSINESS_REPORTING` — relatórios buyer estruturados do Amazon Business.
-- `EBAY_MY_BUYING` — `GetMyeBayBuying` da conta buyer autorizada.
-- `GMAIL_AUTHORIZED` — caixa Gmail autorizada e filtrada.
-- `MICROSOFT_GRAPH_MAIL` — Outlook/Exchange autorizado e filtrado.
-- `CSV_IMPORT` — importação controlada com preview e mapping.
-- `DOCUMENT_IMPORT` — invoice/comprovante; permanece posterior à fundação de storage e extração.
+O contrato normalizado reconhece estas origens conceituais:
+
+- `AMAZON_BUSINESS_API` — relatórios buyer estruturados do Amazon Business;
+- `EBAY_BUYER_API` — API buyer autorizada do eBay;
+- `EMAIL_AMAZON`, `EMAIL_EBAY` e `EMAIL_OUTRO` — evidência recebida em caixa autorizada, preservando provider de e-mail e identidade da mensagem;
+- `INVOICE` e `DOCUMENTO` — documento autorizado, posterior à fundação de storage, retenção e extração;
+- `CSV` — importação controlada com preview e mapping;
 - `MANUAL` — registro humano auditável.
+
+Nomes técnicos já usados pela fundação, como `AMAZON_BUSINESS_REPORTING`, `EBAY_MY_BUYING`, `GMAIL_AUTHORIZED`, `MICROSOFT_GRAPH_MAIL`, `CSV_IMPORT` e `DOCUMENT_IMPORT`, são identificadores de adapter ou transporte. Eles devem mapear para uma das origens conceituais acima e não criam uma segunda taxonomia de domínio.
 
 ### 3.2 Entidades conceituais
 
@@ -76,21 +79,21 @@ fonte externa → evidência imutável → correlação/reconciliação
 
 As denominações finais de schema poderão seguir a convenção Prisma vigente, mas essas responsabilidades não podem ser colapsadas.
 
-Cada evidência registra, no mínimo: tipo de fonte, provider, conta, identificador do registro ou mensagem, Order ID extraído, data da fonte, payload normalizado/sanitizado, hash, confiança quando houver extração, instante da ingestão, correlation ID, vínculo eventual com `CompraImportada` e estado da conciliação. O payload bruto só pode ser retido conforme a política de privacidade aprovada.
+Cada evidência registra, no mínimo: fonte, provider, conexão, identificador externo da evidência, Order ID extraído, data da fonte, dados normalizados, hash, versão, confiança da extração, instante da ingestão, correlation ID, vínculo eventual com `CompraImportada`, estado da conciliação, referência segura ao original quando permitido e classificação de sensibilidade. O payload original só pode ser retido conforme política de privacidade e retenção aprovada; quando não puder ser guardado, a evidência mantém hash e referência segura suficiente para auditoria.
 
 ## 4. Identidade e deduplicação
 
 ### 4.1 Pedido com identidade oficial
 
-Identidade canônica preferencial:
+Identidade forte canônica:
 
 ```text
-(sourceType, externalAccountId, normalizedExternalOrderId)
+(provider, externalAccountId, normalizedExternalOrderId)
 ```
 
 Para Amazon Business, `externalAccountId` identifica a conta/organização autorizada e `externalOrderId` o pedido do relatório. Para eBay, identifica a conta buyer autorizada e o pedido/linha retornado por `GetMyeBayBuying`.
 
-Normalização de ID aplica trim externo e Unicode NFC e remove somente diferenças adicionais comprovadamente irrelevantes pelo provider. Nunca altera caixa ou pontuação quando o provider as tratar como significativas.
+Normalização de ID aplica trim externo, Unicode NFC e a regra de caixa documentada pelo provider. Qualquer remoção adicional de pontuação ou transformação deve ser comprovadamente irrelevante para aquele provider. Correlação heurística nunca consolida registros sem decisão humana.
 
 ### 4.2 Item
 
@@ -127,24 +130,63 @@ Não existe precedência absoluta por canal. A precedência é por campo e capac
 
 Uma fonte posterior não sobrescreve a anterior. Alterações geram nova evidência e reconciliação.
 
+### 5.1 Confiança de conciliação
+
+`ConfiancaConciliacao` é uma avaliação explicável e versionada da qualidade da correlação entre evidências. Possui score de `0` a `100` e classificação `ALTA`, `MEDIA` ou `BAIXA`. Considera sinais como identidade forte, conta, Order ID, itens, quantidades, valores, moeda, merchant e proximidade temporal.
+
+O backend é a única fonte da fórmula. A versão da fórmula, os sinais usados e a justificativa do resultado acompanham a avaliação. Pesos e faixas de classificação permanecem decisão aberta de produto/técnica antes da implementação.
+
+Confiança nunca:
+
+- aprova ou rejeita uma compra;
+- escolhe loja ou quantidade;
+- resolve divergência;
+- cria `CompraImportada`;
+- materializa pedido;
+- altera decisão histórica quando a fórmula evolui.
+
+Ela apenas prioriza filas, simplifica a apresentação de revisão e qualifica a origem dos dados. Toda aprovação da V1 continua humana.
+
 ## 6. Estados de reconciliação e aprovação
 
-Estados do candidato:
+O estado de revisão do candidato usa uma única taxonomia conceitual:
 
-- `DETECTED` — evidência recebida;
-- `AWAITING_IDENTIFICATION` — identidade insuficiente;
-- `RECONCILING` — fontes sendo correlacionadas;
-- `CONFLICTED` — divergência bloqueadora;
-- `READY_FOR_REVIEW` — identidade e mínimos completos;
-- `APPROVED` — aprovação humana concluída;
-- `REJECTED` — não representa compra válida para o domínio;
-- `PARTIALLY_ALLOCATED` — parte das quantidades atribuída;
-- `ALLOCATED` — toda quantidade destinada ou deliberadamente mantida pendente conforme decisão explícita;
-- `PARTIALLY_MATERIALIZED` — ao menos uma loja materializada;
-- `MATERIALIZED` — todas as atribuições aprovadas materializadas;
-- `CANCELLED` — cancelamento confirmado e preservado no histórico.
+- `DETECTADA`;
+- `AGUARDANDO_IDENTIFICACAO`;
+- `AGUARDANDO_CONCILIACAO`;
+- `CONCILIADA`;
+- `COM_DIVERGENCIA`;
+- `AGUARDANDO_APROVACAO`;
+- `APROVADA`;
+- `REJEITADA`;
+- `CANCELADA`;
+- `REEMBOLSADA`;
+- `IGNORADA`.
 
-Transições são validadas no backend e versionadas. Aprovação rejeita versão stale. `REJECTED` e `CANCELLED` não apagam evidências.
+Atribuição e materialização são projeções posteriores com estados próprios e não são misturadas ao estado de revisão. Transições são validadas no backend e versionadas. Aprovação rejeita versão stale. Estados terminais não apagam evidências.
+
+### 6.1 Compra externa estável, eventos e projeção
+
+A identidade da compra permanece estável. Mudanças posteriores são fatos representados por `EventoCompraExterna`; a visão corrente é uma `ProjecaoCompraExterna` reconstruível. Este recorte não institui event sourcing genérico no sistema: aplica registro imutável apenas aos fatos externos e decisões de ingestão que precisam de rastreabilidade.
+
+Eventos mínimos previstos:
+
+- compra detectada ou confirmada e pagamento informado;
+- alteração de item, quantidade, valor, moeda ou status;
+- cancelamento e reembolso, totais ou parciais;
+- remessa, pacote, tracking e invoice detectados ou atualizados;
+- conciliação, conflito, aprovação, rejeição e classificação humana;
+- atribuição e materialização, apenas como referências aos comandos internos correspondentes.
+
+Evento confirmado é imutável. Correção cria novo evento ligado ao original. A projeção pode ser reconstruída deterministicamente e fatos externos nunca sobrescrevem silenciosamente decisões internas. Nenhum evento externo cria estoque, checkpoint ou materialização. Horários oficiais são armazenados em UTC, preservando também o instante informado pela fonte.
+
+### 6.2 Cenários multicanal normativos
+
+- API primeiro e e-mail depois: a mensagem é nova evidência reconciliada ao mesmo candidato quando a identidade forte coincide.
+- E-mail primeiro e API depois: o candidato permanece provisório até a API confirmar ou uma decisão humana resolver a identidade.
+- API sem e-mail ou e-mail sem API: a compra pode seguir para revisão; ausência de uma fonte não implica rejeição automática.
+- Fontes divergentes: nenhuma sobrescreve a outra; o candidato fica `COM_DIVERGENCIA` até decisão auditável.
+- Replay idêntico: retorna a evidência já conhecida; payload diferente sob a mesma identidade cria versão/evento ou conflito conforme o contrato.
 
 ## 7. Aprovação humana
 
@@ -162,6 +204,8 @@ Toda detecção automática passa por uma fila de revisão. O revisor deve visua
 - ações permitidas e bloqueios vindos do backend.
 
 A decisão grava ator, permissão, versão, antes/depois, motivo, correlation ID e timestamp UTC. Aprovação nunca é inferida por visualização, sincronização ou associação de conta.
+
+`ConfiancaConciliacao` pode ordenar a fila e reduzir ruído visual, mas não elimina esta etapa nem muda as ações permitidas.
 
 ## 8. Atribuição Dronz/Gooder
 
@@ -191,16 +235,16 @@ O painel mensal apresenta, por mês e moeda original:
 - quantidade de conflitos e mappings pendentes;
 - composição por fonte, conta e merchant.
 
-Filtros obrigatórios: mês, ano, loja, provider, conta, merchant, status, Categoria, Produto e moeda.
+Filtros obrigatórios: mês, ano, loja, provider, conta, merchant, Categoria, Produto, status, responsável e moeda.
 
 Indicadores e detalhamento previstos:
 
-- valor bruto, descontos, impostos, frete, valor líquido, cancelado e reembolsado;
+- valor bruto, valor líquido, cancelado e reembolsado;
 - pedidos, linhas e unidades;
-- pendências de aprovação, identificação, atribuição e materialização;
-- aprovadas, materializadas, canceladas e com divergência;
-- data, Order ID, provider, merchant, item, quantidade da loja e valor proporcional;
-- Produto mapeado, responsável, origem e links para compra e pedido operacional.
+- compras aprovadas, pendentes de aprovação, pendentes de atribuição e materializadas;
+- canceladas, reembolsadas e com divergência;
+- data, Order ID, provider, conta, merchant, item, quantidade e valor por loja;
+- Produto mapeado, status, comprador interno somente quando comprovado, aprovador, fonte, evidências e links para compra e pedido operacional.
 
 Valores USD e BRL só são combinados quando existir cotação oficial no domínio. Sem cotação, o painel separa moedas e não inventa conversão.
 
@@ -212,7 +256,7 @@ valorLoja = valorItem × quantidadeLoja / quantidadeTotalItem
 
 Arredondamento usa a menor unidade da moeda e o resíduo não pode ser descartado. A regra definitiva de distribuição do resíduo, frete, imposto, desconto e encargos no nível do pedido é decisão de produto bloqueadora. Até sua aprovação, esses valores aparecem separados e não compõem silenciosamente o total por loja.
 
-O read model mensal é dinâmico e auditável na V1. Fechamento contábil com snapshot/lock permanece bloqueado até definição do Product Owner; não será simulado por cache ou exportação.
+O read model mensal é dinâmico e auditável na V1, derivado de `CompraImportada` aprovada, itens, atribuições, materializações, eventos, cancelamentos, reembolsos, valores e moedas. Não existe uma segunda base mensal independente. A confiança aparece como qualidade da evidência e histórico, sem excluir resultados de baixa confiança. CSV é a primeira exportação prevista; PDF e metas são posteriores. Fechamento contábil com snapshot/lock permanece decisão futura e não será simulado por cache ou exportação.
 
 ## 10. Amazon Business buyer
 
@@ -335,14 +379,16 @@ O Batch 13 deve usar pipeline de importação, nunca SQL manual:
 
 1. inventariar colunas, fórmulas, moedas e meses;
 2. preservar arquivo original e hash;
-3. mapear cada linha a uma evidência `CSV_IMPORT`;
+3. mapear cada linha a uma evidência de origem conceitual `CSV` pelo adapter de importação controlada;
 4. validar preview, duplicidades, datas, quantidades e totais;
 5. exigir aprovação do lote;
 6. importar idempotentemente;
 7. reconciliar com Amazon/eBay/e-mail sem duplicar;
 8. produzir relatório de aceitos, rejeitados e conflitos;
 9. comparar totais mensais antigos e novos;
-10. manter rollback lógico por lote, sem apagar auditoria.
+10. manter rollback lógico por lote, sem apagar auditoria;
+11. operar planilha e sistema em paralelo até reconciliação, comparação de totais e aceite operacional;
+12. desativar a planilha somente após aceite formal, sem perda do arquivo histórico.
 
 ## 17. Auditoria, privacidade e retenção
 
@@ -392,16 +438,16 @@ Evidências devem aplicar minimização, criptografia em trânsito e repouso, se
 
 ## 20. Estratégia incremental
 
-1. Batch 9 — este contrato, sem código.
-2. Batch 10 — Amazon Business Reporting API: onboarding validado, conexão, adapter, pedidos e itens.
-3. Batch 11 — eBay buyer: keyset validado, `GetMyeBayBuying`, janela e paginação.
-4. Batch 12 — Gmail/Outlook autorizados e reconciliação multicanal.
-5. Batch 13 — migração de planilha e painel mensal.
-6. Batch 14 — consolidação de shipment/package/tracking.
-7. Batch 15 — motor independente de tracking.
+1. Batch 9 — contrato buyer, evidências e painel mensal, sem código.
+2. Batch 10 — Amazon Business Buyer Integration.
+3. Batch 11 — eBay Buyer Integration.
+4. Batch 12 — e-mail autorizado e reconciliação multicanal.
+5. Batch 13 — painel mensal e migração da planilha histórica.
+6. Batch 14 — consolidação de remessas, pacotes e tracking.
+7. Batch 15 — motor de tracking e alertas.
 8. Batch 16 — Financeiro e conciliação.
 9. Batch 17 — Vendas e baixa patrimonial.
-10. Batch 18 — Analytics avançado.
+10. Batch 18 — Analytics.
 
 Cada implementação exige migration aditiva quando aplicável, banco limpo e baseline, seed idempotente, testes PostgreSQL reais, isolamento/RBAC, auditoria e rollback conceitual.
 
@@ -517,6 +563,38 @@ Bloqueadoras antes dos respectivos batches, mas não do planejamento documental 
 12. Correções após fechamento reabrem o mês ou viram ajuste?
 13. Como ratear frete, impostos, descontos e resíduo de arredondamento no split?
 14. Qual planilha é a fonte histórica, quais colunas são canônicas e qual mês inicial será migrado?
+
+### 21.3 Decisões fechadas neste complemento
+
+1. fonte, evidência imutável, candidato reconciliado, aprovação, `CompraImportada`, atribuição e materialização são etapas distintas;
+2. a identidade forte é provider + conta externa + Order ID normalizado;
+3. merge heurístico nunca ocorre sem decisão humana;
+4. evidências são versionadas e preservam hash, origem, correlação e sensibilidade;
+5. a compra mantém identidade estável e mudanças externas são eventos;
+6. eventos confirmados são imutáveis e correções geram novos eventos;
+7. a projeção corrente é reconstruível;
+8. não será introduzido event sourcing genérico;
+9. confiança é explicável, versionada e calculada no backend;
+10. confiança não aprova, atribui, resolve conflito ou materializa;
+11. aprovação humana continua obrigatória na V1;
+12. painel mensal é read model derivado, sem base independente;
+13. `dataPedidoExterno` é a competência mensal e moedas permanecem separadas sem cotação oficial;
+14. planilha só será aposentada após importação, reconciliação, comparação de totais, operação paralela e aceite.
+
+### 21.4 Decisões ainda abertas deste complemento
+
+- pesos e fórmula de `ConfiancaConciliacao`;
+- faixas de `ALTA`, `MEDIA` e `BAIXA`;
+- tolerância monetária;
+- eventual limiar para revisão simplificada, sem aprovação automática;
+- arquivo e estrutura reais da planilha histórica;
+- rateio de frete, imposto, desconto geral e taxas;
+- regra do resíduo de arredondamento;
+- eventual fechamento mensal futuro;
+- retenção de payloads e documentos;
+- privacidade e retenção de e-mail.
+
+Essas decisões não bloqueiam a consolidação documental atual. Elas bloqueiam somente a implementação que dependa diretamente de cada regra.
 
 Já fechadas: uma conta Amazon Business inicial, `SHARED`, Amazon.com/EUA, USD, Marco como responsável administrativo, arquitetura multi-conta, backfill de 15 dias, sincronização manual mais automática configurável com recomendação de quatro horas, capabilities progressivas, aprovação humana obrigatória, quantidade sempre revisada, moeda divergente bloqueadora, exceções separadas e split com saldo pendente. Permanecem vigentes: conta dedicada ainda exige atribuição explícita e competência mensal principal usa `dataPedidoExterno`.
 

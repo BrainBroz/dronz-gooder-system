@@ -89,16 +89,16 @@ Classificações: `IMPLEMENTADO`, `PARCIAL`, `PLANEJADO`, `FORA DO ESCOPO ATUAL`
 
 ## 4. Roadmap oficial
 
-1. Batch 9 — contrato normativo de Buyer Purchase Ingestion;
-2. Batch 10 — Amazon Business Reporting API;
-3. Batch 11 — eBay Buyer API;
+1. Batch 9 — contrato buyer, evidências e painel mensal;
+2. Batch 10 — Amazon Business Buyer Integration;
+3. Batch 11 — eBay Buyer Integration;
 4. Batch 12 — e-mail autorizado e reconciliação multicanal;
-5. Batch 13 — migração da planilha e painel mensal;
-6. Batch 14 — consolidação de envios, pacotes e trackings;
-7. Batch 15 — tracking automático independente;
+5. Batch 13 — painel mensal e migração da planilha histórica;
+6. Batch 14 — consolidação de remessas, pacotes e tracking;
+7. Batch 15 — motor de tracking e alertas;
 8. Batch 16 — Financeiro e conciliação;
 9. Batch 17 — Vendas e baixa patrimonial;
-10. Batch 18 — Analytics avançado.
+10. Batch 18 — Analytics.
 
 O tracking automático depende de dados ingeridos por fontes autorizadas, mas seu domínio não depende de marketplace, e-mail ou documento. Ordem sem tracking é válida; tracking pode surgir ou mudar depois; pedidos podem possuir múltiplos envios, pacotes e códigos; e o fallback manual deve permanecer auditável.
 
@@ -107,5 +107,5 @@ O tracking automático depende de dados ingeridos por fontes autorizadas, mas se
 - briefing integral não localizado;
 - definição horária P-08 ainda pendente;
 - responsabilidades adicionais de galpão, remessa, viajante e frete não comprovadas;
-- contrato buyer e decisões iniciais Amazon estão definidos; onboarding, papéis, IDs, campos retornados, limites e referência de secrets Amazon, contas eBay, autorização de e-mail/caixa, privacidade, retenção, rateio, fechamento mensal e planilha histórica permanecem pendentes;
+- contrato buyer, evidências imutáveis, eventos/projeções, aprovação humana e decisões iniciais Amazon estão definidos; onboarding, papéis, IDs, campos retornados, limites e referência de secrets Amazon, contas eBay, autorização de e-mail/caixa, pesos/faixas de confiança, privacidade, retenção, rateio, arredondamento, eventual fechamento mensal e planilha histórica permanecem pendentes nos batches que dependem deles;
 - Financeiro ampliado, Vendas, Patrimônio e Analytics exigem contratos próprios.

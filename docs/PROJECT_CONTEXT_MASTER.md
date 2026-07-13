@@ -199,16 +199,16 @@ Produção exige secrets distintos, `WEB_ORIGIN` HTTPS explícito, PostgreSQL pe
 
 Próximos módulos só podem iniciar em batches aprovados e independentes:
 
-1. Batch 9 — contrato de Buyer Purchase Ingestion, reconciliação, aprovação e visão mensal;
-2. Batch 10 — Amazon Business Reporting API;
-3. Batch 11 — eBay Buyer API;
+1. Batch 9 — contrato buyer, evidências e painel mensal;
+2. Batch 10 — Amazon Business Buyer Integration;
+3. Batch 11 — eBay Buyer Integration;
 4. Batch 12 — e-mail autorizado e reconciliação multicanal;
-5. Batch 13 — migração da planilha e painel mensal;
-6. Batch 14 — consolidação de envios, pacotes e trackings;
-7. Batch 15 — motor automático de tracking independente;
+5. Batch 13 — painel mensal e migração da planilha histórica;
+6. Batch 14 — consolidação de remessas, pacotes e tracking;
+7. Batch 15 — motor de tracking e alertas;
 8. Batch 16 — Financeiro e conciliação;
 9. Batch 17 — Vendas e baixa patrimonial;
-10. Batch 18 — Analytics avançado.
+10. Batch 18 — Analytics.
 
 Cada módulo deve preservar os contratos existentes, isolamento por loja, auditoria e migrations incrementais. Este roadmap não declara esses itens implementados nem autoriza iniciá-los automaticamente.
 
@@ -225,6 +225,10 @@ Cada módulo deve preservar os contratos existentes, isolamento por loja, audito
 - eBay buyer purchase ingestion é tecnicamente possível por `GetMyeBayBuying`, sujeito à autorização do usuário, janela de até 60 dias, paginação, quotas e disponibilidade do keyset/aplicação.
 - Gmail e Outlook são evidências independentes, com OAuth, escopo mínimo, leitura seletiva, retenção e privacidade definidos antes da implementação.
 - Toda detecção automática exige reconciliação e aprovação humana antes de atribuição ou materialização.
+- O fluxo normativo é fonte → evidência imutável → normalização → reconciliação → candidato → aprovação humana → `CompraImportada` → atribuição → materialização explícita.
+- A identidade forte usa provider, conta externa e Order ID normalizado. Correlação heurística não consolida compras sem decisão humana.
+- Alterações externas são `EventoCompraExterna`; a visão corrente é `ProjecaoCompraExterna` reconstruível. Esse recorte não cria event sourcing genérico.
+- `ConfiancaConciliacao` é score explicável e versionado de 0 a 100, classificado como alta, média ou baixa. Serve para priorização e apresentação; nunca aprova, atribui, resolve conflito ou materializa.
 - `dataPedidoExterno` define a competência mensal principal; outras datas permanecem dimensões distintas.
 - O tracking automático vem depois das fontes de ingestão e da consolidação de envios/pacotes.
 - O motor de tracking é independente do marketplace, e-mail ou documento.
@@ -234,6 +238,8 @@ Cada módulo deve preservar os contratos existentes, isolamento por loja, audito
 - Troca, correção ou inclusão posterior de código não apaga eventos anteriores.
 - O fluxo deve aceitar fallback manual auditável para compras manuais, providers sem suporte ou indisponibilidade da integração.
 - Nenhuma dessas decisões declara as integrações ou o tracking implementados na baseline atual.
+- O painel mensal é prioridade operacional do Batch 13, depois da ingestão multicanal, e usa read model derivado dos registros aprovados; não possui base paralela própria.
+- A planilha histórica só será aposentada após importação, reconciliação, comparação de totais, operação paralela e aceite operacional.
 
 ## 13. Riscos residuais conhecidos
 
@@ -241,7 +247,7 @@ Cada módulo deve preservar os contratos existentes, isolamento por loja, audito
 - A fundação técnica do Batch 8 permanece útil, mas ainda não contém adapter real. Amazon SP-API e eBay Sell Fulfillment continuam seller-side. Amazon Business Reporting API e `GetMyeBayBuying` exigem adapters próprios e validação externa.
 - O sistema legado citado pelo Product Owner não está disponível nos repositórios acessíveis. Para eBay ainda devem ser comprovados keyset, versão efetiva, autorização, frequência, quota e origem real do tracking.
 - Para o Batch 10, permanecem externos/abertos: onboarding, papel Amazon Business Analytics, papéis de Package Tracking/Document/Reconciliation, IDs e campos reais, rate limits, referência segura de secrets, tolerância monetária e escopo final de atribuição dos operadores.
-- Para os Batches 11–13, permanecem bloqueadoras as decisões de contas eBay, caixas autorizadas, retenção de e-mail, tolerância multicanal, rateio de encargos, fechamento mensal e planilha histórica.
+- Para os Batches 11–13, permanecem abertas as decisões de contas eBay, caixas autorizadas, retenção de e-mail, pesos/faixas de confiança, tolerância monetária, rateio de encargos, arredondamento, eventual fechamento mensal e planilha histórica. Cada uma bloqueia apenas a implementação que dependa diretamente dela.
 - O serviço atual trata mudança incompatível no payload de uma compra já importada como conflito. O contrato buyer determina evidências versionadas e reconciliação, mas essa evolução ainda não está implementada.
 - O futuro tracking precisa normalizar múltiplos pacotes/códigos e eventos fora de ordem sem acoplamento ao provider; a baseline atual não possui esse motor.
 - Contratos antigos de Relatórios ainda usam estruturas genéricas em alguns pontos; sua evolução exige batch próprio para não alterar respostas existentes.
