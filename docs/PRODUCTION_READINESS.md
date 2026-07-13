@@ -17,7 +17,9 @@
 4. Execute `npm run typecheck`, `npm run lint`, `npm run test` e `npm run build`.
 5. Inicie a API e valide `GET /health` atrás do proxy HTTPS.
 
-O seed cria dados administrativos e deve ser executado deliberadamente, somente com `SEED_ADMIN_*` definidos para o ambiente correto. Integrações reais Amazon/eBay, sincronização automática de ordens, tracking automático, e-mail, QR Code, PDF e Excel não fazem parte desta versão.
+O seed cria dados administrativos e deve ser executado deliberadamente, somente com `SEED_ADMIN_*` definidos para o ambiente correto. O Batch 8 prepara conexões e sincronização explícita por adapters, mas adapters reais Amazon/eBay, agendamento, tracking automático, e-mail, QR Code, PDF e Excel não fazem parte desta versão.
+
+Referências `env:MARKETPLACE_*` não são credenciais: são ponteiros. Valores devem existir somente no ambiente/secret manager e nunca em banco, logs, respostas ou commits. Como os programas oficiais encontrados são orientados principalmente a seller, nenhuma conexão deve ser ativada em produção antes de confirmar o tipo e a elegibilidade da conta.
 
 Os testes de integração exigem `DATABASE_TEST_URL` apontando para um PostgreSQL exclusivo de testes. A suíte aplica migrations e seed nesse banco antes da execução e nunca deve receber a URL do banco de desenvolvimento ou produção.
 

@@ -34,7 +34,7 @@ export const merchantSchema = z
   })
   .strict();
 
-export const externalItemSchema = z
+const externalItemObjectSchema = z
   .object({
     externalLineId: z.string().trim().min(1).max(240).optional(),
     titulo: z.string().trim().min(1).max(500),
@@ -43,6 +43,8 @@ export const externalItemSchema = z
     asin: z.string().trim().max(40).optional(),
     identificadorOferta: z.string().trim().max(200).optional(),
     quantidade: z.number().int().positive(),
+    quantidadeCancelada: z.number().int().nonnegative().default(0),
+    quantidadeReembolsada: z.number().int().nonnegative().default(0),
     precoUnitario: z.number().nonnegative(),
     moeda: z
       .string()
@@ -53,6 +55,12 @@ export const externalItemSchema = z
     snapshot: metadataSchema
   })
   .strict();
+
+export const externalItemSchema = externalItemObjectSchema.refine(
+  (value) =>
+    value.quantidadeCancelada + value.quantidadeReembolsada <= value.quantidade,
+  { message: "cancelled and refunded quantities exceed total quantity" }
+);
 
 export const importPurchaseSchema = z
   .object({
@@ -84,7 +92,9 @@ export const manualPurchaseSchema = z
     moeda: z.literal("USD"),
     itens: z
       .array(
-        externalItemSchema.extend({ produtoId: z.string().cuid() }).strict()
+        externalItemObjectSchema
+          .extend({ produtoId: z.string().cuid() })
+          .strict()
       )
       .min(1)
       .max(500)

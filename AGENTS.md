@@ -34,20 +34,21 @@ Construir um sistema operacional para Dronz e Gooder com separação rigorosa en
 
 ## Estado da fundação
 
-A baseline técnica dos Batches 0–7 está concluída no commit `f413791`. Estão implementados e validados: autenticação cookie-only, Categorias, Produtos, Fornecedores, Pedidos Operacionais, Compras Unificadas, UI-3C, logística internacional, recebimento, entrada definitiva, estoque, financeiro manual, Dashboard e Relatórios. Integrações reais Amazon/eBay, sincronização automática de ordens, tracking automático, integrações PayPal/bancárias, e-mail e QR Code permanecem futuras.
+A baseline técnica dos Batches 0–7 está concluída no commit `f413791`. Estão implementados e validados: autenticação cookie-only, Categorias, Produtos, Fornecedores, Pedidos Operacionais, Compras Unificadas, UI-3C, logística internacional, recebimento, entrada definitiva, estoque, financeiro manual, Dashboard e Relatórios. O Batch 8 adiciona a fundação comum de integrações; adapters reais Amazon/eBay, tracking automático, integrações PayPal/bancárias, e-mail e QR Code permanecem futuros.
 
 ## Roadmap oficial
 
 Executar em batches separados e nesta ordem:
 
-1. integração Amazon;
-2. integração eBay;
-3. sincronização de ordens;
-4. tracking automático independente;
-5. Financeiro;
-6. Vendas;
-7. Patrimônio;
-8. Analytics.
+1. fundação comum Amazon/eBay;
+2. adapter e sincronização real Amazon;
+3. adapter e sincronização real eBay;
+4. normalização operacional de envios e pacotes;
+5. tracking automático independente;
+6. Financeiro;
+7. Vendas;
+8. Patrimônio;
+9. Analytics.
 
 Integrações reais precedem o tracking automático porque fornecem ordens, envios e códigos externos. O domínio de tracking, porém, permanece independente do marketplace: uma ordem pode existir sem tracking, o tracking pode surgir ou mudar posteriormente, um pedido pode possuir múltiplos pacotes e códigos, e deve existir fallback manual auditável. Nunca presumir um único tracking por pedido nem acoplar a máquina de tracking diretamente ao provider.
 

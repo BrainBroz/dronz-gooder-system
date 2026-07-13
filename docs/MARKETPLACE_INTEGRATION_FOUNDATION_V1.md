@@ -1,0 +1,177 @@
+# Fundação unificada de integrações de marketplaces — V1
+
+**Batch:** 8
+
+**Data da pesquisa e implementação:** 2026-07-13
+
+**Providers preparados:** Amazon e eBay
+
+**Estado:** fundação interna implementada; adapters externos reais desabilitados
+
+## 1. Escopo e princípio
+
+Amazon e eBay possuem adapters separados e produzem o mesmo contrato normalizado. O domínio de Compras Unificadas continua sendo a única staging de pedidos externos:
+
+```text
+AmazonMarketplaceAdapter ─┐
+                          ├─ MarketplaceAdapter → normalização → CompraImportada
+EbayMarketplaceAdapter ───┘                         ├─ CompraImportadaItem
+                                                    └─ Envio/Pacote/Tracking externo
+```
+
+Esta versão não autentica contas externas, não chama APIs reais, não consulta transportadoras e não cria pedido operacional, estoque, checkpoint ou materialização automaticamente.
+
+## 2. Pesquisa oficial
+
+### 2.1 Amazon
+
+Fontes oficiais consultadas em 2026-07-13:
+
+- [Selling Partner API — onboarding](https://developer-docs.amazon.com/sp-api/docs/onboarding-overview): cadastro, registro da aplicação e autorização do parceiro vendedor.
+- [Selling Partner API — Orders v0](https://developer-docs.amazon.com/sp-api/reference/orders-v0?ld=ASXXSPAPIDirect): acesso a pedidos no contexto de Selling Partner.
+- [Self-authorization](https://developer-docs.amazon.com/sp-api/docs/self-authorization): autorização de aplicação privada para a própria organização vendedora.
+- [SP-API sandbox](https://developer-docs.amazon.com/sp-api/lang-zh/docs/sp-api-sandbox): sandbox estático/dinâmico sujeito à operação.
+- [Orders API rate limits](https://developer-docs.amazon.com/sp-api/lang-tr_TR/docs/orders-api-rate-limits): limites variam por operação e podem ser devolvidos em headers.
+- [Login with Amazon — customer profile](https://developer.amazon.com/docs/login-with-amazon/customer-profile.html): fornece perfil autorizado; não é uma API de histórico de compras do consumidor.
+
+Conclusão: a SP-API oficial documentada atende operações de Selling Partners. Login with Amazon não fornece histórico de pedidos de consumidor. Antes do Batch 9 é obrigatório confirmar se as contas reais são seller/vendor ou contas compradoras e quais permissões a Amazon efetivamente concederá. Nenhum suporte a pedidos de conta compradora foi presumido.
+
+### 2.2 eBay
+
+Fontes oficiais consultadas em 2026-07-13:
+
+- [OAuth credentials and authorization](https://developer.ebay.com/api-docs/static/oauth-credentials.html): aplicação, client credentials e user access tokens por ambiente.
+- [Sell Fulfillment API overview](https://developer.ebay.com/api-docs/sell/fulfillment/overview.html): pedidos e fulfillment no contexto de seller.
+- [Buy Order API](https://developer.ebay.com/api-docs/buy/api-order.html): API em Limited Release para compras criadas pelo fluxo Buy API; não foi tratada como histórico geral de uma conta consumidora.
+- [Platform notifications](https://developer.ebay.com/api-docs/static/platform-notifications-landing.html): notificações disponíveis dependem do programa e tópico.
+- [Notification API release notes](https://developer.ebay.com/api-docs/commerce/notification/release-notes.html): alterações do contrato de notificações devem ser verificadas no adapter real.
+
+Conclusão: Fulfillment é seller-side; Buy Order possui acesso limitado e escopo próprio. Antes do Batch 10 é obrigatório confirmar o tipo das contas e a elegibilidade da aplicação. Nenhum suporte a histórico geral de compras foi presumido.
+
+### 2.3 Dependências externas ainda necessárias
+
+- cadastro e aprovação das aplicações nos programas aplicáveis;
+- definição de ambientes, regiões/marketplaces e escopos;
+- credenciais mantidas em secret manager, nunca no banco de domínio;
+- confirmação de rate limits, retenção, dados restritos e compliance vigentes na implementação de cada adapter;
+- decisão do Product Owner sobre o tipo real das contas: seller/vendor versus buyer.
+
+## 3. Contrato comum
+
+`MarketplaceAdapter` expõe capacidades, autorização e leitura de pedidos. Capabilities V1:
+
+- `LIST_ORDERS`;
+- `GET_ORDER`;
+- `LIST_ORDER_ITEMS`;
+- `LIST_SHIPMENTS`;
+- `INCREMENTAL_CURSOR`.
+
+Os adapters Amazon/eBay reais permanecem `NOT_CONFIGURED` e retornam erro interno tipado. Fakes existem somente em testes. Respostas de adapters passam por validação Zod estrita antes de qualquer persistência.
+
+Erros externos são normalizados em autorização expirada, throttling, resposta inválida, falha permanente ou falha genérica sanitizada. Mensagens, tokens e payloads sensíveis do provider não são persistidos nem retornados.
+
+## 4. Conexões e escopo
+
+`ConexaoMarketplace` representa uma configuração por conta externa e aceita múltiplas conexões por provider.
+
+- `SHARED`: staging global; atribuições podem ser feitas para Dronz e Gooder; nenhuma atribuição é automática.
+- `STORE_DEDICATED`: exige `lojaPermitidaId`; o backend rejeita e audita atribuição a outra loja.
+
+O escopo não possui endpoint de alteração nesta versão. A ausência é deliberada: mudar escopo depois de haver staging exige análise de impacto e não pode ser uma edição silenciosa.
+
+A identidade normativa continua:
+
+```text
+provider + contaExternaId + externalOrderId normalizado
+```
+
+A normalização aplica trim externo e Unicode NFC, preservando case. A mesma referência em providers ou contas diferentes não colide.
+
+## 5. Secrets
+
+O banco armazena somente uma referência opcional no formato `env:MARKETPLACE_*`. `SecretProvider` resolve referências fora do domínio. O read model informa apenas `secretConfigured`.
+
+Nunca podem ser registrados ou devolvidos:
+
+- client secret, access token ou refresh token;
+- authorization header, assinatura, senha ou cookie;
+- valor resolvido pelo `SecretProvider`;
+- erro bruto que possa conter credencial.
+
+A implementação por variável de ambiente existe apenas como ponte local. Produção deve fornecer um secret manager no adapter real.
+
+## 6. Normalização
+
+O pedido normalizado inclui identidade, referência, datas, moeda, total, status, cancelamento, merchant, itens e envios. Itens incluem quantidade total, cancelada e reembolsada; a soma cancelada + reembolsada não pode superar o total.
+
+Envio, pacote e tracking são estruturas de origem externa:
+
+- uma ordem pode não ter envio ou tracking;
+- um envio pode ter múltiplos pacotes;
+- um pacote pode ter múltiplos códigos;
+- uma correção desativa o código substituído e preserva o vínculo histórico;
+- transportadora pode estar ausente;
+- não existe consulta automática à transportadora neste batch.
+
+`EventoTrackingExterno` está preparado para eventos futuros, mas o motor automático de tracking pertence ao Batch 12.
+
+## 7. Sincronização
+
+Rotas:
+
+- `POST /integrations/marketplaces/connections`;
+- `GET /integrations/marketplaces/connections`;
+- `GET /integrations/marketplaces/connections/:connectionId`;
+- `POST /integrations/marketplaces/connections/:connectionId/sync-runs`;
+- `GET /integrations/marketplaces/connections/:connectionId/sync-runs`;
+- `POST /integrations/marketplaces/sync-runs/:executionId/reprocess`.
+
+Cada execução registra janela, cursores, origem, contadores, correlation ID, idempotency key, status e erro sanitizado. A chave idempotente é persistente: retry idêntico retorna a execução anterior; mesma chave com payload diferente gera conflito.
+
+Um índice parcial PostgreSQL impede duas execuções `RUNNING` para a mesma conexão. Paginação é limitada a 100 páginas por execução. O adapter real deverá aplicar backoff e respeitar `Retry-After`/rate limits do provider; este batch apenas tipa throttling e não inventa política externa.
+
+Falhas por pedido são contabilizadas como resultado parcial. Falha de página/provider encerra a execução como `FAILED`. Cursores são persistidos para retomada incremental; replay ignora o cursor salvo e usa a janela solicitada.
+
+## 8. Compras Unificadas
+
+A sincronização reutiliza `upsertMerchant` e `importPurchase`; não existe um segundo domínio de pedidos. Uma importação:
+
+- cria staging sem loja;
+- preserva conexão e conta de origem;
+- não apaga mappings ou atribuições;
+- não materializa pedido operacional;
+- não cria estoque, checkpoint, venda ou pagamento;
+- trata alteração incompatível segundo os conflitos existentes de Compras Unificadas.
+
+Cancelamentos/reembolsos já chegam no contrato inicial. Evoluções externas incompatíveis com o snapshot atual permanecem conflito explícito até o adapter real definir a política específica e testada de atualização.
+
+## 9. RBAC, read models e auditoria
+
+Permissões comuns:
+
+- `INTEGRACAO_MARKETPLACE_VISUALIZAR`;
+- `INTEGRACAO_MARKETPLACE_GERENCIAR`;
+- `INTEGRACAO_MARKETPLACE_SINCRONIZAR`;
+- `INTEGRACAO_MARKETPLACE_HISTORICO_VISUALIZAR`;
+- `INTEGRACAO_MARKETPLACE_REPROCESSAR`.
+
+O seed as concede ao `SUPER_ADMIN`; perfis locais não as recebem. Conexões dedicadas também exigem vínculo do usuário com a loja. O read model devolve `allowedActions` e `blockedReasons`; toda mutação revalida RBAC e escopo.
+
+São auditados criação de conexão, início/fim/falha de sincronização e tentativa incompatível de atribuição. Falha crítica de auditoria participa da transação da mutação correspondente. Valores secretos e erros brutos ficam fora do AuditLog.
+
+## 10. Migration e compatibilidade
+
+A migration `20260713180000_marketplace_integration_foundation` é aditiva. Ela cria conexões, execuções, envios, pacotes, trackings e eventos, além do vínculo opcional em `CompraImportada`. Nenhum registro legado é apagado, rematerializado ou reclassificado.
+
+Rollback conceitual: interromper novas sincronizações, preservar os dados criados para investigação/exportação, remover primeiro os vínculos externos e somente então as novas tabelas/enums. Rollback destrutivo automático não é fornecido.
+
+Há drift preexistente entre partes do schema Prisma e migrations antigas, relacionado a módulos fora deste batch. Ele não foi incorporado à migration de marketplace e deve ser tratado separadamente antes de usar `prisma migrate diff` como gerador automático de SQL.
+
+## 11. Limitações e gates seguintes
+
+- Batch 9: confirmar elegibilidade/tipo da conta e implementar Amazon real.
+- Batch 10: confirmar elegibilidade/tipo da conta e implementar eBay real.
+- Batch 11: completar normalização operacional de envios, pacotes e associação de itens/quantidades conforme dados realmente fornecidos.
+- Batch 12: motor independente de tracking e transportadoras, preservando fallback manual.
+
+Nenhum desses batches está iniciado. Credenciais, webhooks, polling agendado, throttling concreto e políticas de retenção só podem ser implementados após confirmação oficial do programa aplicável.

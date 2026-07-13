@@ -55,11 +55,11 @@ Status atual:
 
 ## Roadmap
 
-O roadmap oficial está em `docs/PROJECT_CONTEXT_MASTER.md`. A próxima sequência começa por Amazon, eBay, sincronização de ordens e tracking automático independente; Financeiro, Vendas, Patrimônio e Analytics vêm depois. O contrato de tracking preservará ordens sem código, múltiplos pacotes/códigos, atualizações posteriores e fallback manual auditável.
+O roadmap oficial está em `docs/PROJECT_CONTEXT_MASTER.md`. A sequência aprovada é: fundação comum Amazon/eBay, adapter Amazon, adapter eBay, normalização operacional de envios/pacotes e tracking automático independente; Financeiro, Vendas, Patrimônio e Analytics vêm depois. O contrato de tracking preserva ordens sem código, múltiplos pacotes/códigos, atualizações posteriores e fallback manual auditável.
 
 ## Itens não implementados ainda
 
-- integrações reais Amazon/eBay e sincronização automática de ordens;
+- adapters reais Amazon/eBay e sincronização agendada de ordens (a fundação comum existe, mas permanece `NOT_CONFIGURED`);
 - tracking automático e integrações com transportadoras;
 - PayPal, bancos e cartões como integrações (PAYPAL atual é classificação manual);
 - e-mail e QR Code;

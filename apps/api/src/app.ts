@@ -16,6 +16,7 @@ import { analyticsRouter } from "./modules/analytics/analytics.routes";
 import { simulationRouter } from "./modules/simulation/simulation.routes";
 import { operationsRouter } from "./modules/operations/operations.routes";
 import { unifiedPurchasesRouter } from "./modules/unified-purchases/unified-purchases.routes";
+import { marketplaceIntegrationsRouter } from "./modules/marketplace-integrations/marketplace-integrations.routes";
 
 export function createApp() {
   const app = express();
@@ -36,6 +37,7 @@ export function createApp() {
   app.use("/simulations", simulationRouter);
   app.use("/operations", operationsRouter);
   app.use("/imported-purchases", unifiedPurchasesRouter);
+  app.use("/integrations/marketplaces", marketplaceIntegrationsRouter);
   app.use(errorHandler);
   return app;
 }
