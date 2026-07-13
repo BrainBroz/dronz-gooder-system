@@ -34,6 +34,7 @@ import { LogisticsPage } from "./pages/LogisticsPage";
 import { InventoryPage } from "./pages/InventoryPage";
 import { FinancePage } from "./pages/FinancePage";
 import { OperationsPage } from "./pages/OperationsPage";
+import { UnifiedPurchasesPage } from "./pages/UnifiedPurchasesPage";
 
 const loginSchema = z.object({
   email: z.string().email("Informe um e-mail válido"),
@@ -194,7 +195,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
               ["Checkpoints", "/checkpoints"],
               ["Produtos", "/produtos"],
               ["Fornecedores", "/fornecedores"],
-              ["Compras", "/pedidos"],
+              ["Compras Unificadas", "/compras"],
+              ["Pedidos Operacionais", "/pedidos"],
               ["Logística", "/logistica"],
               ["Estoque", "/estoque"],
               ["Financeiro", "/financeiro"],
@@ -231,7 +233,6 @@ export function Shell({ children }: { children: React.ReactNode }) {
     </Box>
   );
 }
-
 
 export function NotFoundPage() {
   return <div>404</div>;
@@ -291,6 +292,16 @@ export function AppRoutes() {
               <AuthGate>
                 <Shell>
                   <SuppliersPage />
+                </Shell>
+              </AuthGate>
+            }
+          />
+          <Route
+            path="/compras"
+            element={
+              <AuthGate>
+                <Shell>
+                  <UnifiedPurchasesPage />
                 </Shell>
               </AuthGate>
             }

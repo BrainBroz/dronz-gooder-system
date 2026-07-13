@@ -19,8 +19,8 @@ afterEach(async () => {
   await disposeTestQueryClients();
   queryClient.clear();
   useAuthStore.getState().clear();
-  localStorage.clear();
-  sessionStorage.clear();
+  window.localStorage?.clear();
+  window.sessionStorage?.clear();
   vi.useRealTimers();
   vi.restoreAllMocks();
   if (unexpectedRequests.length > 0) {

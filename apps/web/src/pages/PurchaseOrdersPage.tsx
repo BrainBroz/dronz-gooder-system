@@ -99,8 +99,8 @@ function PurchaseOrdersContent() {
     <PageContainer>
       <Stack gap={{ xs: 2.5, md: 3.5 }}>
         <PageHeader
-          title="Compras"
-          description="Pedidos de compra da loja ativa"
+          title="Pedidos Operacionais"
+          description="Pedidos materializados e pedidos diretos da loja ativa"
         />
         <ContentCard>
           <form onSubmit={form.handleSubmit((v) => createOrder.mutateAsync(v))}>
