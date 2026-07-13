@@ -71,3 +71,35 @@ Os testes comportamentais cobrem loading, erro, retry, vazio, Miami, Paraguai ap
 - nenhuma dependência foi adicionada;
 - Compras Unificadas, Dashboard e Relatórios não foram alterados;
 - correções de estoque com compensações continuam fora da UI genérica: exigem seleção segura de movimento original fornecida por read model específico, que não faz parte do contrato visual atual.
+
+## Correção pós-auditoria — Batch 4.1
+
+### Causa e regra corrigida
+
+O Batch 4 apresentava o botão de correção de item quando a identidade local continha `CHECKPOINT_CORRIGIR`. Isso substituía indevidamente a decisão operacional do read model. A autorização visual agora depende exclusivamente de `allowedActions`; permissões da sessão não criam ações.
+
+O backend atual não publica uma ação oficial de correção em `allowedActions`. Por isso, o frontend não apresenta o formulário de correção. Adicionar uma ação tipada como `CORRECT_RECEIVING_ITEM` ou equivalente exige primeiro ampliar o contrato do read model em um batch de backend autorizado. Nenhuma string de ação foi inventada neste batch.
+
+### Fonte única de apresentação
+
+`operationActionPresentation` é a única matriz `action → label/formulário/intenção HTTP/feedback`. Ela não contém status, elegibilidade, transição, bloqueio, perfil ou permissão. A página transforma literalmente as ações recebidas e não deriva mais `etapa → ação esperada`.
+
+Foram removidas:
+
+- a checagem local de `CHECKPOINT_CORRIGIR` para renderizar correção;
+- a função `actionFor`, que reproduzia a associação entre etapa e ação;
+- labels e URLs operacionais repetidos entre cards e formulários.
+
+### Regressão coberta
+
+Os testes comprovam:
+
+- permissão local sem `allowedAction` não cria botão nem mutação;
+- ação oficial de conferência abre formulário, envia payload e `idempotency-key` e invalida somente o prefixo tenantado de operações;
+- refetch que remove a ação desmonta o formulário aberto;
+- troca de loja remove ações e dados da loja anterior;
+- `blockedReasons` sem ação permanece somente informativo.
+
+### Limitação mantida
+
+Não existe teste de correção com `allowedAction` oficial porque essa ação não existe no contrato serializado atual. A limitação é intencional e impede que o frontend invente autorização. O fluxo poderá ser habilitado quando o backend publicar a ação específica no read model da entidade.

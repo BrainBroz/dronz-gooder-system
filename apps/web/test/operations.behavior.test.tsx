@@ -118,7 +118,7 @@ describe("UI-3C operacional", () => {
     expect(vi.mocked(api.post).mock.calls[0][1]).toEqual(expect.objectContaining({ viagemId: "trip-1", malaId: "bag-1" }));
   });
 
-  it("mostra progresso, divergência e histórico e envia correção auditável", async () => {
+  it("não oferece correção por permissão local quando allowedActions não autoriza", async () => {
     const receivingDetail = {
       id: "receipt-1", viagemId: "trip-1", malaId: "bag-1", status: "IN_PROGRESS",
       itens: [{ id: "receipt-item-1", quantidadeEsperada: 2, quantidadeRecebida: 1, quantidadeRejeitada: 0, quantidadeJaIncorporada: 0, tipoDivergencia: "FALTA", divergenciaResolvida: false, observacoes: "Faltou uma", produto: { id: "product-1", codigo: 101, nome: "Produto recebido" } }],
@@ -134,13 +134,56 @@ describe("UI-3C operacional", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Ver detalhes" }));
     expect(await screen.findByText(/Progresso da API: 0\/1/)).toBeTruthy();
     expect(screen.getByText("CONFIRM_ITEM")).toBeTruthy();
-    await userEvent.click(screen.getByRole("button", { name: "Corrigir" }));
-    expect(await screen.findByText("Corrigir item")).toBeTruthy();
-    await userEvent.type(await screen.findByLabelText("Motivo da correção"), "Ajuste conferido");
-    await userEvent.click(screen.getByRole("button", { name: "Salvar correção" }));
+    expect(useAuthStore.getState().permissions).toContain("CHECKPOINT_CORRIGIR");
+    expect(screen.queryByRole("button", { name: "Corrigir" })).toBeNull();
+    expect(screen.queryByText("Corrigir item")).toBeNull();
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it("executa a ação oficial do detalhe com idempotência e invalidação tenantada", async () => {
+    const receivingDetail = {
+      id: "receipt-1", viagemId: "trip-1", malaId: "bag-1", status: "IN_PROGRESS",
+      itens: [{ id: "receipt-item-1", quantidadeEsperada: 2, quantidadeRecebida: 0, quantidadeRejeitada: 0, quantidadeJaIncorporada: 0, tipoDivergencia: "CORRETO", divergenciaResolvida: true, observacoes: null, produto: { id: "product-1", codigo: 101, nome: "Produto recebido" } }],
+      progress: { total: 1, completed: 0, pending: 1, divergent: 0 }, allowedActions: ["CONFIRM_RECEIVING_ITEM"], blockedReasons: [], history: { items: [], nextCursor: null }
+    };
+    installGetMock({ "/operations/receiving/candidates": [{ ...receiving, receiving: { id: "receipt-1", status: "IN_PROGRESS" }, allowedActions: [] }], "/operations/receiving/receipt-1": receivingDetail });
+    const { queryClient } = renderWithProviders(<OperationsPage />);
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    await userEvent.click(screen.getByRole("tab", { name: /Recebimento/ }));
+    await userEvent.click(await screen.findByRole("button", { name: "Ver detalhes" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Conferir" }));
+    fireEvent.change(screen.getByLabelText("Quantidade recebida"), { target: { value: "2" } });
+    await userEvent.click(screen.getByRole("button", { name: "Confirmar", exact: true }));
     await waitFor(() => expect(api.post).toHaveBeenCalled());
-    expect(vi.mocked(api.post).mock.calls[0][0]).toBe("/operations/corrections");
-    expect(vi.mocked(api.post).mock.calls[0][1]).toEqual(expect.objectContaining({ entity: "RecebimentoItem", originalEventId: "receipt-item-1", reason: "Ajuste conferido" }));
+    expect(vi.mocked(api.post).mock.calls[0][0]).toBe("/receiving/receipt-1/items/receipt-item-1/confirm");
+    expect(vi.mocked(api.post).mock.calls[0][1]).toEqual(expect.objectContaining({ quantidadeRecebida: 2, tipoDivergencia: "CORRETO" }));
+    expect(vi.mocked(api.post).mock.calls[0][2]).toEqual(expect.objectContaining({ headers: expect.objectContaining({ "idempotency-key": expect.any(String), "x-store-id": "store-dronz" }) }));
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["operations", "store-dronz"] }));
+  });
+
+  it("fecha ação aberta quando o refetch remove allowedActions", async () => {
+    const baseDetail = {
+      id: "receipt-1", viagemId: "trip-1", malaId: "bag-1", status: "IN_PROGRESS",
+      itens: [{ id: "receipt-item-1", quantidadeEsperada: 1, quantidadeRecebida: 0, quantidadeRejeitada: 0, quantidadeJaIncorporada: 0, tipoDivergencia: "CORRETO", divergenciaResolvida: true, observacoes: null, produto: { id: "product-1", codigo: 101, nome: "Produto recebido" } }],
+      progress: { total: 1, completed: 0, pending: 1, divergent: 0 }, blockedReasons: [], history: { items: [], nextCursor: null }
+    };
+    let detailCalls = 0;
+    installGetMock({ "/operations/receiving/candidates": [{ ...receiving, receiving: { id: "receipt-1", status: "IN_PROGRESS" }, allowedActions: [] }] });
+    vi.mocked(api.get).mockImplementation(async (url) => {
+      if (url === "/operations/overview") return { data: overview };
+      if (url === "/operations/receiving/candidates") return { data: [{ ...receiving, receiving: { id: "receipt-1", status: "IN_PROGRESS" }, allowedActions: [] }] };
+      if (url === "/operations/receiving/receipt-1") return { data: { ...baseDetail, allowedActions: detailCalls++ === 0 ? ["CONFIRM_RECEIVING_ITEM"] : [], blockedReasons: detailCalls > 1 ? [{ code: "RECEIVING_ALREADY_COMPLETE", message: "RECEIVING_ALREADY_COMPLETE" }] : [] } };
+      return empty;
+    });
+    const { queryClient } = renderWithProviders(<OperationsPage />);
+    await userEvent.click(screen.getByRole("tab", { name: /Recebimento/ }));
+    await userEvent.click(await screen.findByRole("button", { name: "Ver detalhes" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Conferir" }));
+    expect(screen.getByText("Confirmar item")).toBeTruthy();
+    await queryClient.refetchQueries({ queryKey: ["operations", "store-dronz", "receiving", "detail", "receipt-1"] });
+    await waitFor(() => expect(screen.queryByText("Confirmar item")).toBeNull());
+    expect(screen.queryByRole("button", { name: "Conferir" })).toBeNull();
+    expect(await screen.findByText("RECEIVING_ALREADY_COMPLETE")).toBeTruthy();
   });
 
   it("isola query e header após troca de loja sem mostrar dados stale", async () => {
@@ -158,5 +201,23 @@ describe("UI-3C operacional", () => {
     useAuthStore.getState().setActiveStoreId(testStores[1].id);
     expect(await screen.findByText("Produto Gooder")).toBeTruthy();
     expect(screen.queryByText("Produto Miami")).toBeNull();
+  });
+
+  it("remove ação da loja anterior quando a nova loja não a autoriza", async () => {
+    installGetMock();
+    renderWithProviders(<OperationsPage />);
+    expect(await screen.findByRole("button", { name: "Confirmar em Miami" })).toBeTruthy();
+    vi.mocked(api.get).mockImplementation(async (url, config) => {
+      if (url === "/operations/overview") return { data: { ...overview, lojaId: "store-gooder" } };
+      if (url === "/operations/miami/candidates") {
+        expect(config?.headers?.["x-store-id"]).toBe("store-gooder");
+        return { data: [{ ...miami, id: "item-gooder", allowedActions: [], blockedReasons: [{ code: "INSUFFICIENT_PERMISSION", message: "Ação indisponível" }] }] };
+      }
+      return empty;
+    });
+    useAuthStore.getState().setActiveStoreId(testStores[1].id);
+    expect(await screen.findByText("Ação indisponível")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Confirmar em Miami" })).toBeNull();
+    expect(api.post).not.toHaveBeenCalled();
   });
 });
