@@ -90,6 +90,19 @@ Estas referências continuam corretas para contas seller/consumer, mas não cobr
 
 Conclusão atualizada: SP-API Orders continua seller-side e Login with Amazon continua apenas identidade/perfil. Para compras realizadas em contas Amazon Business, a Reporting API é uma fonte buyer oficial candidata. Ela exige onboarding, papéis, autorização, regiões e validação reais. O adapter futuro será `AmazonBusinessBuyerAdapter`; ele ainda não está implementado.
 
+#### Decisões aprovadas para a conexão Amazon Business V1
+
+- uma conta inicial, `SHARED`, preservando arquitetura multi-conta;
+- marketplace Amazon.com / Estados Unidos;
+- moeda operacional inicial USD;
+- Marco como responsável administrativo pela autorização, concessão, revogação e supervisão;
+- backfill configurável, inicialmente 15 dias;
+- sincronização manual autorizada e automática configurável, inicialmente recomendada a cada quatro horas;
+- pedidos e itens como núcleo mínimo;
+- ativação progressiva de `ORDERS`, `ORDER_ITEMS`, `SHIPMENTS`, `SHIPMENT_ITEMS`, `PACKAGE_TRACKING`, `DOCUMENTS` e `RECONCILIATION` conforme autorização.
+
+Toda compra entra em staging e aprovação humana. Backfill não cria pedido operacional, estoque, recebimento, checkpoint ou logística. A conta pode usar usuários, grupos e papéis internos Amazon Business; Anselmo, Brunno e Marco poderão ser identificados quando a configuração e os relatórios devolverem IDs oficiais. Não serão criadas contas Amazon separadas por comprador e nomes não serão hardcoded.
+
 ### 2.2 eBay
 
 Fontes oficiais consultadas em 2026-07-13:
@@ -110,7 +123,11 @@ O sistema legado informado pelo Product Owner não foi encontrado nos repositór
 ### 2.3 Dependências externas ainda necessárias
 
 - cadastro e aprovação das aplicações nos programas aplicáveis;
-- definição de ambientes, regiões/marketplaces e escopos;
+- confirmação do onboarding Amazon Business e concessão do papel Amazon Business Analytics;
+- confirmação dos papéis/capabilities de Reporting, Package Tracking, Document e Reconciliation;
+- IDs reais de organização, grupos e usuários e campos efetivamente retornados;
+- rate limits aplicáveis à conta Amazon Business;
+- referência de secrets mantida em secret manager, sem registrar valores no domínio;
 - credenciais mantidas em secret manager, nunca no banco de domínio;
 - confirmação de rate limits, retenção, dados restritos e compliance vigentes na implementação de cada adapter;
 - confirmação do keyset/aplicação e da conta eBay que já opera no sistema legado;
@@ -231,7 +248,7 @@ Há drift preexistente entre partes do schema Prisma e migrations antigas, relac
 
 Fontes oficiais candidatas, sem prioridade absoluta entre canais:
 
-- **Amazon Business Reporting API:** adapter buyer do Batch 10, condicionado a onboarding, papéis, contas e regiões aprovadas.
+- **Amazon Business Reporting API:** adapter buyer do Batch 10 para uma conta `SHARED`, Amazon.com/EUA e USD, condicionado a onboarding, papéis, resposta real e limites aplicáveis.
 - **eBay `GetMyeBayBuying`:** adapter buyer do Batch 11, condicionado à validação do keyset e das permissões. A janela de até 60 dias exige sincronização recorrente e retenção local.
 
 Fontes independentes do Batch 12 e posteriores:

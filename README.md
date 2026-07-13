@@ -55,7 +55,7 @@ Status atual:
 
 ## Roadmap
 
-O roadmap oficial está em `docs/PROJECT_CONTEXT_MASTER.md`. Dronz e Gooder usam marketplaces como compradores. O Batch 9 documenta um contrato multicanal: Amazon Business Reporting API, eBay `GetMyeBayBuying`, e-mail autorizado, planilha e entrada manual produzem evidências reconciliadas e aprovadas antes da atribuição por loja. A sequência planejada é Amazon Business, eBay buyer, e-mail/reconciliação, migração da planilha/painel mensal, consolidação de envios e tracking automático independente, seguida de Financeiro, Vendas e Analytics.
+O roadmap oficial está em `docs/PROJECT_CONTEXT_MASTER.md`. Dronz e Gooder usam marketplaces como compradores. O Batch 9 documenta um contrato multicanal: Amazon Business Reporting API, eBay `GetMyeBayBuying`, e-mail autorizado, planilha e entrada manual produzem evidências reconciliadas e aprovadas antes da atribuição por loja. Para Amazon Business, a V1 foi definida com uma conta compartilhada em Amazon.com/EUA, USD, backfill inicial de 15 dias e sincronização manual mais automática configurável; implementação continua condicionada ao onboarding e aos papéis oficiais. Depois vêm eBay buyer, e-mail/reconciliação, migração da planilha/painel mensal, consolidação de envios e tracking automático independente, seguida de Financeiro, Vendas e Analytics.
 
 ## Itens não implementados ainda
 

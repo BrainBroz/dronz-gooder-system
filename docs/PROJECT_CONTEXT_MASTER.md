@@ -152,7 +152,8 @@ Não implementado:
 | 8 — fundação de integrações     | `8644188`            | adapters comuns, conexões, sincronização explícita e logística externa   | APROVADO     |
 | 8.1 — buyer versus seller       | `9790de0`            | corrige contexto de produto e roadmap sem alterar a fundação técnica     | SUPERADO EM PARTE |
 | 8.2 — correção eBay buyer       | `1e4dec9`            | confirma `GetMyeBayBuying`, corrige investigação e roadmap               | APROVADO     |
-| 9 — contrato buyer multicanal   | commit deste batch   | define evidências, reconciliação, aprovação, atribuição e visão mensal   | EM AUDITORIA |
+| 9 — contrato buyer multicanal   | `01224db`            | define evidências, reconciliação, aprovação, atribuição e visão mensal   | BLOQUEADO POR DECISÕES |
+| 9 — complemento Amazon Business | commit deste batch   | registra conta, backfill, capabilities, aprovação e atribuição           | EM AUDITORIA |
 
 As auditorias independentes dos Batches 7 e 8 foram aprovadas. A baseline funcional mais recente é `8644188`; os Batches 8.1, 8.2 e 9 alteram somente documentação e não modificam comportamento. O Batch 8.2 supera apenas a conclusão incorreta de que não havia fonte oficial para compras buyer do eBay. O Batch 9 supera o roadmap provider-first e define primeiro o contrato multicanal comum.
 
@@ -216,6 +217,11 @@ Cada módulo deve preservar os contratos existentes, isolamento por loja, audito
 - Dronz e Gooder utilizam Amazon, eBay e outros marketplaces como compradores. O fluxo principal importa compras realizadas, não vendas recebidas por contas seller.
 - O contrato buyer é independente da fonte; Amazon Business, eBay, e-mail, invoice, CSV e entrada manual são origens possíveis e preservadas como evidências.
 - A Amazon Business Reporting API `2025-06-09` é uma fonte buyer empresarial oficial com pedidos, itens e remessas; não deve ser confundida com SP-API seller. Sua ativação depende de onboarding e papéis concedidos pela Amazon Business.
+- A V1 Amazon usa uma conta Amazon Business `SHARED`, Amazon.com/EUA e USD, mantendo arquitetura multi-conta. Marco é o responsável administrativo pela conexão.
+- O backfill inicial Amazon é configurável e começa em 15 dias; toda compra histórica entra em staging/revisão e nunca cria operação, estoque ou logística automaticamente.
+- Sincronização manual autorizada é obrigatória; a automática é configurável, inicialmente recomendada a cada quatro horas.
+- Capabilities desejadas são ativadas progressivamente: pedidos, itens, remessas, itens de remessa, Package Tracking, documentos e reconciliação. Ausência de uma capability não é simulada nem bloqueia as autorizadas.
+- Anselmo, Brunno e Marco podem receber permissões por perfil/vínculo para revisão e aprovação; nomes não integram regras hardcoded. A decisão de atribuição e a configuração como compradores internos permanecem abertas.
 - eBay buyer purchase ingestion é tecnicamente possível por `GetMyeBayBuying`, sujeito à autorização do usuário, janela de até 60 dias, paginação, quotas e disponibilidade do keyset/aplicação.
 - Gmail e Outlook são evidências independentes, com OAuth, escopo mínimo, leitura seletiva, retenção e privacidade definidos antes da implementação.
 - Toda detecção automática exige reconciliação e aprovação humana antes de atribuição ou materialização.
@@ -234,7 +240,8 @@ Cada módulo deve preservar os contratos existentes, isolamento por loja, audito
 - A API V1 não lista contas externas ou merchants; a UI aceita IDs conhecidos e não inventa opções.
 - A fundação técnica do Batch 8 permanece útil, mas ainda não contém adapter real. Amazon SP-API e eBay Sell Fulfillment continuam seller-side. Amazon Business Reporting API e `GetMyeBayBuying` exigem adapters próprios e validação externa.
 - O sistema legado citado pelo Product Owner não está disponível nos repositórios acessíveis. Para eBay ainda devem ser comprovados keyset, versão efetiva, autorização, frequência, quota e origem real do tracking.
-- Antes dos Batches 10–13, permanecem bloqueadoras as decisões de contas/regiões, aprovadores, caixas autorizadas, retenção de e-mail, backfill, frequência, tolerância de correlação, rateio de encargos, fechamento mensal e planilha histórica.
+- Para o Batch 10, permanecem externos/abertos: onboarding, papel Amazon Business Analytics, papéis de Package Tracking/Document/Reconciliation, IDs e campos reais, rate limits, referência segura de secrets, tolerância monetária e escopo final de atribuição dos operadores.
+- Para os Batches 11–13, permanecem bloqueadoras as decisões de contas eBay, caixas autorizadas, retenção de e-mail, tolerância multicanal, rateio de encargos, fechamento mensal e planilha histórica.
 - O serviço atual trata mudança incompatível no payload de uma compra já importada como conflito. O contrato buyer determina evidências versionadas e reconciliação, mas essa evolução ainda não está implementada.
 - O futuro tracking precisa normalizar múltiplos pacotes/códigos e eventos fora de ordem sem acoplamento ao provider; a baseline atual não possui esse motor.
 - Contratos antigos de Relatórios ainda usam estruturas genéricas em alguns pontos; sua evolução exige batch próprio para não alterar respostas existentes.

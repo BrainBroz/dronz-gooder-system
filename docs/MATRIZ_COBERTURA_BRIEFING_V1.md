@@ -52,6 +52,41 @@ Classificações: `IMPLEMENTADO`, `PARCIAL`, `PLANEJADO`, `FORA DO ESCOPO ATUAL`
 - `allowedActions` do backend governa ações contextuais da UI.
 - P-08 continua pendência exclusiva do Product Owner somente para cálculo da janela “quinta-feira de manhã”.
 
+### 3.1 Decisões Amazon Business do complemento do Batch 9
+
+- uma conta Amazon Business inicial, `SHARED`, Amazon.com/EUA e USD;
+- arquitetura multi-conta preservada;
+- Marco é responsável administrativo pela conexão;
+- backfill inicial configurável de 15 dias, sempre em staging/revisão;
+- sincronização manual obrigatória e automática configurável, recomendada inicialmente a cada quatro horas;
+- capabilities desejadas ativadas progressivamente, com pedidos e itens como núcleo mínimo;
+- aprovação humana obrigatória, divergência de quantidade sempre revisada e moeda divergente bloqueadora;
+- cancelamento, reembolso, compra pessoal, duplicidade e legado possuem classificação/auditoria separadas;
+- conta compartilhada permite split quantitativo e saldo pendente.
+
+### 3.2 Matriz de bloqueios do questionário
+
+| ID | Decisão | Estado após complemento | Dependência restante |
+| --- | --- | --- | --- |
+| A1 | quantidade de contas Amazon | FECHADA | uma conta inicial |
+| A2 | escopo da conta Amazon | FECHADA | `SHARED` |
+| A5 | marketplace inicial | FECHADA | Amazon.com / EUA |
+| A6 | arquitetura para novas contas | FECHADA | multi-conta |
+| B1 | região | FECHADA | Estados Unidos |
+| B2 | grupos/compradores internos | PARCIAL | IDs/configuração reais e `AB-USER-01` |
+| B3 | onboarding e papéis | PARCIAL | aprovação e concessões externas |
+| B4 | responsável administrativo | FECHADA | Marco |
+| B5 | backfill | FECHADA | 15 dias configuráveis |
+| B6 | frequência | FECHADA | manual + automática configurável; recomendação de 4h |
+| B7 | capabilities | FECHADA EM ESCOPO | autorização real por capability |
+| E1 | perfil funcional | PARCIAL | composição final de perfis/permissões |
+| E2 | aprovação humana | FECHADA | obrigatória para toda detecção automática |
+| E5 | divergência | FECHADA EM PARTE | quantidade exige revisão; moeda bloqueia; tolerância monetária aberta |
+| E6 | cancelamento/reembolso/exceções | FECHADA | estados/eventos separados e auditáveis |
+| F1 | aprovação versus atribuição | PARCIAL | definir quem também atribui |
+| F2 | conta dedicada | FECHADA COMO REGRA GERAL | não aplicável à conta inicial `SHARED` |
+| F3 | split e saldo pendente | FECHADA | invariante quantitativa confirmada |
+
 ## 4. Roadmap oficial
 
 1. Batch 9 — contrato normativo de Buyer Purchase Ingestion;
@@ -72,5 +107,5 @@ O tracking automático depende de dados ingeridos por fontes autorizadas, mas se
 - briefing integral não localizado;
 - definição horária P-08 ainda pendente;
 - responsabilidades adicionais de galpão, remessa, viajante e frete não comprovadas;
-- contrato buyer está definido; contas/regiões, aprovadores, autorização de e-mail/caixa, privacidade, retenção, rateio, fechamento mensal e planilha histórica aguardam decisão do Product Owner;
+- contrato buyer e decisões iniciais Amazon estão definidos; onboarding, papéis, IDs, campos retornados, limites e referência de secrets Amazon, contas eBay, autorização de e-mail/caixa, privacidade, retenção, rateio, fechamento mensal e planilha histórica permanecem pendentes;
 - Financeiro ampliado, Vendas, Patrimônio e Analytics exigem contratos próprios.

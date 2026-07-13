@@ -405,27 +405,120 @@ Evidências devem aplicar minimização, criptografia em trânsito e repouso, se
 
 Cada implementação exige migration aditiva quando aplicável, banco limpo e baseline, seed idempotente, testes PostgreSQL reais, isolamento/RBAC, auditoria e rollback conceitual.
 
+## 20.1 Decisões Amazon Business aprovadas
+
+### Conta, marketplace e compradores
+
+- existe uma conta inicial, do tipo Amazon Business;
+- a conexão inicial é `SHARED`, apta a receber atribuições Dronz e Gooder;
+- o marketplace inicial é Amazon.com / Estados Unidos;
+- a moeda operacional inicial é USD;
+- Marco é o responsável administrativo pela autorização, concessão, revogação e supervisão da conexão;
+- a arquitetura permanece multi-conta para conexões futuras.
+
+A Amazon Business admite usuários, grupos e papéis dentro da mesma conta. Não será criada uma conta separada por comprador. Anselmo, Brunno e Marco poderão ser configurados ou identificados como compradores internos se a configuração da conta permitir. `buyerName`, `buyerId` e `groupId` só serão preservados quando retornados oficialmente. Nomes pessoais nunca integram regras de domínio, RBAC hardcoded ou inferência sem evidência.
+
+Decisão ainda aberta `AB-USER-01`: configurar ou não Anselmo, Brunno e Marco como usuários/compradores internos na Amazon Business. A avaliação ocorrerá antes ou durante o onboarding e não bloqueia a ingestão se a conta ainda não possuir usuários separados.
+
+### Backfill e classificação humana
+
+A primeira sincronização real usa, por configuração, os 15 dias imediatamente anteriores ao seu início. A janela permanece configurável sem migration. Toda compra do backfill entra em staging e revisão; nenhuma cria estoque, recebimento, checkpoint, pedido operacional ou logística automaticamente.
+
+Classificações conceituais disponíveis mediante decisão humana, com nomenclatura final alinhada às convenções do projeto:
+
+- `VALIDA_PENDENTE`;
+- `JA_TRATADA_NO_LEGADO`;
+- `JA_VENDIDA_OU_ENCERRADA`;
+- `CANCELADA`;
+- `REEMBOLSADA`;
+- `COMPRA_PESSOAL`;
+- `DUPLICADA`;
+- `IGNORADA_COM_MOTIVO`.
+
+Toda classificação registra ator, timestamp e motivo quando aplicável. `JA_TRATADA_NO_LEGADO` não recria operação, estoque ou pedido. `JA_VENDIDA_OU_ENCERRADA` preserva a evidência sem gerar patrimônio. Registros não são apagados; correções criam eventos auditáveis; nenhuma classificação é inferida somente pela data.
+
+### Sincronização e capabilities
+
+- sincronização manual autorizada é obrigatória;
+- sincronização automática é configurável;
+- recomendação inicial: a cada quatro horas;
+- a frequência nunca é hardcoded e deve respeitar rate limits e papéis oficiais;
+- sincronizações sem novas compras continuam necessárias para detectar aprovação, cancelamento, reembolso, remessa, tracking, invoice e mudança de status.
+
+Capabilities progressivas desejadas:
+
+- `ORDERS`;
+- `ORDER_ITEMS`;
+- `SHIPMENTS`;
+- `SHIPMENT_ITEMS`;
+- `PACKAGE_TRACKING`;
+- `DOCUMENTS`;
+- `RECONCILIATION`.
+
+Pedidos e itens são o núcleo mínimo. Capability não autorizada não bloqueia as disponíveis. Read models futuros expõem `AVAILABLE`, `UNAVAILABLE` ou `UNAUTHORIZED`; o sistema não simula dados ausentes. Ausência de tracking ou invoice não impede a entrada na staging, e falhas devem ser isoladas por capability quando possível.
+
+### Operadores, aprovação e divergências
+
+Anselmo, Brunno e Marco poderão receber permissões funcionais, por perfil e vínculo administrativo, para revisar e aprovar compras conforme sua atuação operacional em Miami/Paraguai. A nomenclatura final será definida no batch de implementação; nomes pessoais não serão hardcoded.
+
+Permissões conceituais:
+
+- `BUYER_INGESTION_VISUALIZAR`;
+- `BUYER_INGESTION_RECONCILIAR`;
+- `BUYER_INGESTION_APROVAR`;
+- `BUYER_INGESTION_REJEITAR`;
+- `BUYER_INGESTION_ATRIBUIR`.
+
+Toda compra detectada automaticamente exige aprovação humana, mesmo quando API/e-mail coincidem, conta e Order ID são conhecidos, não existe divergência, a conta é dedicada ou todos os itens foram encontrados. Coincidência pode simplificar a revisão, nunca aprovar automaticamente. Antes da aprovação não há materialização, estoque, logística, entrada ou patrimônio.
+
+USD é a moeda inicial esperada. Divergência de quantidade sempre exige verificação; divergência de moeda é sempre bloqueadora; toda divergência material deve ser apresentada. Categorias conceituais: quantidade, valor, moeda, itens, variação, conta, merchant, Order ID, cancelamento, reembolso, duplicidade, compra pessoal, status, tracking e invoice. Resolução nunca sobrescreve fonte e registra ator, instante, decisão, motivo, antes/depois e evidências consideradas.
+
+Cancelamento e reembolso são eventos e estados distintos. Cancelamento não apaga a compra, bloqueia nova materialização e, se houver downstream, exige correção posterior. Reembolso preserva valores original e reembolsado, pode ser total ou parcial e mantém vínculos com itens/atribuições quando possível. Variação de item, quantidade, preço, status, remessa, tracking, invoice ou outro dado externo cria novo evento e nova conciliação.
+
+### Atribuição
+
+A conta inicial compartilhada permite atribuir itens aprovados à Dronz, à Gooder ou dividir quantidades, mantendo saldo pendente. A aprovação pode anteceder a atribuição completa e a materialização continua explícita.
+
+```text
+Dronz + Gooder + Pendente = Quantidade Elegível
+```
+
 ## 21. Decisões Exclusivas do Product Owner
 
-Bloqueadoras antes dos respectivos batches:
+### 21.1 Pendências específicas do Amazon Business
+
+Após as decisões do complemento do Batch 9, permanecem abertas somente:
+
+1. status do onboarding da aplicação;
+2. concessão do papel Amazon Business Analytics;
+3. disponibilidade efetiva dos papéis/capabilities de Reporting, Package Tracking, Document e Reconciliation;
+4. IDs reais de organização, grupos e usuários, incluindo `AB-USER-01` sobre configurar ou não os três compradores internos;
+5. campos efetivamente retornados pelos relatórios da conta;
+6. rate limits oficiais aplicáveis à conta;
+7. referência segura de secrets no ambiente/secret manager, sem valor no documento;
+8. política final de tolerância monetária;
+9. se Anselmo, Brunno e Marco também receberão permissão de atribuição, além de revisão/aprovação.
+
+### 21.2 Pendências dos batches posteriores
+
+Bloqueadoras antes dos respectivos batches, mas não do planejamento documental Amazon:
 
 1. Qual mailbox receberá os e-mails?
 2. Gmail, Outlook ou ambos?
 3. Uma caixa compartilhada ou uma por conta?
-4. Quais contas Amazon Business existem e quais regiões entram no primeiro rollout?
-5. Quais contas eBay existem?
-6. Quais contas são compartilhadas ou dedicadas e a quais lojas?
-7. Quanto histórico inicial importar e com qual frequência sincronizar cada fonte?
-8. Quem pode visualizar staging global, reconciliar, aprovar e atribuir?
-9. Quais campos mínimos e tolerâncias tornam uma correlação e aprovação válidas?
-10. Quem resolve conflitos e quais motivos são obrigatórios?
-11. O corpo completo e anexos de e-mail podem ser armazenados e por quanto tempo?
-12. Fechamento mensal será obrigatório?
-13. Correções após fechamento reabrem o mês ou viram ajuste?
-14. Como ratear frete, impostos, descontos e resíduo de arredondamento no split?
-15. Qual planilha é a fonte histórica, quais colunas são canônicas e qual mês inicial será migrado?
+4. Quais contas eBay existem?
+5. Quais contas eBay são compartilhadas ou dedicadas e a quais lojas?
+6. Quanto histórico inicial importar e com qual frequência sincronizar eBay e e-mail?
+7. Quem pode visualizar staging global e resolver conflitos fora do fluxo Amazon já indicado?
+8. Quais campos mínimos e tolerâncias tornam uma correlação multicanal válida?
+9. Quem resolve conflitos e quais motivos são obrigatórios?
+10. O corpo completo e anexos de e-mail podem ser armazenados e por quanto tempo?
+11. Fechamento mensal será obrigatório?
+12. Correções após fechamento reabrem o mês ou viram ajuste?
+13. Como ratear frete, impostos, descontos e resíduo de arredondamento no split?
+14. Qual planilha é a fonte histórica, quais colunas são canônicas e qual mês inicial será migrado?
 
-Já fechadas pelo Product Owner neste contrato: compra detectada por API também exige aprovação; conta dedicada ainda exige atribuição explícita; competência mensal principal usa `dataPedidoExterno`.
+Já fechadas: uma conta Amazon Business inicial, `SHARED`, Amazon.com/EUA, USD, Marco como responsável administrativo, arquitetura multi-conta, backfill de 15 dias, sincronização manual mais automática configurável com recomendação de quatro horas, capabilities progressivas, aprovação humana obrigatória, quantidade sempre revisada, moeda divergente bloqueadora, exceções separadas e split com saldo pendente. Permanecem vigentes: conta dedicada ainda exige atribuição explícita e competência mensal principal usa `dataPedidoExterno`.
 
 ## 22. Referências oficiais consultadas
 
@@ -467,4 +560,4 @@ Já fechadas pelo Product Owner neste contrato: compra detectada por API também
 
 ## 23. Status
 
-O contrato técnico está definido, mas a implementação permanece bloqueada pelas decisões do Product Owner listadas na seção 21 e pelos gates externos de onboarding/credenciais. Nenhum adapter, endpoint, schema, migration ou tela foi criado neste Batch 9.
+O contrato técnico Amazon está definido para auditoria. O início do Batch 10 permanece condicionado à comprovação externa de onboarding, papel Amazon Business Analytics, capabilities concedidas, resposta real sanitizada, limites aplicáveis e referência segura de secrets. As demais decisões da seção 21 bloqueiam seus respectivos batches posteriores. Nenhum adapter, endpoint, schema, migration ou tela foi criado neste complemento.
