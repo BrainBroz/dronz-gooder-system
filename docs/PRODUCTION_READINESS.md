@@ -1,6 +1,6 @@
 # Prontidão para produção
 
-**Baseline técnica:** `8644188` — Batches 0–8 e auditorias independentes aprovados. A fundação de integração do Batch 8 permanece desabilitada para providers reais. A Trading API `GetMyeBayBuying` é uma fonte oficial tecnicamente compatível com o caso buyer do eBay, mas o adapter, as credenciais, a elegibilidade produtiva e a política de sincronização ainda não foram implementados nem validados. Esta classificação cobre código, migrations e testes; publicação continua condicionada à infraestrutura e aos segredos do ambiente.
+**Baseline técnica:** `8644188` — Batches 0–8 e auditorias independentes aprovados. Os Batches 8.1, 8.2 e 9 são documentais. A fundação de integração permanece desabilitada para providers reais. Amazon Business Reporting API e eBay `GetMyeBayBuying` são fontes buyer oficiais candidatas, mas adapters, credenciais, onboarding, elegibilidade produtiva e políticas de sincronização ainda não foram implementados nem validados. Esta classificação cobre código, migrations e testes; publicação continua condicionada à infraestrutura e aos segredos do ambiente.
 
 ## Segurança
 
@@ -19,7 +19,7 @@
 
 O seed cria dados administrativos e deve ser executado deliberadamente, somente com `SEED_ADMIN_*` definidos para o ambiente correto. O Batch 8 prepara conexões e sincronização explícita por adapters, mas ingestão automática de compras buyer, tracking automático, e-mail operacional, QR Code, PDF e Excel não fazem parte desta versão.
 
-Referências `env:MARKETPLACE_*` não são credenciais: são ponteiros. Valores devem existir somente no ambiente/secret manager e nunca em banco, logs, respostas ou commits. Dronz e Gooder operam como compradores. Amazon SP-API e eBay Sell Fulfillment não atendem ao histórico geral de compras consumer; portanto, os adapters seller permanecem adiados e nenhuma conexão desse tipo deve ser ativada como solução do fluxo buyer. Para eBay buyer, a fonte candidata oficial é `GetMyeBayBuying`, não Sell Fulfillment nem Buy Order API. Sua ativação exige consentimento/token do usuário, confirmação de quota e teste no keyset real.
+Referências `env:MARKETPLACE_*` não são credenciais: são ponteiros. Valores devem existir somente no ambiente/secret manager e nunca em banco, logs, respostas ou commits. Dronz e Gooder operam como compradores. Amazon SP-API e eBay Sell Fulfillment são seller-side e permanecem adiados. Para Amazon buyer empresarial, a fonte candidata é a Amazon Business Reporting API atual, condicionada ao onboarding e ao papel Amazon Business Analytics. Para eBay buyer, a fonte candidata é `GetMyeBayBuying`, condicionada a consentimento/token, quota e teste no keyset real. Gmail/Outlook exigirão OAuth, escopos mínimos, retenção e privacidade aprovados antes de qualquer ativação.
 
 Os testes de integração exigem `DATABASE_TEST_URL` apontando para um PostgreSQL exclusivo de testes. A suíte aplica migrations e seed nesse banco antes da execução e nunca deve receber a URL do banco de desenvolvimento ou produção.
 
@@ -42,3 +42,5 @@ O `npm audit` de 2026-07-13 reporta cinco vulnerabilidades na toolchain de desen
 O frontend usa lazy routes e chunks estáveis de vendor. O Batch 7 reduziu o maior chunk de 789,22 kB para 297,25 kB e eliminou o aviso do Vite para chunks acima de 500 kB, sem alterar comportamento ou dependências.
 
 Na validação do Batch 8, Prisma validate/generate, lint, typecheck, builds e duas execuções globais passaram. A baseline registrou 126 testes de API e 78 testes web, totalizando 204 testes por execução, sem ignorados.
+
+O Batch 9 não altera a classificação de produção nem a contagem de testes. Ele apenas congela o contrato documental de ingestão buyer. Os Batches 10–13 permanecem bloqueados pelos gates externos e pelas decisões do Product Owner registradas em `BUYER_PURCHASE_INGESTION_CONTRACT_V1.md`.

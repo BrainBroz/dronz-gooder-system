@@ -16,7 +16,7 @@ Classificações: `IMPLEMENTADO`, `PARCIAL`, `PLANEJADO`, `FORA DO ESCOPO ATUAL`
 | IDs              | Área                              | Situação atual               | Evidência ou limite                                                                                         |
 | ---------------- | --------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | B-01             | Compra nos EUA                    | IMPLEMENTADO                 | staging global, compra manual, atribuição quantitativa e materialização por loja nos Batches 5–6            |
-| B-02             | Plataformas e contas externas     | PARCIAL                      | fundação de conexões existe; o caso principal buyer depende do contrato de ingestão por fontes autorizadas  |
+| B-02             | Plataformas e contas externas     | PARCIAL                      | fundação de conexões e contrato buyer existem; adapters Amazon Business/eBay/e-mail não foram implementados |
 | B-03, B-05, B-06 | Miami, conferência e divergências | IMPLEMENTADO                 | UI-3C possui read models, RBAC, eventos corretivos, auditoria e interface operacional                       |
 | B-04             | Galpão nos EUA                    | NÃO LOCALIZADO               | localização genérica existe, mas operação específica de galpão não possui contrato canônico                 |
 | B-07             | Consolidação física               | PARCIAL                      | viagens, malas, volumes e checkpoints existem; regras adicionais do briefing integral não foram localizadas |
@@ -54,14 +54,16 @@ Classificações: `IMPLEMENTADO`, `PARCIAL`, `PLANEJADO`, `FORA DO ESCOPO ATUAL`
 
 ## 4. Roadmap oficial
 
-1. contrato normativo de Buyer Purchase Ingestion;
-2. ingestão por e-mail autorizado;
-3. ingestão por documentos, invoices e CSV;
-4. consolidação de envios, pacotes e trackings;
-5. tracking automático independente;
-6. Financeiro e conciliação;
-7. Vendas e baixa patrimonial;
-8. Analytics avançado.
+1. Batch 9 — contrato normativo de Buyer Purchase Ingestion;
+2. Batch 10 — Amazon Business Reporting API;
+3. Batch 11 — eBay Buyer API;
+4. Batch 12 — e-mail autorizado e reconciliação multicanal;
+5. Batch 13 — migração da planilha e painel mensal;
+6. Batch 14 — consolidação de envios, pacotes e trackings;
+7. Batch 15 — tracking automático independente;
+8. Batch 16 — Financeiro e conciliação;
+9. Batch 17 — Vendas e baixa patrimonial;
+10. Batch 18 — Analytics avançado.
 
 O tracking automático depende de dados ingeridos por fontes autorizadas, mas seu domínio não depende de marketplace, e-mail ou documento. Ordem sem tracking é válida; tracking pode surgir ou mudar depois; pedidos podem possuir múltiplos envios, pacotes e códigos; e o fallback manual deve permanecer auditável.
 
@@ -70,5 +72,5 @@ O tracking automático depende de dados ingeridos por fontes autorizadas, mas se
 - briefing integral não localizado;
 - definição horária P-08 ainda pendente;
 - responsabilidades adicionais de galpão, remessa, viajante e frete não comprovadas;
-- contrato buyer, autorização de e-mail/caixa, privacidade, retenção e estratégia de documentos/CSV ainda devem ser definidos antes da implementação;
+- contrato buyer está definido; contas/regiões, aprovadores, autorização de e-mail/caixa, privacidade, retenção, rateio, fechamento mensal e planilha histórica aguardam decisão do Product Owner;
 - Financeiro ampliado, Vendas, Patrimônio e Analytics exigem contratos próprios.

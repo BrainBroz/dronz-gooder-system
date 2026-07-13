@@ -34,23 +34,24 @@ Construir um sistema operacional para Dronz e Gooder com separação rigorosa en
 
 ## Estado da fundação
 
-A baseline técnica dos Batches 0–7 está concluída no commit `f413791`. Estão implementados e validados: autenticação cookie-only, Categorias, Produtos, Fornecedores, Pedidos Operacionais, Compras Unificadas, UI-3C, logística internacional, recebimento, entrada definitiva, estoque, financeiro manual, Dashboard e Relatórios. O Batch 8 adiciona uma fundação técnica comum de integrações, preservada para fontes futuras. O caso principal aprovado é `buyer purchase ingestion`: importar compras realizadas por Dronz e Gooder. A ingestão buyer do eBay é tecnicamente possível pela Trading API `GetMyeBayBuying`, sujeita à validação da aplicação, autorização da conta, limites e janela histórica; ela ainda não está implementada. Amazon buyer permanece sob investigação separada. Adapters seller Amazon/eBay ficam adiados; tracking automático, integrações PayPal/bancárias, e-mail operacional e QR Code permanecem futuros.
+A baseline técnica dos Batches 0–7 está concluída no commit `f413791`. Estão implementados e validados: autenticação cookie-only, Categorias, Produtos, Fornecedores, Pedidos Operacionais, Compras Unificadas, UI-3C, logística internacional, recebimento, entrada definitiva, estoque, financeiro manual, Dashboard e Relatórios. O Batch 8 adiciona uma fundação técnica comum de integrações, preservada para fontes futuras. O caso principal aprovado é `buyer purchase ingestion`: importar compras realizadas por Dronz e Gooder. O Batch 9 define o contrato multicanal de evidências, reconciliação, aprovação humana, atribuição por loja e visão mensal, sem implementar adapters. Amazon Business Reporting API e eBay `GetMyeBayBuying` são fontes buyer oficiais candidatas, sujeitas a onboarding, autorização e validação real. E-mail autorizado é evidência independente. Adapters seller ficam adiados; tracking automático, integrações PayPal/bancárias e QR Code permanecem futuros.
 
 ## Roadmap oficial
 
 Executar em batches separados e nesta ordem:
 
-1. Batch 8.2 — correção forense e contratual do eBay buyer;
-2. Batch 9 — adapter eBay buyer, condicionado à confirmação da aplicação e das credenciais/permissões;
-3. Batch 10 — investigação e contrato Amazon buyer;
-4. Batch 11 — fontes complementares: e-mail autorizado, invoices e CSV;
-5. Batch 12 — consolidação de envios, pacotes e trackings;
-6. Batch 13 — motor automático de tracking independente;
-7. Batch 14 — Financeiro e conciliação;
-8. Batch 15 — Vendas e baixa patrimonial;
-9. Batch 16 — Analytics avançado.
+1. Batch 9 — contrato de Buyer Purchase Ingestion, reconciliação, aprovação e visão mensal;
+2. Batch 10 — Amazon Business Reporting API;
+3. Batch 11 — eBay Buyer API;
+4. Batch 12 — e-mail autorizado e reconciliação multicanal;
+5. Batch 13 — migração da planilha e painel mensal;
+6. Batch 14 — consolidação de envios, pacotes e trackings;
+7. Batch 15 — motor automático de tracking independente;
+8. Batch 16 — Financeiro e conciliação;
+9. Batch 17 — Vendas e baixa patrimonial;
+10. Batch 18 — Analytics avançado.
 
-O adapter eBay buyer, a investigação Amazon buyer e as fontes complementares precedem o tracking automático porque podem fornecer compras, envios e códigos externos. Amazon e eBay são origens possíveis dos dados, não a arquitetura central do domínio. O tracking permanece independente da fonte: uma ordem pode existir sem tracking, o tracking pode surgir ou mudar posteriormente, um pedido pode possuir múltiplos envios, pacotes e códigos, e deve existir fallback manual auditável. Nunca presumir um único tracking por pedido nem acoplar a máquina de tracking diretamente ao marketplace, e-mail ou documento.
+Amazon, eBay e e-mail precedem o tracking automático porque fornecem evidências de compras, envios e códigos externos. Nenhuma fonte é a arquitetura central do domínio. Toda compra detectada automaticamente exige reconciliação e aprovação humana antes da atribuição/materialização. O tracking permanece independente da fonte: uma ordem pode existir sem tracking, o tracking pode surgir ou mudar posteriormente, um pedido pode possuir múltiplos envios, pacotes e códigos, e deve existir fallback manual auditável. Nunca presumir um único tracking por pedido nem acoplar a máquina de tracking diretamente ao marketplace, e-mail ou documento.
 
 ## Padrões arquiteturais vigentes
 
@@ -86,6 +87,7 @@ O adapter eBay buyer, a investigação Amazon buyer e as fontes complementares p
 ## Documentação
 
 - `docs/PROJECT_CONTEXT_MASTER.md` é o índice oficial de continuidade e deve refletir somente o que o código e os testes comprovam.
+- `docs/BUYER_PURCHASE_INGESTION_CONTRACT_V1.md` é o contrato normativo para os Batches 10–13; decisões de produto nele marcadas como bloqueadoras não podem ser preenchidas por suposição.
 - Contratos normativos específicos preservam as regras do domínio; documentos iniciais ou de investigação devem ser marcados como históricos quando superados.
 - Atualizações relevantes registram estado implementado, commit, riscos, limitações e roadmap sem duplicar contratos completos.
 - Uma decisão planejada nunca deve ser descrita como implementada.

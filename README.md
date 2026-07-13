@@ -55,12 +55,13 @@ Status atual:
 
 ## Roadmap
 
-O roadmap oficial está em `docs/PROJECT_CONTEXT_MASTER.md`. Dronz e Gooder usam marketplaces como compradores. A próxima sequência começa pela validação e implementação controlada do adapter eBay buyer baseado em `GetMyeBayBuying`; Amazon buyer permanece em investigação separada. Depois vêm fontes complementares de e-mail/invoices/CSV, consolidação de envios/pacotes, tracking automático independente, Financeiro, Vendas e Analytics. O contrato de tracking preserva ordens sem código, múltiplos envios/pacotes/códigos, atualizações posteriores e fallback manual auditável.
+O roadmap oficial está em `docs/PROJECT_CONTEXT_MASTER.md`. Dronz e Gooder usam marketplaces como compradores. O Batch 9 documenta um contrato multicanal: Amazon Business Reporting API, eBay `GetMyeBayBuying`, e-mail autorizado, planilha e entrada manual produzem evidências reconciliadas e aprovadas antes da atribuição por loja. A sequência planejada é Amazon Business, eBay buyer, e-mail/reconciliação, migração da planilha/painel mensal, consolidação de envios e tracking automático independente, seguida de Financeiro, Vendas e Analytics.
 
 ## Itens não implementados ainda
 
-- adapter eBay buyer e ingestão automática de compras realizadas por contas buyer;
-- investigação e contrato Amazon buyer;
+- adapters Amazon Business buyer e eBay buyer;
+- e-mail autorizado, reconciliação multicanal e migração da planilha;
+- painel mensal de compras reconciliadas;
 - adapters seller Amazon/eBay, adiados até existir necessidade específica de importar vendas recebidas;
 - tracking automático e integrações com transportadoras;
 - PayPal, bancos e cartões como integrações (PAYPAL atual é classificação manual);

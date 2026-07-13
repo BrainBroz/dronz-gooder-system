@@ -6,7 +6,7 @@
 
 **Providers preparados:** Amazon e eBay
 
-**Estado:** fundação interna implementada e aprovada; adapters externos desabilitados; eBay buyer confirmado como fonte oficial candidata e ainda não implementado
+**Estado:** fundação interna implementada e aprovada; adapters externos desabilitados; Amazon Business Reporting API e eBay buyer confirmados como fontes oficiais candidatas e ainda não implementados
 
 ## 1. Escopo e princípio
 
@@ -41,6 +41,7 @@ Caso secundário futuro:
 
 | Fonte/API                  | Seller orders | Buyer purchase history | Uso atual                         |
 | -------------------------- | ------------: | ---------------------: | --------------------------------- |
+| Amazon Business Reporting  |           Não |                    Sim | Adapter buyer futuro              |
 | Amazon SP-API              |           Sim |                    Não | Seller adiado                     |
 | eBay `GetMyeBayBuying`     |           Não |                    Sim | Adapter buyer futuro              |
 | eBay Sell Fulfillment      |           Sim |                    Não | Seller adiado                     |
@@ -55,14 +56,15 @@ Caso secundário futuro:
 O futuro contrato deve ser independente da fonte:
 
 ```text
-EbayBuyerAdapter ────┐
-EmailBuyerAdapter ───┤
-InvoiceBuyerAdapter ─┤
-CsvBuyerAdapter ─────┼─ NormalizedBuyerPurchase → Compras Unificadas
-ManualBuyerAdapter ──┘
+AmazonBusinessBuyerAdapter ─┐
+EbayBuyerAdapter ───────────┤
+EmailBuyerAdapter ──────────┤
+InvoiceBuyerAdapter ────────┤
+CsvBuyerAdapter ────────────┼─ NormalizedBuyerPurchase → Compras Unificadas
+ManualBuyerAdapter ─────────┘
 ```
 
-O Batch 9 deverá implementar o adapter eBay buyer sobre o contrato comum existente, após confirmar aplicação, autenticação, containers e quota. Deve definir provider/origem, conta externa, identidade do pedido, itens, quantidades, moeda, valores, merchant, datas, cancelamentos, envios, tracking posterior, conflitos e histórico da origem. O adapter ainda não está implementado.
+O Batch 9 define o contrato normativo comum antes de qualquer adapter. Ele preserva evidências independentes, reconciliação, aprovação humana, atribuição quantitativa e visão mensal. Amazon Business, eBay e e-mail serão implementados em batches separados, sem transformar uma fonte em autoridade absoluta e sem materialização automática.
 
 ## 2. Pesquisa oficial
 
@@ -77,7 +79,16 @@ Fontes oficiais consultadas em 2026-07-13:
 - [Orders API rate limits](https://developer-docs.amazon.com/sp-api/lang-tr_TR/docs/orders-api-rate-limits): limites variam por operação e podem ser devolvidos em headers.
 - [Login with Amazon — customer profile](https://developer.amazon.com/docs/login-with-amazon/customer-profile.html): fornece perfil autorizado; não é uma API de histórico de compras do consumidor.
 
-Conclusão: a SP-API Orders atende pedidos recebidos por sellers/vendors. Não fornece histórico geral de compras realizadas por conta consumer. Login with Amazon fornece perfil, não histórico de compras. Portanto, Amazon SP-API fica adiada e não é solução do caso principal buyer.
+Estas referências continuam corretas para contas seller/consumer, mas não cobriam a oferta específica Amazon Business. Fontes adicionais oficiais consultadas em 2026-07-13:
+
+- [Amazon Business Reporting API v2025-06-09](https://docs.business.amazon.com/docs/reporting-v2025-06-09): relatórios de pedidos, linhas, remessas e linhas de remessa para clientes Amazon Business.
+- [Order reports](https://docs.business.amazon.com/docs/retrieving-order-reports): janela de até 366 dias, paginação de até 100 resultados e `nextPageToken`.
+- [Order line items](https://docs.business.amazon.com/docs/retrieving-order-line-items): IDs de linha, ASIN, título, quantidade, valores/moeda e seller.
+- [Shipment reports](https://docs.business.amazon.com/docs/retrieving-shipment-reports): remessas, status, datas, endereço e valores.
+- [Amazon Business onboarding](https://docs.business.amazon.com/docs/onboarding-overview) e [roles](https://docs.business.amazon.com/docs/amazon-business-roles): aprovação do programa e papel Amazon Business Analytics para Reporting API.
+- [Rate limits](https://docs.business.amazon.com/docs/rate-limits-in-amazon-business-apis): limites por operação/party, `429` e backoff com jitter.
+
+Conclusão atualizada: SP-API Orders continua seller-side e Login with Amazon continua apenas identidade/perfil. Para compras realizadas em contas Amazon Business, a Reporting API é uma fonte buyer oficial candidata. Ela exige onboarding, papéis, autorização, regiões e validação reais. O adapter futuro será `AmazonBusinessBuyerAdapter`; ele ainda não está implementado.
 
 ### 2.2 eBay
 
@@ -162,7 +173,7 @@ Envio, pacote e tracking são estruturas de origem externa:
 - transportadora pode estar ausente;
 - não existe consulta automática à transportadora neste batch.
 
-`EventoTrackingExterno` está preparado para eventos futuros, mas a consolidação operacional pertence ao Batch 12 e o motor automático de tracking ao Batch 13.
+`EventoTrackingExterno` está preparado para eventos futuros, mas a consolidação operacional pertence ao Batch 14 e o motor automático de tracking ao Batch 15.
 
 ## 7. Sincronização
 
@@ -218,11 +229,12 @@ Há drift preexistente entre partes do schema Prisma e migrations antigas, relac
 
 ## 11. Fontes de Buyer Purchase Ingestion
 
-Fonte oficial prioritária:
+Fontes oficiais candidatas, sem prioridade absoluta entre canais:
 
-- **eBay `GetMyeBayBuying`:** adapter buyer do Batch 9, condicionado à validação do sistema legado, do keyset e das permissões. A janela de até 60 dias exige sincronização recorrente e retenção local.
+- **Amazon Business Reporting API:** adapter buyer do Batch 10, condicionado a onboarding, papéis, contas e regiões aprovadas.
+- **eBay `GetMyeBayBuying`:** adapter buyer do Batch 11, condicionado à validação do keyset e das permissões. A janela de até 60 dias exige sincronização recorrente e retenção local.
 
-Fontes complementares do Batch 11:
+Fontes independentes do Batch 12 e posteriores:
 
 - **E-mail autorizado:** confirmação, atualização, envio, tracking, cancelamento, reembolso, múltiplos pacotes e múltiplas mensagens correlacionadas ao mesmo pedido.
 - **Caixa dedicada:** encaminhamento automático, regras por remetente e correlação por `externalOrderId`.
@@ -231,7 +243,7 @@ Fontes complementares do Batch 11:
 - **CSV/exportação:** upload, mapeamento de colunas, validação, preview e importação idempotente.
 - **Entrada manual:** fallback existente, independente de integração e apto a receber tracking posteriormente.
 
-Critérios obrigatórios: autorização verificável, minimização de dados, identidade estável, deduplicação, idempotência, evidência, auditabilidade, privacidade, custo operacional, cobertura de atualizações e recuperação de falhas.
+Critérios obrigatórios: autorização verificável, minimização de dados, identidade estável, deduplicação, idempotência, evidência preservada, reconciliação, aprovação humana, auditabilidade, privacidade, custo operacional, cobertura de atualizações e recuperação de falhas. O contrato completo está em `BUYER_PURCHASE_INGESTION_CONTRACT_V1.md`.
 
 ## 12. Tracking independente da fonte
 
@@ -246,12 +258,13 @@ Critérios obrigatórios: autorização verificável, minimização de dados, id
 
 ## 13. Limitações e gates seguintes
 
-- Batch 8.2: correção forense e contratual do eBay buyer.
-- Batch 9: adapter eBay buyer, somente após confirmar aplicação e credenciais/permissões.
-- Batch 10: investigação e contrato Amazon buyer.
-- Batch 11: fontes complementares por e-mail autorizado, invoices e CSV.
-- Batch 12: consolidação operacional de envios, pacotes e trackings.
-- Batch 13: motor independente de tracking e transportadoras.
-- Batches 14–16: Financeiro/conciliação, Vendas/baixa patrimonial e Analytics avançado.
+- Batch 9: contrato normativo multicanal de Buyer Purchase Ingestion.
+- Batch 10: Amazon Business Reporting API.
+- Batch 11: eBay buyer por `GetMyeBayBuying`.
+- Batch 12: e-mail autorizado e reconciliação multicanal.
+- Batch 13: migração da planilha e painel mensal.
+- Batch 14: consolidação operacional de envios, pacotes e trackings.
+- Batch 15: motor independente de tracking e transportadoras.
+- Batches 16–18: Financeiro/conciliação, Vendas/baixa patrimonial e Analytics avançado.
 
-Nenhum desses batches está iniciado. Adapters seller Amazon/eBay permanecem adiados até existir necessidade específica de importar vendas recebidas. O adapter eBay buyer é uma trilha distinta e tecnicamente possível, mas exige confirmação externa antes da implementação. Amazon buyer não deve ser presumido equivalente e permanece sob investigação.
+O Batch 9 é exclusivamente documental. Nenhum adapter seguinte está iniciado. Adapters seller Amazon/eBay permanecem adiados até existir necessidade específica de importar vendas recebidas. Amazon Business e eBay buyer são trilhas distintas dentro do mesmo contrato de evidências e exigem confirmação externa antes da implementação.

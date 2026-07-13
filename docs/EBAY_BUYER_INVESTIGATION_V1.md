@@ -63,7 +63,7 @@ Na consulta de 2026-07-13, `GetMyeBayBuying` não constava na página oficial de
 | itens, moeda e status | Compatível | contrato normalizado possui esses campos |
 | cancelamentos | Compatível em estrutura | mapping exato depende da resposta real |
 | envios/pacotes/trackings | Parcial | estruturas existem, mas campos e fonte eBay precisam ser comprovados |
-| atualização posterior | Gap contratual | mudança de payload hoje gera conflito; Batch 9 deve definir atualização incremental auditável |
+| atualização posterior | Contrato definido, implementação pendente | Batch 9 exige evidência versionada e reconciliação auditável; código atual ainda trata mudança incompatível como conflito |
 
 A fundação não precisa ser descartada. O adapter poderá traduzir XML, paginação e janela do eBay para o contrato normalizado. Não é permitido interpretar esse diagnóstico como adapter implementado.
 
@@ -82,7 +82,7 @@ A frequência não foi definida porque o comportamento do sistema existente e a 
 
 ## 6. Gate do adapter
 
-O Batch 9 não deve iniciar até obter evidência mínima da aplicação eBay existente ou de um keyset legitimamente autorizado:
+O contrato documental do Batch 9 foi concluído sem depender do keyset. O adapter eBay do Batch 11 não deve iniciar até obter evidência mínima da aplicação existente ou de um keyset legitimamente autorizado:
 
 1. ambiente e keyset;
 2. fluxo de consentimento e tipo de token;
@@ -93,4 +93,4 @@ O Batch 9 não deve iniciar até obter evidência mínima da aplicação eBay ex
 7. origem comprovada de tracking;
 8. política de atualização incremental e retenção.
 
-Amazon buyer permanece em investigação separada no Batch 10. Não se presume que a solução eBay seja transferível para Amazon.
+Amazon buyer é uma trilha separada no Batch 10, baseada na Amazon Business Reporting API e condicionada ao onboarding próprio. Não se presume que a solução eBay seja transferível para Amazon.
