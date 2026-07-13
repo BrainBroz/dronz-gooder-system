@@ -1,5 +1,7 @@
 # Batch 3.1 — Correções do Backend UI-3C
 
+> **Status concluído:** registro histórico do commit `79f5247`. O estado consolidado da UI-3C está em `UI3C_BACKEND_V1.md`, `UI3C_FRONTEND_V1.md` e `PROJECT_CONTEXT_MASTER.md`.
+
 ## Escopo
 
 Este batch corrige exclusivamente os achados bloqueadores e altos da auditoria do commit `6367fb3`. Não inclui frontend, Compras Unificadas, Dashboard ou Relatórios.

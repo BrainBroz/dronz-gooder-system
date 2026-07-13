@@ -2,7 +2,7 @@
 
 ## Estado implementado
 
-O backend da UI-3C fornece read models tenant-safe, RBAC granular, snapshot de rota, idempotência persistente, auditoria estruturada e eventos corretivos. O frontend continua fora deste batch.
+O backend da UI-3C foi concluído nos commits `6367fb3` e `79f5247`. Ele fornece read models tenant-safe, RBAC granular, snapshot de rota, idempotência persistente, auditoria estruturada e eventos corretivos. O frontend foi implementado posteriormente nos commits `fe658c8` e `cf3a880`, documentados em `UI3C_FRONTEND_V1.md`.
 
 ## Rotas e checkpoints
 
@@ -25,7 +25,9 @@ Todos exigem JWT, `x-store-id`, vínculo e permissão de leitura:
 - `GET /operations/brazil/candidates`;
 - `GET /operations/brazil/:id`;
 - `GET /operations/receiving/candidates`;
+- `GET /operations/receiving/:id`;
 - `GET /operations/definitive-entry/candidates`;
+- `GET /operations/definitive-entry/:id`;
 - `GET /operations/history`.
 
 Os DTOs retornam `allowedActions` e `blockedReasons`. Dados monetários não fazem parte do read model Miami.
@@ -78,6 +80,6 @@ Mutações críticas gravam ator, loja, permissão, ação, entidade, correlaç�
 
 ## Compatibilidade e migration
 
-Migration: `20260712180000_ui3c_backend`.
+Migrations: `20260712180000_ui3c_backend` e `20260712210000_ui3c_audit_fixes`.
 
-A alteração é aditiva. Registros duplicados legados não são apagados: o primeiro registro canônico permanece ativo e os demais recebem `supersededAt`. O banco limpo e a baseline existente devem executar a mesma migration antes do deploy. O frontend atual não foi alterado.
+As alterações são aditivas. Registros duplicados legados não são apagados: o primeiro registro canônico permanece ativo e os demais recebem `supersededAt`. Banco limpo e baseline existente devem executar ambas as migrations antes do deploy. A migration corretiva também preserva compensações e aborta quando não puder reparar saldo legado com segurança.

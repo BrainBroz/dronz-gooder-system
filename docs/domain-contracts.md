@@ -1,6 +1,7 @@
 # Contratos normativos do domínio
 
 **Aprovado em:** 2026-07-11  
+**Consolidado após os Batches 3–7:** 2026-07-13
 **Escopo:** compras, logística internacional, recebimento, estoque, financeiro, dashboard e relatórios.
 
 Este documento é fonte normativa. Toda entidade operacional possui `lojaId` diretamente ou herda um vínculo validável. O backend valida usuário ativo, vínculo explícito com a loja e nunca confia apenas no `lojaId` do frontend. Dronz e Gooder não compartilham dados operacionais. IDs técnicos usam o padrão Prisma atual; IDs históricos de Produtos não são reutilizados. Valores monetários usam `Decimal`; datas são persistidas em UTC.
@@ -48,7 +49,7 @@ Status de recebimento: `PENDING`, `IN_PROGRESS`, `PARTIALLY_COMPLETED`, `COMPLET
 
 Movimentos: `ENTRY`, `RESERVE`, `RELEASE_RESERVATION`, `EXIT`, `ADJUSTMENT_POSITIVE`, `ADJUSTMENT_NEGATIVE`, `RETURN_ENTRY`, `RETURN_EXIT`. Motivos: `PURCHASE_RECEIPT`, `SALE`, `MANUAL_CORRECTION`, `DAMAGE`, `LOSS`, `RETURN`, `RESERVATION`, `RESERVATION_RELEASE`.
 
-`quantidadeDisponivel = quantidadeFisica - quantidadeReservada`. Saldo físico e disponível nunca ficam negativos. Reserva não muda físico; baixa reduz físico; liberação reduz reservado. Entrada exige recebimento válido após chegada ao Brasil. Ajustes exigem motivo e observação. Operações usam transação Prisma. Movimentos confirmados não são editados nem apagados. Recebimento parcial é permitido e cada confirmação gera ENTRY.
+`quantidadeDisponivel = quantidadeFisica - quantidadeReservada`. Saldo físico e disponível nunca ficam negativos. Reserva não muda físico; baixa reduz físico; liberação reduz reservado. Confirmações de recebimento registram conferência, mas não geram estoque. Somente a entrada definitiva, após Brasil e conferência válida, gera `ENTRY`. Ajustes exigem motivo e observação. Operações usam transação Prisma. Movimentos confirmados não são editados nem apagados; correções usam eventos e movimentos compensatórios auditáveis.
 
 ## Financeiro
 
@@ -73,4 +74,4 @@ Relatórios oficiais: Pedidos de Compra, Itens Comprados, Logística por Viagem,
 
 ## Autorização e decisões futuras
 
-Neste ciclo vale o modelo atual: usuário autenticado e ativo, vínculo explícito com loja e SUPER_ADMIN limitado às lojas vinculadas. Não criar RBAC novo. Integrações PayPal, bancos, cartões, e-mail, companhias aéreas, tracking automático, PDF e Excel permanecem futuras.
+Vale o modelo atual: usuário autenticado e ativo, vínculo explícito com loja e `SUPER_ADMIN` limitado às lojas vinculadas nas operações tenantadas. O RBAC granular aprovado para UI-3C e Compras Unificadas está definido nos contratos específicos e supera a restrição histórica de não criar permissões nesses fluxos. Novas permissões fora desses contratos exigem aprovação. Integrações Amazon/eBay, sincronização automática, PayPal, bancos, cartões, e-mail, companhias aéreas, tracking automático, PDF e Excel permanecem futuras.

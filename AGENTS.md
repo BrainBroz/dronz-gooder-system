@@ -7,7 +7,7 @@ Construir um sistema operacional para Dronz e Gooder com separação rigorosa en
 ## Regras centrais
 
 - Duas lojas iniciais: `dronz` e `gooder`.
-- Toda entidade comercial preserva `lojaId`.
+- Toda entidade comercial operacional ou materializada preserva `lojaId`. A staging global de Compras Unificadas é a única exceção aprovada: não usa `lojaId` como tenant, exige RBAC global e cria dados tenantados somente por atribuição/materialização explícita.
 - Estoques nunca são misturados.
 - Uma remessa pode transportar itens das duas lojas.
 - Cada item mantém seu próprio `lojaId`.
@@ -34,7 +34,23 @@ Construir um sistema operacional para Dronz e Gooder com separação rigorosa en
 
 ## Estado da fundação
 
-A fundação, autenticação cookie-only, Categorias, Produtos, Fornecedores, Pedidos de Compra, logística internacional, recebimento, estoque, financeiro manual, dashboard e relatórios estão implementados e validados. Tracking automático, integrações PayPal/bancárias, e-mail e QR Code permanecem fora do escopo atual.
+A baseline técnica dos Batches 0–7 está concluída no commit `f413791`. Estão implementados e validados: autenticação cookie-only, Categorias, Produtos, Fornecedores, Pedidos Operacionais, Compras Unificadas, UI-3C, logística internacional, recebimento, entrada definitiva, estoque, financeiro manual, Dashboard e Relatórios. Integrações reais Amazon/eBay, sincronização automática de ordens, tracking automático, integrações PayPal/bancárias, e-mail e QR Code permanecem futuras.
+
+## Roadmap oficial
+
+Executar em batches separados e nesta ordem:
+
+1. auditoria final da baseline;
+2. integração Amazon;
+3. integração eBay;
+4. sincronização de ordens;
+5. tracking automático independente;
+6. Financeiro;
+7. Vendas;
+8. Patrimônio;
+9. Analytics.
+
+Integrações reais precedem o tracking automático porque fornecem ordens, envios e códigos externos. O domínio de tracking, porém, permanece independente do marketplace: uma ordem pode existir sem tracking, o tracking pode surgir ou mudar posteriormente, um pedido pode possuir múltiplos pacotes e códigos, e deve existir fallback manual auditável. Nunca presumir um único tracking por pedido nem acoplar a máquina de tracking diretamente ao provider.
 
 ## Padrões arquiteturais vigentes
 
@@ -66,3 +82,10 @@ A fundação, autenticação cookie-only, Categorias, Produtos, Fornecedores, Pe
 - não usar mocks como banco;
 - manter backend como fonte de autorização;
 - não alterar regras de negócio sem aprovação explícita.
+
+## Documentação
+
+- `docs/PROJECT_CONTEXT_MASTER.md` é o índice oficial de continuidade e deve refletir somente o que o código e os testes comprovam.
+- Contratos normativos específicos preservam as regras do domínio; documentos iniciais ou de investigação devem ser marcados como históricos quando superados.
+- Atualizações relevantes registram estado implementado, commit, riscos, limitações e roadmap sem duplicar contratos completos.
+- Uma decisão planejada nunca deve ser descrita como implementada.

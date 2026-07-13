@@ -1,15 +1,15 @@
 # Compras Unificadas e Checkpoints V1
 
-**Status:** contrato normativo candidato à implementação
+**Status:** contrato normativo aprovado e implementado nos Batches 3–6
 
 **Data:** 2026-07-12
 
-**Escopo de implementação associado:** Batches 3 a 6
+**Escopo de implementação associado:** Batches 3 a 6, concluídos nos commits `6367fb3`, `79f5247`, `fe658c8`, `cf3a880`, `e9a9d9b` e `968b2bf`
 **Fontes confrontadas:** `AGENTS.md`, `docs/domain-contracts.md`, documentos históricos, schema Prisma, API e testes existentes.
 
 ## 1. Propósito, precedência e limites
 
-Este documento congela o modelo-alvo de Compras Unificadas e da UI-3C. Ele não declara que o modelo-alvo já está implementado. Quando houver conflito:
+Este documento congela o contrato de Compras Unificadas e da UI-3C. A implementação correspondente foi concluída nos Batches 3–6; os documentos `UI3C_*` e `COMPRAS_UNIFICADAS_*` descrevem a realização técnica. Quando houver conflito:
 
 1. regras expressamente confirmadas neste documento;
 2. `AGENTS.md`;
@@ -17,7 +17,7 @@ Este documento congela o modelo-alvo de Compras Unificadas e da UI-3C. Ele não 
 4. código e schema atuais, como evidência do comportamento existente;
 5. documentos históricos.
 
-Decisões técnicas e P-01 a P-07 estão fechadas. P-08 permanece pendência exclusiva do Product Owner, não bloqueadora para o Batch 3, conforme a seção 35.
+Decisões técnicas e P-01 a P-07 estão fechadas. P-08 permanece pendência exclusiva do Product Owner e não invalida os fluxos implementados que não calculam a janela horária de quinta-feira.
 
 Fora deste contrato: Vendas, tracking automático, integrações de pagamento, e-mail, QR Code, PDF e alterações em `calcSimulacao`.
 
@@ -67,9 +67,9 @@ Atribuição != Materialização
 Checkpoint != simples alteração de status
 ```
 
-## 4. Estado atual versus modelo-alvo
+## 4. Estado anterior e implementação consolidada
 
-O schema atual contém `CompraImportada`, `CompraImportadaItem` e `AtribuicaoItem`, porém:
+Antes do Batch 5, o schema continha `CompraImportada`, `CompraImportadaItem` e `AtribuicaoItem`, porém:
 
 - não há rota operacional de criação/listagem da staging;
 - a unicidade atual é `fornecedorId + numeroPedido`, sem plataforma ou conta;
@@ -79,7 +79,7 @@ O schema atual contém `CompraImportada`, `CompraImportadaItem` e `AtribuicaoIte
 - os testes atuais comprovam isolamento, não split cross-store da staging;
 - não existe materialização idempotente da staging.
 
-Essas estruturas serão migradas incrementalmente no Batch 5. Não devem ser confundidas com o contrato-alvo.
+O Batch 5 resolveu essas lacunas de forma aditiva na migration `20260712230000_unified_purchases_backend`; o Batch 6 implementou o cliente web. A lista acima permanece somente como registro da baseline anterior e não descreve o estado atual.
 
 ## 5. Identidade da compra externa
 
@@ -754,11 +754,11 @@ Pedido Operacional confirmado
 24. Usuário de uma loja não vê atribuição da outra no contexto operacional.
 25. CSV neutraliza fórmula maliciosa e preserva moeda.
 
-## 34. Riscos e critérios de aceite dos próximos batches
+## 34. Riscos e critérios de aceite da implementação
 
-Riscos principais: migração de atribuições ambíguas, implementação ainda inexistente da autorização global, duplicação de estoque entre confirmação e entrada definitiva e checkpoints ainda sem read models/RBAC. A aplicabilidade do Paraguai está resolvida por rota; o Batch 3 deverá migrar a exigência universal atual sem perder histórico.
+Os riscos que bloquearam os Batches 3–6 foram tratados por migrations aditivas, autorização global explícita, entrada de estoque somente na entrada definitiva, read models tenant-safe, RBAC granular, idempotência persistente e auditoria transacional. Permanecem como riscos residuais a operação de integrações externas ainda inexistentes, a ausência de listagens V1 de contas/merchants e a decisão P-08 sobre a janela de quinta-feira.
 
-P-03 e P-05 estão fechadas e não bloqueiam mais o Batch 3. P-01, P-02, P-06 e P-07 estão fechadas e não bloqueiam o desenho do Batch 5. Critério comum: schema/migrations reproduzíveis, contratos tenant-safe, auditoria, idempotência, concorrência e testes PostgreSQL reais.
+P-01 a P-07 foram implementadas. Critério permanente: schema/migrations reproduzíveis, contratos tenant-safe, auditoria, idempotência, concorrência e testes PostgreSQL reais.
 
 ## 35. Decisões de produto aprovadas
 
@@ -771,7 +771,7 @@ P-03 e P-05 estão fechadas e não bloqueiam mais o Batch 3. P-01, P-02, P-06 e 
 | P-05 | RBAC granular aprovado para staging, mappings, Miami, Paraguai, Brasil, recebimento, entrada definitiva e correções. | supera a proibição anterior somente nesses fluxos | APROVADA |
 | P-06 | Compra manual usa ID técnico, `MANUAL`, origem/conta manual, referência pesquisável não globalmente única e chave técnica de idempotência. | identidade no Batch 5/6 | APROVADA |
 | P-07 | Antes de downstream, cancelamento/ajuste transacional auditado; depois, somente correção e compensação sem apagar histórico. | lifecycle no Batch 5/6 | APROVADA |
-| P-08 | “Quinta-feira de manhã” permanece janela não computável até o Product Owner definir início, fim, timezone e efeito de alerta ou bloqueio. | bloqueia somente alerta horário correspondente no Batch 7 | PENDENTE NÃO BLOQUEADORA PARA BATCH 3 |
+| P-08 | “Quinta-feira de manhã” permanece janela não computável até o Product Owner definir início, fim, timezone e efeito de alerta ou bloqueio. | bloqueia somente o alerta horário correspondente; não bloqueia a baseline atual | PENDENTE NÃO BLOQUEADORA |
 
 Quantidade inteira está fechada tecnicamente para Produtos físicos. Fallback de linha externa está fechado por fingerprint versionado com revisão de ambiguidades. Nenhuma decisão técnica essencial permanece aberta.
 
@@ -788,18 +788,29 @@ Quantidade inteira está fechada tecnicamente para Produtos físicos. Fallback d
 
 O briefing-fonte integral não foi localizado no repositório, no histórico pesquisável nem nos arquivos fornecidos. A única fonte disponível é uma enumeração resumida de temas no pedido de revisão. Por isso, a cobertura detalhada está em `docs/MATRIZ_COBERTURA_BRIEFING_V1.md`; itens sem requisito verificável permanecem `NÃO LOCALIZADO` e não são incorporados por suposição.
 
-| Batch futuro proposto | Objetivo | Dependências | Risco | Prioridade | Aceite mínimo |
-|---|---|---|---|---|---|
-| Integrações de compras | Conectores de plataforma/conta e ingestão automatizada | contrato do Batch 5, arquitetura de segredos | alto | posterior | importação idempotente, auditada e sem segredo em domínio |
-| Documentos e evidências | Armazenar comprovantes e evidências com autorização | storage S3, política de retenção | médio | posterior | upload tenant-safe, metadados e auditoria |
-| Pagamentos e conciliação | Evoluir pagamentos manuais para integrações aprovadas | arquitetura financeira e providers | alto | posterior | reconciliação idempotente e segregada por loja |
-| Tracking automático e alertas | Consumir eventos de transportadoras e gerar alertas | contas externas, timezone e P-08 quando aplicável | alto | posterior | eventos fora de ordem tratados e alertas auditáveis |
-| Responsabilidades operacionais | Vincular papéis a atividades sem hardcode de pessoas | definição formal do Product Owner | médio | posterior | RBAC por função, nenhuma regra baseada em nome pessoal |
+| Ordem | Batch futuro | Objetivo | Dependências | Aceite mínimo |
+|---:|---|---|---|---|
+| 1 | Auditoria final da baseline | comprovar a baseline consolidada antes de novo domínio | Batches 0–7 | testes, migrations, RBAC e isolamento revalidados |
+| 2 | Integração Amazon | conectar conta e importar dados sem guardar segredo no domínio | arquitetura de credenciais e contrato de staging | ingestão idempotente, auditada e recuperável |
+| 3 | Integração eBay | adaptar eBay ao mesmo contrato canônico | fundação de integração e staging | mesmas garantias da Amazon sem regra duplicada |
+| 4 | Sincronização de ordens | reconciliar ordens, itens, pacotes e atualizações | conectores Amazon/eBay | upsert determinístico e conflitos explícitos |
+| 5 | Tracking automático independente | acompanhar códigos normalizados sem acoplamento ao marketplace | ordens e envios sincronizados | eventos fora de ordem tratados e histórico auditável |
+| 6–9 | Financeiro, Vendas, Patrimônio e Analytics | evoluções funcionais posteriores | contratos próprios e aprovação | isolamento, auditoria e migrations incrementais |
+
+### 37.1 Decisões oficiais de tracking
+
+- O tracking automático depende da fundação de integração e sincronização para receber dados de Amazon/eBay.
+- O domínio de tracking é independente do marketplace; adapters traduzem providers para um contrato canônico.
+- Ordem externa válida pode existir sem tracking.
+- Tracking pode surgir, mudar ou receber detalhes posteriormente.
+- Um pedido pode possuir múltiplos pacotes e múltiplos códigos de rastreamento.
+- Atualizações preservam histórico e não sobrescrevem eventos silenciosamente.
+- Entrada manual de tracking permanece fallback auditável.
 
 ## 38. Status do contrato
 
-Parte técnica: completa e pronta para implementação.
+Parte técnica dos Batches 3–6: implementada e validada.
 
-P-01 a P-07 estão aprovadas e incorporadas. P-08 permanece decisão exclusiva do Product Owner, mas não bloqueia o Batch 3 nem qualquer endpoint que não calcule atraso por horário de quinta-feira.
+P-01 a P-07 estão aprovadas e incorporadas. P-08 permanece decisão exclusiva do Product Owner, mas não bloqueia a baseline nem qualquer endpoint que não calcule atraso por horário de quinta-feira.
 
-Gate documental: Batch 3 liberado. Batch 5 possui decisões essenciais fechadas, sujeito ao gate normal de conclusão dos Batches 3 e 4 e à estratégia segura de migration.
+Gate documental: Batches 3–6 concluídos. O próximo gate é a auditoria final da baseline; integrações e tracking continuam planejados, não implementados.

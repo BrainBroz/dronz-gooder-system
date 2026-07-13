@@ -1,5 +1,7 @@
 # Prontidão para produção
 
+**Baseline técnica:** `f413791` — Batches 0–7 consolidados. Esta classificação cobre código, migrations e testes; publicação continua condicionada à infraestrutura e aos segredos do ambiente.
+
 ## Segurança
 
 - Configure `WEB_ORIGIN` com a origem HTTPS exata da aplicação web; CORS não aceita wildcard com credenciais.
@@ -15,7 +17,7 @@
 4. Execute `npm run typecheck`, `npm run lint`, `npm run test` e `npm run build`.
 5. Inicie a API e valide `GET /health` atrás do proxy HTTPS.
 
-O seed cria dados administrativos e deve ser executado deliberadamente, somente com `SEED_ADMIN_*` definidos para o ambiente correto. Integrações externas, tracking, e-mail, QR Code, PDF e Excel não fazem parte desta versão.
+O seed cria dados administrativos e deve ser executado deliberadamente, somente com `SEED_ADMIN_*` definidos para o ambiente correto. Integrações reais Amazon/eBay, sincronização automática de ordens, tracking automático, e-mail, QR Code, PDF e Excel não fazem parte desta versão.
 
 Os testes de integração exigem `DATABASE_TEST_URL` apontando para um PostgreSQL exclusivo de testes. A suíte aplica migrations e seed nesse banco antes da execução e nunca deve receber a URL do banco de desenvolvimento ou produção.
 
@@ -33,6 +35,8 @@ Os stashes anteriores a esta baseline foram preservados apenas como histórico. 
 
 ## Riscos conhecidos
 
-O `npm audit` de 2026-07-11 reporta vulnerabilidades na toolchain de testes Vitest 2/Vite transitivo, incluindo um alerta crítico ligado ao servidor de UI do Vitest. Essa UI não é iniciada pelos scripts do projeto e os pacotes são de desenvolvimento, não do runtime publicado. A correção indicada exige upgrade major do Vitest; por restrição de dependências, deve ser tratada em batch próprio com validação de compatibilidade. Não exponha servidores Vite/Vitest à rede pública.
+O `npm audit` de 2026-07-13 reporta cinco vulnerabilidades na toolchain de desenvolvimento Vitest/Vite transitiva: três moderadas, uma alta e uma crítica. O audit de dependências de produção (`--omit=dev`) reporta zero vulnerabilidades. A correção completa indicada exige upgrade major do Vitest; por restrição de dependências, deve ser tratada em batch próprio com validação de compatibilidade. Não exponha servidores Vite/Vitest à rede pública.
 
 O frontend usa lazy routes e chunks estáveis de vendor. O Batch 7 reduziu o maior chunk de 789,22 kB para 297,25 kB e eliminou o aviso do Vite para chunks acima de 500 kB, sem alterar comportamento ou dependências.
+
+Na validação do Batch 7, Prisma validate/generate, lint, typecheck, builds e duas execuções globais passaram. A baseline registrou 114 testes de API e 78 testes web, totalizando 192 testes por execução, sem ignorados.

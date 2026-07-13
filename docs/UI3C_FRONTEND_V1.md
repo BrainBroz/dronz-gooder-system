@@ -1,5 +1,7 @@
 # UI-3C Frontend V1
 
+**Status:** implementado nos commits `fe658c8` e `cf3a880`.
+
 ## Escopo
 
 O frontend operacional implementa a sequência Miami → Paraguai → Brasil → Recebimento → Entrada Definitiva sobre os contratos do backend UI-3C. Este batch não altera schema, migrations, seed, serviços da API nem regras de domínio.
@@ -26,7 +28,7 @@ O frontend não calcula elegibilidade, progresso, alertas, impacto ou transiçõ
 - checkpoints e projeções efetivas;
 - histórico de auditoria.
 
-Botões operacionais só existem quando a ação correspondente está em `allowedActions`. A permissão de correção vem da identidade retornada pelo backend, nunca de nome de perfil ou role. O backend continua validando JWT, `x-store-id`, vínculo e permissão em todas as chamadas.
+Botões operacionais só existem quando a ação correspondente está em `allowedActions`. Permissões da sessão protegem apenas o acesso geral; não criam transições nem correções contextuais. O backend continua validando JWT, `x-store-id`, vínculo e permissão em todas as chamadas.
 
 ## Contratos consumidos
 

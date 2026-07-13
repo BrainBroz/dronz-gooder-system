@@ -2,7 +2,7 @@
 
 ## Status
 
-Implementação técnica do Batch 5, subordinada a `AGENTS.md` e a `COMPRAS_UNIFICADAS_E_CHECKPOINTS_V1.md`. Este documento descreve o código implementado; não substitui o contrato normativo.
+Implementação técnica concluída no Batch 5, commit `e9a9d9b`, subordinada a `AGENTS.md` e a `COMPRAS_UNIFICADAS_E_CHECKPOINTS_V1.md`. Este documento descreve o código implementado; não substitui o contrato normativo.
 
 ## Modelo de domínio
 
@@ -53,6 +53,7 @@ O serviço cria `PedidoCompra`, `PedidoCompraItem` e vínculos de origem. Não c
 Todas exigem JWT e permissão específica.
 
 - `POST /imported-purchases/accounts`
+- `POST /imported-purchases/conflicts/:conflictId/resolve`
 - `POST /imported-purchases/merchants`
 - `POST /imported-purchases`
 - `POST /imported-purchases/manual`
@@ -99,3 +100,7 @@ Nenhuma migration anterior foi editada e nenhuma coluna legada foi removida. O r
 - Moeda diferente de USD não é convertida silenciosamente; a materialização é bloqueada.
 - Sugestões automáticas de produto/fornecedor não foram implementadas.
 - O frontend foi implementado separadamente no Batch 6 e está documentado em `COMPRAS_UNIFICADAS_FRONTEND_V1.md`; este contrato permanece restrito ao backend.
+
+## Limite com integrações futuras
+
+O módulo recebe payload interno controlado, mas não autentica nem sincroniza Amazon/eBay. Integrações futuras devem adaptar cada provider ao contrato de staging existente, preservando identidade, idempotência e auditoria. Ordens podem ser importadas antes de qualquer tracking. Pacotes, códigos e atualizações posteriores pertencem ao futuro domínio independente de tracking e não devem ser incorporados diretamente às regras de materialização.

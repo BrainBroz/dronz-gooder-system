@@ -133,9 +133,9 @@ Não implementado:
 | 4 — UI-3C frontend              | `fe658c8`, `cf3a880`               | interfaces operacionais e alinhamento estrito a `allowedActions`         |
 | 5 — Compras Unificadas backend  | `e9a9d9b`                          | staging, mappings, atribuição, conflitos e materialização                |
 | 6 — Compras Unificadas frontend | `968b2bf`                          | workflow global e pedidos operacionais separados                         |
-| 7 — production readiness        | `chore: harden production baseline` | code splitting, cache preciso, documentação master e validação final    |
+| 7 — production readiness        | `f413791`                          | code splitting, cache preciso, documentação master e validação final     |
 
-O hash do Batch 7 deve ser consultado no Git porque este documento integra o mesmo commit.
+Baseline documental consolidada após o Batch 7: `f413791` (`chore: harden production baseline`).
 
 ## 10. Convenções de implementação
 
@@ -177,13 +177,28 @@ Produção exige secrets distintos, `WEB_ORIGIN` HTTPS explícito, PostgreSQL pe
 
 Próximos módulos só podem iniciar em batches aprovados e independentes:
 
-1. Financeiro operacional ampliado e conciliação;
-2. Vendas e baixa patrimonial;
-3. tracking automático;
-4. integrações externas Amazon/eBay;
-5. documentos, notificações e exportações adicionais.
+1. auditoria final da baseline;
+2. integração Amazon;
+3. integração eBay;
+4. sincronização de ordens;
+5. tracking automático independente;
+6. Financeiro;
+7. Vendas;
+8. Patrimônio;
+9. Analytics.
 
 Cada módulo deve preservar os contratos existentes, isolamento por loja, auditoria e migrations incrementais. Este roadmap não declara esses itens implementados nem autoriza iniciá-los automaticamente.
+
+### 12.1 Integrações e tracking
+
+- O tracking automático vem depois das integrações Amazon/eBay e da sincronização de ordens, que fornecem as identidades externas de pedidos, pacotes e envios.
+- O motor de tracking é independente do marketplace e não contém regras específicas de Amazon ou eBay.
+- Uma ordem pode existir sem tracking e continuar válida na staging.
+- Tracking pode surgir ou ser atualizado em sincronização posterior.
+- Um pedido pode possuir múltiplos pacotes e cada pacote pode possuir um ou mais códigos ao longo do histórico.
+- Troca, correção ou inclusão posterior de código não apaga eventos anteriores.
+- O fluxo deve aceitar fallback manual auditável para compras manuais, providers sem suporte ou indisponibilidade da integração.
+- Nenhuma dessas decisões declara as integrações ou o tracking implementados na baseline atual.
 
 ## 13. Riscos residuais conhecidos
 
@@ -204,3 +219,11 @@ Ao iniciar uma nova tarefa:
 5. implementar um batch por commit;
 6. executar testes proporcionais ao risco;
 7. não fazer deploy ou iniciar o próximo módulo sem autorização explícita.
+
+## 15. Convenções documentais
+
+- Este arquivo resume; contratos específicos definem detalhes e não devem ser copiados integralmente para cá.
+- Documentos de batch registram o que foi implementado naquele batch e permanecem históricos quando o trabalho seguinte os supera.
+- Documentos iniciais V1 e investigações devem indicar explicitamente quando foram superados.
+- Toda afirmação de implementação exige evidência no código, migration ou teste da baseline.
+- Roadmap, limitação e decisão aprovada devem permanecer separados para não transformar planejamento em estado atual.

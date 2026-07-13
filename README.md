@@ -1,13 +1,15 @@
 # Dronz & Gooder System
 
-Monorepo inicial do sistema operacional de compras, logística, estoque, remessas e financeiro internacional para Dronz e Gooder.
+Monorepo do sistema operacional de compras, logística, estoque, remessas e financeiro internacional para Dronz e Gooder.
 
 Status atual:
 
-- fundação do monorepo criada;
+- baseline técnica dos Batches 0–7 consolidada no commit `f413791`;
 - stack definida sem Next.js, Tailwind, Supabase ou Firebase;
 - autenticação com refresh token exclusivamente em cookie HttpOnly;
-- catálogo, compras, logística, recebimento, estoque, financeiro manual, dashboard e relatórios isolados por loja;
+- catálogo, Fornecedores e Pedidos Operacionais isolados por loja;
+- Compras Unificadas com staging global controlada, atribuição quantitativa e materialização independente por loja;
+- UI-3C, logística, recebimento, entrada definitiva, estoque, financeiro manual, Dashboard e Relatórios;
 - migrations e testes de integração usam PostgreSQL real.
 
 ## Stack
@@ -28,7 +30,7 @@ Status atual:
 
 ## Requisitos
 
-- Node.js LTS
+- Node.js 22, conforme `.nvmrc`
 - npm
 - PostgreSQL local ou remoto
 
@@ -51,9 +53,14 @@ Status atual:
 - `npm run db:migrate:deploy`
 - `npm run db:seed`
 
+## Roadmap
+
+O roadmap oficial está em `docs/PROJECT_CONTEXT_MASTER.md`. A próxima sequência começa pela auditoria final da baseline, seguida por Amazon, eBay, sincronização de ordens e tracking automático independente; Financeiro, Vendas, Patrimônio e Analytics vêm depois. O contrato de tracking preservará ordens sem código, múltiplos pacotes/códigos, atualizações posteriores e fallback manual auditável.
+
 ## Itens não implementados ainda
 
-- tracking e integrações automáticas;
+- integrações reais Amazon/eBay e sincronização automática de ordens;
+- tracking automático e integrações com transportadoras;
 - PayPal, bancos e cartões como integrações (PAYPAL atual é classificação manual);
 - e-mail e QR Code;
 - exportações PDF e Excel.
