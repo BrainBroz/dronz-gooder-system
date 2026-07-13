@@ -1,6 +1,8 @@
 import { MalaStatus, Prisma, ViagemStatus } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { AppError } from "../../lib/app-error";
+import { audit, idempotentMutation } from "../operations/operations.persistence";
+import { assertBrazilTransition, assertParaguayTransition } from "../operations/operations.policy";
 const tripTransitions: Record<string, string[]> = {
   PLANNED: ["OPEN_FOR_ALLOCATION"],
   OPEN_FOR_ALLOCATION: ["CLOSED_FOR_ALLOCATION", "CANCELLED"],
@@ -56,6 +58,7 @@ export async function createTrip(
     destino: string;
     partidaEm: Date;
     chegadaPrevistaEm: Date;
+    rotaCodigo?: "MIAMI_PARAGUAI_BRASIL" | "MIAMI_BRASIL";
   }
 ) {
   if (d.chegadaPrevistaEm <= d.partidaEm)
@@ -66,7 +69,17 @@ export async function createTrip(
     }))
   )
     throw new AppError(404, "not_found");
-  return prisma.viagem.create({ data: { ...d, lojaId } });
+  const rotaCodigo = d.rotaCodigo ?? "MIAMI_PARAGUAI_BRASIL";
+  return prisma.viagem.create({
+    data: {
+      ...d,
+      lojaId,
+      rotaCodigo,
+      checkpointsObrigatorios: rotaCodigo === "MIAMI_PARAGUAI_BRASIL"
+        ? ["MIAMI", "PARAGUAI", "BRASIL", "RECEBIMENTO", "ENTRADA_DEFINITIVA"]
+        : ["MIAMI", "BRASIL", "RECEBIMENTO", "ENTRADA_DEFINITIVA"]
+    }
+  });
 }
 export async function tripStatus(
   lojaId: string,
@@ -194,9 +207,12 @@ export async function confirmMiami(
     recebidoEm: Date;
     observacao?: string;
     tipoDivergencia?: "CORRETO" | "FALTANTE" | "QUANTIDADE_DIVERGENTE" | "DANIFICADO" | "DESCONHECIDO" | "TRACKING_NAO_LOCALIZADO";
-  }
+  },
+  idempotencyKey?: string
 ) {
-  return prisma.$transaction(async (tx) => {
+  return idempotentMutation({
+    lojaId, operation: "CONFIRM_MIAMI", entityId: d.pedidoCompraItemId, key: idempotencyKey, payload: d,
+    execute: async (tx, correlationId) => {
     const i = await tx.pedidoCompraItem.findFirst({
       where: { id: d.pedidoCompraItemId, lojaId },
       include: { pedido: true }
@@ -238,7 +254,14 @@ export async function confirmMiami(
         status: complete ? "RECEIVED_MIAMI" : "PARTIALLY_RECEIVED_MIAMI"
       }
     });
+    await audit(tx, {
+      usuarioId: userId, lojaId, permissionCode: "MIAMI_RECEBIMENTO_CONFIRMAR",
+      action: "CONFIRM_MIAMI", entity: "PedidoCompraItem", entityId: i.id,
+      correlationId, idempotencyKey, before: { quantidadeRecebidaMiami: i.quantidadeRecebidaMiami },
+      after: { quantidadeRecebidaMiami: qty, tipoDivergencia: r.tipoDivergencia }
+    });
     return r;
+    }
   });
 }
 
@@ -403,20 +426,25 @@ export async function confirmParaguai(
     confirmadoEm: Date;
     observacao?: string;
     tipoDivergencia?: "CORRETO" | "MALA_AUSENTE" | "VOLUME_AUSENTE" | "ITEM_NAO_LOCALIZADO" | "QUANTIDADE_DIVERGENTE" | "AVARIA" | "ITEM_EXTRA" | "CHECKPOINT_PARCIAL";
-  }
+  },
+  idempotencyKey?: string
 ) {
-  return prisma.$transaction(async (tx) => {
+  return idempotentMutation({
+    lojaId, operation: "CONFIRM_PARAGUAY", entityId: `${d.viagemId}:${d.malaId}`, key: idempotencyKey, payload: d,
+    execute: async (tx, correlationId) => {
     const viagem = await tx.viagem.findFirst({
       where: { id: d.viagemId, lojaId }
     });
     if (!viagem) throw new AppError(404, "not_found");
+    if (!viagem.checkpointsObrigatorios.includes("PARAGUAI"))
+      throw new AppError(409, "checkpoint_not_applicable");
     const mala = await tx.mala.findFirst({
       where: { id: d.malaId, lojaId, viagemId: d.viagemId }
     });
     if (!mala) throw new AppError(404, "not_found");
+    assertParaguayTransition(viagem, mala);
     const checkpoint = await tx.checkpointParaguai.create({
       data: {
-        id: `cp-py-${Date.now()}`,
         lojaId,
         viagemId: d.viagemId,
         malaId: d.malaId,
@@ -426,7 +454,13 @@ export async function confirmParaguai(
         tipoDivergencia: d.tipoDivergencia || "CORRETO"
       }
     });
+    await audit(tx, {
+      usuarioId: userId, lojaId, permissionCode: "PARAGUAI_CHECKPOINT_CONFIRMAR",
+      action: "CONFIRM_PARAGUAY", entity: "CheckpointParaguai", entityId: checkpoint.id,
+      correlationId, idempotencyKey, after: checkpoint
+    });
     return checkpoint;
+    }
   });
 }
 
@@ -439,9 +473,12 @@ export async function confirmBrasil(
     confirmadoEm: Date;
     observacao?: string;
     tipoDivergencia?: "CORRETO" | "MALA_AUSENTE" | "ITEM_NAO_LOCALIZADO" | "QUANTIDADE_DIVERGENTE" | "AVARIA" | "ITEM_EXTRA" | "REGISTRO_ADUANEIRO_DIVERGENTE" | "LACRE_ROMPIDO";
-  }
+  },
+  idempotencyKey?: string
 ) {
-  return prisma.$transaction(async (tx) => {
+  return idempotentMutation({
+    lojaId, operation: "CONFIRM_BRAZIL", entityId: `${d.viagemId}:${d.malaId}`, key: idempotencyKey, payload: d,
+    execute: async (tx, correlationId) => {
     const viagem = await tx.viagem.findFirst({
       where: { id: d.viagemId, lojaId, status: "ARRIVED_BRAZIL" }
     });
@@ -450,9 +487,18 @@ export async function confirmBrasil(
       where: { id: d.malaId, lojaId, viagemId: d.viagemId }
     });
     if (!mala) throw new AppError(404, "not_found");
+    const paraguay = await tx.checkpointParaguai.findFirst({
+      where: { lojaId, viagemId: d.viagemId, malaId: d.malaId, supersededAt: null }
+    });
+    const paraguayProjection = paraguay ? await tx.projecaoOperacional.findUnique({
+      where: { lojaId_entity_entityId: { lojaId, entity: "CheckpointParaguai", entityId: paraguay.id } }
+    }) : null;
+    const effectiveParaguay = paraguay ? {
+      tipoDivergencia: (paraguayProjection?.state as { tipoDivergencia?: string } | null)?.tipoDivergencia ?? paraguay.tipoDivergencia
+    } : null;
+    assertBrazilTransition(viagem, mala, effectiveParaguay);
     const checkpoint = await tx.checkpointBrasil.create({
       data: {
-        id: `cp-br-${Date.now()}`,
         lojaId,
         viagemId: d.viagemId,
         malaId: d.malaId,
@@ -462,6 +508,12 @@ export async function confirmBrasil(
         tipoDivergencia: d.tipoDivergencia || "CORRETO"
       }
     });
+    await audit(tx, {
+      usuarioId: userId, lojaId, permissionCode: "BRASIL_CHECKPOINT_CONFIRMAR",
+      action: "CONFIRM_BRAZIL", entity: "CheckpointBrasil", entityId: checkpoint.id,
+      correlationId, idempotencyKey, after: checkpoint
+    });
     return checkpoint;
+    }
   });
 }

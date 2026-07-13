@@ -1,5 +1,7 @@
 # Prontidão para produção
 
+**Baseline técnica:** `f413791` — Batches 0–7 e Auditoria Independente aprovados. A consolidação documental posterior está em `342e0f3`. Esta classificação cobre código, migrations e testes; publicação continua condicionada à infraestrutura e aos segredos do ambiente.
+
 ## Segurança
 
 - Configure `WEB_ORIGIN` com a origem HTTPS exata da aplicação web; CORS não aceita wildcard com credenciais.
@@ -15,12 +17,26 @@
 4. Execute `npm run typecheck`, `npm run lint`, `npm run test` e `npm run build`.
 5. Inicie a API e valide `GET /health` atrás do proxy HTTPS.
 
-O seed cria dados administrativos e deve ser executado deliberadamente, somente com `SEED_ADMIN_*` definidos para o ambiente correto. Integrações externas, tracking, e-mail, QR Code, PDF e Excel não fazem parte desta versão.
+O seed cria dados administrativos e deve ser executado deliberadamente, somente com `SEED_ADMIN_*` definidos para o ambiente correto. Integrações reais Amazon/eBay, sincronização automática de ordens, tracking automático, e-mail, QR Code, PDF e Excel não fazem parte desta versão.
 
 Os testes de integração exigem `DATABASE_TEST_URL` apontando para um PostgreSQL exclusivo de testes. A suíte aplica migrations e seed nesse banco antes da execução e nunca deve receber a URL do banco de desenvolvimento ou produção.
 
+## Baseline de desenvolvimento
+
+- A versão oficial é Node.js 22, definida em `.nvmrc`. Em instalações Homebrew, use `export PATH="$(brew --prefix node@22)/bin:$PATH"` antes dos comandos do projeto.
+- O monorepo usa npm workspaces e mantém `package-lock.json` versionado. Instalações reproduzíveis devem usar `npm ci`.
+- Prisma CLI e Prisma Client permanecem alinhados em `6.19.3`; upgrades major exigem batch próprio.
+- `npm test` prepara o banco PostgreSQL de testes com valores locais não sensíveis quando `SEED_ADMIN_*` não estiver definido. Esses defaults existem somente no runner de testes e não alteram o seed de desenvolvimento ou produção.
+- Scripts de desenvolvimento não contêm segredos. A API carrega o `.env` local, que permanece ignorado pelo Git.
+
+## Histórico local e stashes
+
+Os stashes anteriores a esta baseline foram preservados apenas como histórico. Eles contêm versões antigas e sobrepostas do frontend e backend e não devem ser reaplicados integralmente. Qualquer recuperação futura exige comparação por arquivo e comprovação de que a mudança ainda não existe na `main`.
+
 ## Riscos conhecidos
 
-O `npm audit` de 2026-07-11 reporta vulnerabilidades na toolchain de testes Vitest 2/Vite transitivo, incluindo um alerta crítico ligado ao servidor de UI do Vitest. Essa UI não é iniciada pelos scripts do projeto e os pacotes são de desenvolvimento, não do runtime publicado. A correção indicada exige upgrade major do Vitest; por restrição de dependências, deve ser tratada em batch próprio com validação de compatibilidade. Não exponha servidores Vite/Vitest à rede pública.
+O `npm audit` de 2026-07-13 reporta cinco vulnerabilidades na toolchain de desenvolvimento Vitest/Vite transitiva: três moderadas, uma alta e uma crítica. O audit de dependências de produção (`--omit=dev`) reporta zero vulnerabilidades. A correção completa indicada exige upgrade major do Vitest; por restrição de dependências, deve ser tratada em batch próprio com validação de compatibilidade. Não exponha servidores Vite/Vitest à rede pública.
 
-O bundle web atual gera aviso de chunk principal acima de 500 kB. A aplicação compila corretamente; code splitting deve ser medido e tratado em trabalho específico de performance, sem mudança arquitetural incidental.
+O frontend usa lazy routes e chunks estáveis de vendor. O Batch 7 reduziu o maior chunk de 789,22 kB para 297,25 kB e eliminou o aviso do Vite para chunks acima de 500 kB, sem alterar comportamento ou dependências.
+
+Na validação do Batch 7, Prisma validate/generate, lint, typecheck, builds e duas execuções globais passaram. A baseline registrou 114 testes de API e 78 testes web, totalizando 192 testes por execução, sem ignorados.

@@ -6,6 +6,13 @@ export const purchasingQueryKeys = {
   suppliers: (storeId: string | null) => ["suppliers", storeId] as const,
   orders: (storeId: string | null) => ["purchase-orders", storeId] as const
 };
+export const unifiedPurchasesQueryKeys = {
+  all: ["unified-purchases"] as const,
+  overview: () => ["unified-purchases", "overview"] as const,
+  lists: () => ["unified-purchases", "list"] as const,
+  list: (filters: object) => ["unified-purchases", "list", filters] as const,
+  detail: (id: string | null) => ["unified-purchases", "detail", id] as const
+};
 export const logisticsQueryKeys = {
   travelers: (id: string | null) => ["travelers", id] as const,
   trips: (id: string | null) => ["trips", id] as const,
@@ -31,12 +38,13 @@ export const reportQueryKeys = {
     from?: Date | string,
     to?: Date | string,
     status?: string
-  ) => [
-    "report",
-    id,
-    type,
-    typeof from === "string" ? from : from?.toISOString(),
-    typeof to === "string" ? to : to?.toISOString(),
-    status
-  ] as const
+  ) =>
+    [
+      "report",
+      id,
+      type,
+      typeof from === "string" ? from : from?.toISOString(),
+      typeof to === "string" ? to : to?.toISOString(),
+      status
+    ] as const
 };

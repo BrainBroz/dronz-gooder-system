@@ -13,7 +13,7 @@ import { authHeader, useAuthStore } from "../stores/auth";
 import { purchasingQueryKeys } from "../queryKeys";
 import type { Supplier } from "../types/purchasing";
 
-export function SuppliersPage() {
+function SuppliersContent() {
   const store = useAuthStore((s) => s.activeStoreId),
     client = useQueryClient();
   const q = useQuery<Supplier[]>({
@@ -47,10 +47,6 @@ export function SuppliersPage() {
       form.reset();
     }
   });
-  React.useEffect(() => {
-    form.reset();
-    m.reset();
-  }, [store, form, m]);
   const { errors } = form.formState;
   return (
     <PageContainer>
@@ -109,4 +105,9 @@ export function SuppliersPage() {
       </Stack>
     </PageContainer>
   );
+}
+
+export function SuppliersPage() {
+  const store = useAuthStore((state) => state.activeStoreId);
+  return <SuppliersContent key={store} />;
 }

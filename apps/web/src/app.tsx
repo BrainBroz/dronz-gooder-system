@@ -22,37 +22,76 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { appTheme } from "./theme";
 import { api, queryClient } from "./api/client";
-import { authHeader, useAuthStore } from "./stores/auth";
+import { useAuthStore } from "./stores/auth";
 import { extractErrorMessage } from "./utils/errors";
-import { DashboardPage } from "./pages/DashboardPage";
-import { CategoriesPage } from "./pages/CategoriesPage";
-import { SuppliersPage } from "./pages/SuppliersPage";
-import { PurchaseOrdersPage } from "./pages/PurchaseOrdersPage";
-import { ReportsPage } from "./pages/ReportsPage";
-import { ProductsPage } from "./pages/ProductsPage";
-import { LogisticsPage } from "./pages/LogisticsPage";
-import { InventoryPage } from "./pages/InventoryPage";
-import { FinancePage } from "./pages/FinancePage";
+
+const DashboardPage = React.lazy(() =>
+  import("./pages/DashboardPage").then((module) => ({
+    default: module.DashboardPage
+  }))
+);
+const CategoriesPage = React.lazy(() =>
+  import("./pages/CategoriesPage").then((module) => ({
+    default: module.CategoriesPage
+  }))
+);
+const SuppliersPage = React.lazy(() =>
+  import("./pages/SuppliersPage").then((module) => ({
+    default: module.SuppliersPage
+  }))
+);
+const PurchaseOrdersPage = React.lazy(() =>
+  import("./pages/PurchaseOrdersPage").then((module) => ({
+    default: module.PurchaseOrdersPage
+  }))
+);
+const ReportsPage = React.lazy(() =>
+  import("./pages/ReportsPage").then((module) => ({
+    default: module.ReportsPage
+  }))
+);
+const ProductsPage = React.lazy(() =>
+  import("./pages/ProductsPage").then((module) => ({
+    default: module.ProductsPage
+  }))
+);
+const LogisticsPage = React.lazy(() =>
+  import("./pages/LogisticsPage").then((module) => ({
+    default: module.LogisticsPage
+  }))
+);
+const InventoryPage = React.lazy(() =>
+  import("./pages/InventoryPage").then((module) => ({
+    default: module.InventoryPage
+  }))
+);
+const FinancePage = React.lazy(() =>
+  import("./pages/FinancePage").then((module) => ({
+    default: module.FinancePage
+  }))
+);
+const OperationsPage = React.lazy(() =>
+  import("./pages/OperationsPage").then((module) => ({
+    default: module.OperationsPage
+  }))
+);
+const UnifiedPurchasesPage = React.lazy(() =>
+  import("./pages/UnifiedPurchasesPage").then((module) => ({
+    default: module.UnifiedPurchasesPage
+  }))
+);
 
 const loginSchema = z.object({
   email: z.string().email("Informe um e-mail válido"),
   password: z.string().min(1, "Senha obrigatória")
 });
 
-async function loadSession() {
+export async function loadSession() {
   try {
     const refreshed = await api.post("/auth/refresh");
-    useAuthStore.getState().setSession({
-      accessToken: refreshed.data.accessToken,
-      user: useAuthStore.getState().user ?? {
-        id: "",
-        name: "",
-        email: "",
-        active: true
-      },
-      stores: useAuthStore.getState().stores
+    const response = await api.get("/auth/me", {
+      headers: { Authorization: `Bearer ${refreshed.data.accessToken}` }
     });
-    const response = await api.get("/auth/me", { headers: authHeader() });
     useAuthStore.getState().setSession({
       accessToken: refreshed.data.accessToken,
       user: response.data.user,
@@ -62,6 +101,9 @@ async function loadSession() {
           slug: s.slug,
           nome: s.nome
         })
+      ),
+      permissions: (response.data.permissoes ?? []).map(
+        (permission: { code: string }) => permission.code
       )
     });
   } catch {
@@ -69,7 +111,7 @@ async function loadSession() {
   }
 }
 
-function AuthGate({ children }: { children: React.ReactNode }) {
+export function AuthGate({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = React.useState(false);
   const accessToken = useAuthStore((state) => state.accessToken);
   React.useEffect(() => {
@@ -96,7 +138,10 @@ export function LoginPage() {
       useAuthStore.getState().setSession({
         accessToken: response.data.accessToken,
         user: response.data.user,
-        stores: response.data.stores
+        stores: response.data.stores,
+        permissions: (response.data.permissions ?? []).map(
+          (permission: { code: string }) => permission.code
+        )
       });
       navigate("/operacao");
     } catch (error) {
@@ -164,15 +209,20 @@ export function LoginPage() {
   );
 }
 
-function Shell({ children }: { children: React.ReactNode }) {
+export function Shell({ children }: { children: React.ReactNode }) {
   const { user, stores, activeStoreId, setActiveStoreId, clear } =
     useAuthStore();
   const navigate = useNavigate();
   const logout = async () => {
-    await api.post("/auth/logout");
-    queryClient.clear();
-    clear();
-    navigate("/login");
+    try {
+      await api.post("/auth/logout");
+    } catch {
+      // A intenção de sair deve encerrar a sessão local mesmo sem resposta da API.
+    } finally {
+      queryClient.clear();
+      clear();
+      navigate("/login");
+    }
   };
   return (
     <Box sx={{ display: "flex" }}>
@@ -191,9 +241,11 @@ function Shell({ children }: { children: React.ReactNode }) {
             ))}
             {[
               ["Operação", "/operacao"],
+              ["Checkpoints", "/checkpoints"],
               ["Produtos", "/produtos"],
               ["Fornecedores", "/fornecedores"],
-              ["Compras", "/pedidos"],
+              ["Compras Unificadas", "/compras"],
+              ["Pedidos Operacionais", "/pedidos"],
               ["Logística", "/logistica"],
               ["Estoque", "/estoque"],
               ["Financeiro", "/financeiro"],
@@ -231,7 +283,6 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
-
 export function NotFoundPage() {
   return <div>404</div>;
 }
@@ -241,103 +292,84 @@ export function AppRoutes() {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider theme={appTheme}>
         <CssBaseline />
-        <Routes>
-          <Route path="/" element={<Navigate to="/operacao" replace />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route
-            path="/operacao"
-            element={
-              <AuthGate>
-                <Shell>
-                  <DashboardPage />
-                </Shell>
-              </AuthGate>
-            }
-          />
-          <Route
-            path="/categorias"
-            element={
-              <AuthGate>
-                <Shell>
-                  <CategoriesPage />
-                </Shell>
-              </AuthGate>
-            }
-          />
-          <Route
-            path="/produtos"
-            element={
-              <AuthGate>
-                <Shell>
-                  <ProductsPage />
-                </Shell>
-              </AuthGate>
-            }
-          />
-          <Route
-            path="/fornecedores"
-            element={
-              <AuthGate>
-                <Shell>
-                  <SuppliersPage />
-                </Shell>
-              </AuthGate>
-            }
-          />
-          <Route
-            path="/pedidos"
-            element={
-              <AuthGate>
-                <Shell>
-                  <PurchaseOrdersPage />
-                </Shell>
-              </AuthGate>
-            }
-          />
-          <Route
-            path="/logistica"
-            element={
-              <AuthGate>
-                <Shell>
-                  <LogisticsPage />
-                </Shell>
-              </AuthGate>
-            }
-          />
-          <Route
-            path="/estoque"
-            element={
-              <AuthGate>
-                <Shell>
-                  <InventoryPage />
-                </Shell>
-              </AuthGate>
-            }
-          />
-          <Route
-            path="/financeiro"
-            element={
-              <AuthGate>
-                <Shell>
-                  <FinancePage />
-                </Shell>
-              </AuthGate>
-            }
-          />
-          <Route
-            path="/relatorios"
-            element={
-              <AuthGate>
-                <Shell>
-                  <ReportsPage />
-                </Shell>
-              </AuthGate>
-            }
-          />
-          {(["/viajantes", "/viagens", "/malas"] as const).map((path) => (
+        <React.Suspense
+          fallback={<div role="status">Carregando módulo...</div>}
+        >
+          <Routes>
+            <Route path="/" element={<Navigate to="/operacao" replace />} />
+            <Route path="/login" element={<LoginPage />} />
             <Route
-              key={path}
-              path={path}
+              path="/operacao"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <DashboardPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/checkpoints"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <OperationsPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/categorias"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <CategoriesPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/produtos"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <ProductsPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/fornecedores"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <SuppliersPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/compras"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <UnifiedPurchasesPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/pedidos"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <PurchaseOrdersPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/logistica"
               element={
                 <AuthGate>
                   <Shell>
@@ -346,19 +378,62 @@ export function AppRoutes() {
                 </AuthGate>
               }
             />
-          ))}
-          <Route
-            path="/recebimentos"
-            element={
-              <AuthGate>
-                <Shell>
-                  <InventoryPage />
-                </Shell>
-              </AuthGate>
-            }
-          />
-          <Route path="*" element={<NotFoundPage />} />
-        </Routes>
+            <Route
+              path="/estoque"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <InventoryPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/financeiro"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <FinancePage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/relatorios"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <ReportsPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            {(["/viajantes", "/viagens", "/malas"] as const).map((path) => (
+              <Route
+                key={path}
+                path={path}
+                element={
+                  <AuthGate>
+                    <Shell>
+                      <LogisticsPage />
+                    </Shell>
+                  </AuthGate>
+                }
+              />
+            ))}
+            <Route
+              path="/recebimentos"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <InventoryPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route path="*" element={<NotFoundPage />} />
+          </Routes>
+        </React.Suspense>
       </ThemeProvider>
     </QueryClientProvider>
   );

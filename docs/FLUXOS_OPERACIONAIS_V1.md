@@ -1,5 +1,7 @@
 # Fluxos Operacionais V1
 
+> **Status histórico:** fluxo da tarefa de fundação. Compras, recebimentos, estoque, logística e financeiro manual foram implementados posteriormente; consulte `PROJECT_CONTEXT_MASTER.md`.
+
 Fluxos iniciais:
 
 - login;
@@ -8,7 +10,7 @@ Fluxos iniciais:
 - consulta de identidade autenticada;
 - página de operação com visão resumida.
 
-Fluxos futuros não implementados nesta tarefa:
+Fluxos que eram futuros nesta tarefa inicial:
 
 - compras;
 - tracking;
@@ -17,4 +19,3 @@ Fluxos futuros não implementados nesta tarefa:
 - remessas;
 - financeiro;
 - integrações.
-

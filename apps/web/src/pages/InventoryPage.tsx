@@ -11,7 +11,7 @@ import { authHeader, useAuthStore } from "../stores/auth";
 import { inventoryQueryKeys, logisticsQueryKeys } from "../queryKeys";
 import { formatSalePrice } from "../utils/formatting";
 
-export function InventoryPage() {
+function InventoryContent() {
   const store = useAuthStore((s) => s.activeStoreId);
   const headers = { ...authHeader(), "x-store-id": store };
   const client = useQueryClient();
@@ -125,14 +125,6 @@ export function InventoryPage() {
       ),
     onSuccess: refreshInventory
   });
-  React.useEffect(() => {
-    movementForm.reset();
-    receiptForm.reset();
-    move.reset();
-    createReceipt.reset();
-    confirmReceipt.reset();
-  }, [store, movementForm, receiptForm, move, createReceipt, confirmReceipt]);
-
   return (
     <PageContainer>
       <Stack gap={{ xs: 2.5, md: 3.5 }}>
@@ -351,4 +343,9 @@ export function InventoryPage() {
       </Stack>
     </PageContainer>
   );
+}
+
+export function InventoryPage() {
+  const store = useAuthStore((state) => state.activeStoreId);
+  return <InventoryContent key={store} />;
 }

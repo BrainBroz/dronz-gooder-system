@@ -1,6 +1,8 @@
 # Gaps e Divergências — Base para a V2
 
-Este documento mapeia, contra o `schema.prisma` real do repositório (commit `5132e8a`), os itens ausentes e divergentes identificados na comparação entre o briefing original e o histórico do projeto SGE. Serve de base para `tasks/CODEX_TASK_002_EXPANSAO.md`.
+> **Status histórico:** análise produzida sobre o commit `5132e8a`. Parte das lacunas foi resolvida nos Batches 2–7 e seu estado consolidado está em `MATRIZ_COBERTURA_BRIEFING_V1.md` e `PROJECT_CONTEXT_MASTER.md`. Propostas deste arquivo não autorizam implementação quando não estiverem reafirmadas por contrato vigente.
+
+Este documento mapeia, contra o `schema.prisma` real do repositório no commit `5132e8a`, os itens ausentes e divergentes identificados na comparação entre o briefing original e o histórico do projeto SGE. A tarefa de expansão citada na versão original não existe na baseline atual; continuidade deve partir do roadmap em `PROJECT_CONTEXT_MASTER.md`.
 
 Confirmado com o dono do produto:
 
