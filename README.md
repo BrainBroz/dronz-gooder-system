@@ -55,11 +55,12 @@ Status atual:
 
 ## Roadmap
 
-O roadmap oficial está em `docs/PROJECT_CONTEXT_MASTER.md`. Dronz e Gooder usam marketplaces como compradores; a próxima sequência começa pelo contrato independente de `buyer purchase ingestion`, seguido por fontes autorizadas de e-mail, documentos/invoices e CSV. Depois vêm consolidação de envios/pacotes, tracking automático independente, Financeiro, Vendas e Analytics. O contrato de tracking preserva ordens sem código, múltiplos envios/pacotes/códigos, atualizações posteriores e fallback manual auditável.
+O roadmap oficial está em `docs/PROJECT_CONTEXT_MASTER.md`. Dronz e Gooder usam marketplaces como compradores. A próxima sequência começa pela validação e implementação controlada do adapter eBay buyer baseado em `GetMyeBayBuying`; Amazon buyer permanece em investigação separada. Depois vêm fontes complementares de e-mail/invoices/CSV, consolidação de envios/pacotes, tracking automático independente, Financeiro, Vendas e Analytics. O contrato de tracking preserva ordens sem código, múltiplos envios/pacotes/códigos, atualizações posteriores e fallback manual auditável.
 
 ## Itens não implementados ainda
 
-- ingestão automática de compras realizadas por contas buyer;
+- adapter eBay buyer e ingestão automática de compras realizadas por contas buyer;
+- investigação e contrato Amazon buyer;
 - adapters seller Amazon/eBay, adiados até existir necessidade específica de importar vendas recebidas;
 - tracking automático e integrações com transportadoras;
 - PayPal, bancos e cartões como integrações (PAYPAL atual é classificação manual);

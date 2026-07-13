@@ -1,6 +1,6 @@
 # Prontidão para produção
 
-**Baseline técnica:** `8644188` — Batches 0–8 e auditorias independentes aprovados. A fundação de integração do Batch 8 permanece desabilitada para providers reais até existir fonte compatível com o caso buyer. Esta classificação cobre código, migrations e testes; publicação continua condicionada à infraestrutura e aos segredos do ambiente.
+**Baseline técnica:** `8644188` — Batches 0–8 e auditorias independentes aprovados. A fundação de integração do Batch 8 permanece desabilitada para providers reais. A Trading API `GetMyeBayBuying` é uma fonte oficial tecnicamente compatível com o caso buyer do eBay, mas o adapter, as credenciais, a elegibilidade produtiva e a política de sincronização ainda não foram implementados nem validados. Esta classificação cobre código, migrations e testes; publicação continua condicionada à infraestrutura e aos segredos do ambiente.
 
 ## Segurança
 
@@ -19,7 +19,7 @@
 
 O seed cria dados administrativos e deve ser executado deliberadamente, somente com `SEED_ADMIN_*` definidos para o ambiente correto. O Batch 8 prepara conexões e sincronização explícita por adapters, mas ingestão automática de compras buyer, tracking automático, e-mail operacional, QR Code, PDF e Excel não fazem parte desta versão.
 
-Referências `env:MARKETPLACE_*` não são credenciais: são ponteiros. Valores devem existir somente no ambiente/secret manager e nunca em banco, logs, respostas ou commits. Dronz e Gooder operam como compradores. Amazon SP-API e eBay Sell Fulfillment não atendem ao histórico geral de compras consumer; portanto, os adapters seller permanecem adiados e nenhuma conexão desse tipo deve ser ativada como solução do fluxo buyer.
+Referências `env:MARKETPLACE_*` não são credenciais: são ponteiros. Valores devem existir somente no ambiente/secret manager e nunca em banco, logs, respostas ou commits. Dronz e Gooder operam como compradores. Amazon SP-API e eBay Sell Fulfillment não atendem ao histórico geral de compras consumer; portanto, os adapters seller permanecem adiados e nenhuma conexão desse tipo deve ser ativada como solução do fluxo buyer. Para eBay buyer, a fonte candidata oficial é `GetMyeBayBuying`, não Sell Fulfillment nem Buy Order API. Sua ativação exige consentimento/token do usuário, confirmação de quota e teste no keyset real.
 
 Os testes de integração exigem `DATABASE_TEST_URL` apontando para um PostgreSQL exclusivo de testes. A suíte aplica migrations e seed nesse banco antes da execução e nunca deve receber a URL do banco de desenvolvimento ou produção.
 

@@ -82,6 +82,8 @@ O frontend não reconstrói RBAC, transições, elegibilidade, cálculo financei
 - `COMPRAS_UNIFICADAS_FRONTEND_V1.md`: consumo fino dos read models e mutações da staging.
 - `UI3C_BACKEND_V1.md`: read models, RBAC, auditoria e correções dos checkpoints.
 - `UI3C_FRONTEND_V1.md`: interfaces operacionais governadas por `allowedActions`.
+- `MARKETPLACE_INTEGRATION_FOUNDATION_V1.md`: fundação comum de providers, conexões, sincronização e normalização.
+- `EBAY_BUYER_INVESTIGATION_V1.md`: evidência oficial, limitações e gate do futuro adapter eBay buyer.
 - `PRODUCTION_READINESS.md`: requisitos de ambiente, publicação e riscos operacionais.
 
 ## 7. Fluxo operacional implementado
@@ -147,9 +149,10 @@ Não implementado:
 | 6 — Compras Unificadas frontend | `968b2bf`            | workflow global e pedidos operacionais separados                         | APROVADO     |
 | 7 — production readiness        | `f413791`            | code splitting, cache preciso, documentação master e validação final     | APROVADO     |
 | 8 — fundação de integrações     | `8644188`            | adapters comuns, conexões, sincronização explícita e logística externa   | APROVADO     |
-| 8.1 — buyer versus seller       | commit deste batch   | corrige contexto de produto e roadmap sem alterar a fundação técnica     | EM AUDITORIA |
+| 8.1 — buyer versus seller       | `9790de0`            | corrige contexto de produto e roadmap sem alterar a fundação técnica     | SUPERADO EM PARTE |
+| 8.2 — correção eBay buyer       | commit deste batch   | confirma `GetMyeBayBuying`, corrige investigação e roadmap               | EM AUDITORIA |
 
-As auditorias independentes dos Batches 7 e 8 foram aprovadas. A baseline funcional mais recente é `8644188`; o Batch 8.1 altera somente documentação e não modifica comportamento.
+As auditorias independentes dos Batches 7 e 8 foram aprovadas. A baseline funcional mais recente é `8644188`; os Batches 8.1 e 8.2 alteram somente documentação e não modificam comportamento. O Batch 8.2 supera apenas a conclusão incorreta de que não havia fonte oficial para compras buyer do eBay.
 
 ## 10. Convenções de implementação
 
@@ -163,7 +166,7 @@ As auditorias independentes dos Batches 7 e 8 foram aprovadas. A baseline funcio
 - Testes de API usam PostgreSQL exclusivo e fixtures autocontidas.
 - Não remover ou condicionar assertions para fazer a suíte passar.
 - Testes não usam registros incidentais, ordem de execução, guards silenciosos, `skip` ou sleeps para mascarar falhas.
-- Baseline do Batch 8 aprovada: 126 testes de API e 78 web, total de 204, sem ignorados. O Batch 8.1 é exclusivamente documental e não altera essa contagem.
+- Baseline do Batch 8 aprovada: 126 testes de API e 78 web, total de 204, sem ignorados. Os Batches 8.1 e 8.2 são exclusivamente documentais e não alteram essa contagem.
 - Mudanças de performance exigem medição antes/depois.
 
 ## 11. Operação e validação
@@ -193,10 +196,10 @@ Produção exige secrets distintos, `WEB_ORIGIN` HTTPS explícito, PostgreSQL pe
 
 Próximos módulos só podem iniciar em batches aprovados e independentes:
 
-1. Batch 8.1 — correção documental buyer versus seller;
-2. Batch 9 — contrato normativo de Buyer Purchase Ingestion;
-3. Batch 10 — ingestão por e-mail autorizado;
-4. Batch 11 — ingestão por documentos, invoices e CSV;
+1. Batch 8.2 — correção forense e contratual do eBay buyer;
+2. Batch 9 — adapter eBay buyer, condicionado à confirmação da aplicação e das credenciais/permissões;
+3. Batch 10 — investigação e contrato Amazon buyer;
+4. Batch 11 — fontes complementares: e-mail autorizado, invoices e CSV;
 5. Batch 12 — consolidação de envios, pacotes e trackings;
 6. Batch 13 — motor automático de tracking independente;
 7. Batch 14 — Financeiro e conciliação;
@@ -209,6 +212,8 @@ Cada módulo deve preservar os contratos existentes, isolamento por loja, audito
 
 - Dronz e Gooder utilizam Amazon, eBay e outros marketplaces como compradores. O fluxo principal importa compras realizadas, não vendas recebidas por contas seller.
 - O contrato buyer é independente da fonte; Amazon/eBay, e-mail, invoice, CSV e entrada manual são origens possíveis.
+- eBay buyer purchase ingestion é tecnicamente possível por `GetMyeBayBuying`, sujeito à autorização do usuário, janela de até 60 dias, paginação, quotas e disponibilidade do keyset/aplicação.
+- Amazon buyer permanece em investigação separada; não se presume paridade com a solução eBay.
 - O tracking automático vem depois das fontes de ingestão e da consolidação de envios/pacotes.
 - O motor de tracking é independente do marketplace, e-mail ou documento.
 - Uma ordem pode existir sem tracking e continuar válida na staging.
@@ -221,8 +226,9 @@ Cada módulo deve preservar os contratos existentes, isolamento por loja, audito
 ## 13. Riscos residuais conhecidos
 
 - A API V1 não lista contas externas ou merchants; a UI aceita IDs conhecidos e não inventa opções.
-- A fundação técnica do Batch 8 permanece útil, mas não resolve o caso principal buyer. Amazon SP-API e eBay Sell Fulfillment são seller-side; Login with Amazon e a Buy Order API restrita também não fornecem histórico geral de compras consumer.
-- O Batch 9 deve definir critérios e contrato independente para e-mail autorizado, caixa dedicada, Gmail/Outlook, invoices, comprovantes, CSV e entrada manual, sem escolher silenciosamente a primeira implementação.
+- A fundação técnica do Batch 8 permanece útil e é compatível em princípio com `GetMyeBayBuying`, mas ainda não contém adapter real. Amazon SP-API e eBay Sell Fulfillment continuam seller-side; Login with Amazon e a Buy Order API restrita também não fornecem o mesmo histórico geral da área My eBay Buying.
+- O sistema legado citado pelo Product Owner não está disponível nos repositórios acessíveis. Antes do Batch 9, ainda devem ser comprovados keyset, versão, autenticação, containers, frequência, retenção, quota e origem real do tracking.
+- O serviço atual trata mudança no payload de uma compra já importada como conflito. O Batch 9 precisa definir e testar a política de atualização incremental de status, envio e tracking sem apagar histórico.
 - O futuro tracking precisa normalizar múltiplos pacotes/códigos e eventos fora de ordem sem acoplamento ao provider; a baseline atual não possui esse motor.
 - Contratos antigos de Relatórios ainda usam estruturas genéricas em alguns pontos; sua evolução exige batch próprio para não alterar respostas existentes.
 - Existem casts legados em rotas e analytics da API; removê-los exige tipagem dos contratos afetados e testes específicos.

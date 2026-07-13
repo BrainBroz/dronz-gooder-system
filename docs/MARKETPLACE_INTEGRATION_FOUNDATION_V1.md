@@ -6,7 +6,7 @@
 
 **Providers preparados:** Amazon e eBay
 
-**Estado:** fundação interna implementada e aprovada; adapters seller externos desabilitados e adiados
+**Estado:** fundação interna implementada e aprovada; adapters externos desabilitados; eBay buyer confirmado como fonte oficial candidata e ainda não implementado
 
 ## 1. Escopo e princípio
 
@@ -30,7 +30,7 @@ Caso principal aprovado:
 - pedidos de compra externos;
 - atualização posterior por fontes autorizadas.
 
-Caso não atendido por Amazon SP-API ou eBay Sell Fulfillment:
+Caso não atendido por Amazon SP-API ou eBay Sell Fulfillment, que são APIs seller:
 
 - histórico geral de compras realizadas como consumidor;
 - compras comuns feitas no site por contas buyer.
@@ -39,27 +39,30 @@ Caso secundário futuro:
 
 - seller fulfillment, somente se houver necessidade de negócio específica e aprovada para importar vendas recebidas.
 
-| Fonte/API             | Seller orders | Buyer purchase history | Uso atual              |
-| --------------------- | ------------: | ---------------------: | ---------------------- |
-| Amazon SP-API         |           Sim |                    Não | Adiado                 |
-| eBay Sell Fulfillment |           Sim |                    Não | Adiado                 |
-| E-mail autorizado     | Não aplicável |           Parcial/útil | Candidato              |
-| Invoice/comprovante   | Não aplicável |                Parcial | Candidato              |
-| CSV/exportação        | Não aplicável |         Conforme fonte | Candidato              |
-| Entrada manual        | Não aplicável |                    Sim | Já compatível/fallback |
+| Fonte/API                  | Seller orders | Buyer purchase history | Uso atual                         |
+| -------------------------- | ------------: | ---------------------: | --------------------------------- |
+| Amazon SP-API              |           Sim |                    Não | Seller adiado                     |
+| eBay `GetMyeBayBuying`     |           Não |                    Sim | Adapter buyer futuro              |
+| eBay Sell Fulfillment      |           Sim |                    Não | Seller adiado                     |
+| eBay Buy Order API         |           Não |      Somente fluxo Buy | Não atende compras comuns         |
+| E-mail autorizado          | Não aplicável |           Parcial/útil | Fonte complementar candidata      |
+| Invoice/comprovante        | Não aplicável |                Parcial | Fonte complementar candidata      |
+| CSV/exportação             | Não aplicável |         Conforme fonte | Fonte complementar candidata      |
+| Entrada manual             | Não aplicável |                    Sim | Já compatível/fallback            |
 
 ### 1.2 Princípio para Buyer Purchase Ingestion
 
 O futuro contrato deve ser independente da fonte:
 
 ```text
-EmailBuyerAdapter ───┐
+EbayBuyerAdapter ────┐
+EmailBuyerAdapter ───┤
 InvoiceBuyerAdapter ─┤
 CsvBuyerAdapter ─────┼─ NormalizedBuyerPurchase → Compras Unificadas
 ManualBuyerAdapter ──┘
 ```
 
-O contrato normativo do Batch 9 deverá avaliar provider/origem, conta externa, identidade do pedido, itens, quantidades, moeda, valores, merchant, datas, cancelamentos, reembolsos, envios, pacotes, tracking posterior, evidências, confiança, conflitos e histórico da origem. Essas interfaces ainda não estão implementadas.
+O Batch 9 deverá implementar o adapter eBay buyer sobre o contrato comum existente, após confirmar aplicação, autenticação, containers e quota. Deve definir provider/origem, conta externa, identidade do pedido, itens, quantidades, moeda, valores, merchant, datas, cancelamentos, envios, tracking posterior, conflitos e histórico da origem. O adapter ainda não está implementado.
 
 ## 2. Pesquisa oficial
 
@@ -81,12 +84,17 @@ Conclusão: a SP-API Orders atende pedidos recebidos por sellers/vendors. Não f
 Fontes oficiais consultadas em 2026-07-13:
 
 - [OAuth credentials and authorization](https://developer.ebay.com/api-docs/static/oauth-credentials.html): aplicação, client credentials e user access tokens por ambiente.
+- [Trading API — GetMyeBayBuying](https://developer.ebay.com/Devzone/XML/docs/Reference/eBay/GetMyeBayBuying.html): dados da área de compras da conta autenticada, incluindo `WonList`, transações e paginação.
+- [Making a Trading API call](https://developer.ebay.com/devzone/xml/docs/Concepts/MakingACall.html): OAuth usa User access token em `X-EBAY-API-IAF-TOKEN`; Auth'n'Auth legado permanece documentado.
+- [API Deprecation Status](https://developer.ebay.com/develop/get-started/api-deprecation-status): `GetMyeBayBuying` não constava entre as capacidades descontinuadas ou com desligamento anunciado na consulta de 2026-07-13.
 - [Sell Fulfillment API overview](https://developer.ebay.com/api-docs/sell/fulfillment/overview.html): pedidos e fulfillment no contexto de seller.
 - [Buy Order API](https://developer.ebay.com/api-docs/buy/api-order.html): API em Limited Release para compras criadas pelo fluxo Buy API; não foi tratada como histórico geral de uma conta consumidora.
 - [Platform notifications](https://developer.ebay.com/api-docs/static/platform-notifications-landing.html): notificações disponíveis dependem do programa e tópico.
 - [Notification API release notes](https://developer.ebay.com/api-docs/commerce/notification/release-notes.html): alterações do contrato de notificações devem ser verificadas no adapter real.
 
-Conclusão: Sell Fulfillment atende pedidos recebidos por sellers e não o histórico de compras de buyer. Buy Order API permanece restrita aos pedidos criados pelo fluxo Buy API e não resolve compras comuns feitas no site por uma conta buyer. O adapter seller eBay fica adiado.
+Conclusão corrigida: `GetMyeBayBuying` retorna dados do usuário comprador autenticado e `WonList` cobre itens ganhos/comprados. `WonList.DurationInDays` aceita de 0 a 60 dias, possui paginação por `EntriesPerPage` e `PageNumber` e retorna `PaginationResult`. A resposta documenta identidades de item/transação/linha, quantidade, valores, pagamento, envio e cancelamento. Sell Fulfillment continua seller-side e Buy Order API continua restrita ao seu próprio fluxo. O adapter eBay buyer é tecnicamente possível, mas ainda depende da confirmação do keyset, consentimento/token, quota e comportamento produtivo da aplicação.
+
+O sistema legado informado pelo Product Owner não foi encontrado nos repositórios ou históricos acessíveis. Permanecem sem evidência local: chamada e versão efetivamente usadas, autenticação, containers, frequência, retenção, quota, ambiente e origem do código de tracking. A referência atual de `GetMyeBayBuying` expõe `ShippedTime`, mas não foi localizado `ShipmentTrackingDetails`; portanto, tracking bruto não deve ser prometido sem resposta real ou fonte complementar comprovada.
 
 ### 2.3 Dependências externas ainda necessárias
 
@@ -94,7 +102,8 @@ Conclusão: Sell Fulfillment atende pedidos recebidos por sellers e não o hist�
 - definição de ambientes, regiões/marketplaces e escopos;
 - credenciais mantidas em secret manager, nunca no banco de domínio;
 - confirmação de rate limits, retenção, dados restritos e compliance vigentes na implementação de cada adapter;
-- contrato e critérios de seleção das fontes autorizadas de buyer purchase ingestion.
+- confirmação do keyset/aplicação e da conta eBay que já opera no sistema legado;
+- contrato e critérios das fontes complementares de buyer purchase ingestion.
 
 ## 3. Contrato comum
 
@@ -106,7 +115,7 @@ Conclusão: Sell Fulfillment atende pedidos recebidos por sellers e não o hist�
 - `LIST_SHIPMENTS`;
 - `INCREMENTAL_CURSOR`.
 
-Os adapters Amazon/eBay seller permanecem `NOT_CONFIGURED`, estão adiados e retornam erro interno tipado. Fakes existem somente em testes. A fundação continua aprovada e útil para múltiplos providers/contas, escopos, normalização, sincronização, idempotência, auditoria, RBAC e secrets externos.
+Os adapters reais permanecem `NOT_CONFIGURED` e retornam erro interno tipado. Fakes existem somente em testes. A fundação continua aprovada e útil para múltiplos providers/contas, escopos, normalização, sincronização, idempotência, auditoria, RBAC e secrets externos. O futuro adapter eBay buyer poderá traduzir a paginação por página da Trading API em cursor opaco, sem alterar o contrato público.
 
 Erros externos são normalizados em autorização expirada, throttling, resposta inválida, falha permanente ou falha genérica sanitizada. Mensagens, tokens e payloads sensíveis do provider não são persistidos nem retornados.
 
@@ -207,9 +216,13 @@ Rollback conceitual: interromper novas sincronizações, preservar os dados cria
 
 Há drift preexistente entre partes do schema Prisma e migrations antigas, relacionado a módulos fora deste batch. Ele não foi incorporado à migration de marketplace e deve ser tratado separadamente antes de usar `prisma migrate diff` como gerador automático de SQL.
 
-## 11. Fontes candidatas de Buyer Purchase Ingestion
+## 11. Fontes de Buyer Purchase Ingestion
 
-O Batch 9 deve comparar as fontes abaixo sem escolher silenciosamente uma implementação:
+Fonte oficial prioritária:
+
+- **eBay `GetMyeBayBuying`:** adapter buyer do Batch 9, condicionado à validação do sistema legado, do keyset e das permissões. A janela de até 60 dias exige sincronização recorrente e retenção local.
+
+Fontes complementares do Batch 11:
 
 - **E-mail autorizado:** confirmação, atualização, envio, tracking, cancelamento, reembolso, múltiplos pacotes e múltiplas mensagens correlacionadas ao mesmo pedido.
 - **Caixa dedicada:** encaminhamento automático, regras por remetente e correlação por `externalOrderId`.
@@ -233,11 +246,12 @@ Critérios obrigatórios: autorização verificável, minimização de dados, id
 
 ## 13. Limitações e gates seguintes
 
-- Batch 9: contrato normativo de Buyer Purchase Ingestion.
-- Batch 10: ingestão por e-mail autorizado.
-- Batch 11: ingestão por documentos, invoices e CSV.
+- Batch 8.2: correção forense e contratual do eBay buyer.
+- Batch 9: adapter eBay buyer, somente após confirmar aplicação e credenciais/permissões.
+- Batch 10: investigação e contrato Amazon buyer.
+- Batch 11: fontes complementares por e-mail autorizado, invoices e CSV.
 - Batch 12: consolidação operacional de envios, pacotes e trackings.
 - Batch 13: motor independente de tracking e transportadoras.
 - Batches 14–16: Financeiro/conciliação, Vendas/baixa patrimonial e Analytics avançado.
 
-Nenhum desses batches está iniciado. Adapters seller Amazon/eBay permanecem adiados até existir necessidade específica de importar vendas recebidas. Fontes buyer exigem contrato, autorização, privacidade e retenção aprovados antes da implementação.
+Nenhum desses batches está iniciado. Adapters seller Amazon/eBay permanecem adiados até existir necessidade específica de importar vendas recebidas. O adapter eBay buyer é uma trilha distinta e tecnicamente possível, mas exige confirmação externa antes da implementação. Amazon buyer não deve ser presumido equivalente e permanece sob investigação.
