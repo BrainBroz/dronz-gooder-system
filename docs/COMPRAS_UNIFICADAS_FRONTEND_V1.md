@@ -1,6 +1,6 @@
 # Compras Unificadas — Frontend V1
 
-Implementação técnica concluída no Batch 6, commit `968b2bf`, subordinada ao `AGENTS.md`, ao contrato `COMPRAS_UNIFICADAS_E_CHECKPOINTS_V1.md` e ao backend descrito em `COMPRAS_UNIFICADAS_BACKEND_V1.md`.
+Implementação técnica concluída e aprovada no Batch 6, commit `968b2bf`, subordinada ao `AGENTS.md`, ao contrato `COMPRAS_UNIFICADAS_E_CHECKPOINTS_V1.md` e ao backend descrito em `COMPRAS_UNIFICADAS_BACKEND_V1.md`. Gate: **APROVADO**.
 
 ## Escopo
 

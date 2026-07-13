@@ -1,6 +1,6 @@
 # UI-3C Frontend V1
 
-**Status:** implementado nos commits `fe658c8` e `cf3a880`.
+**Status:** implementado e aprovado nos commits `fe658c8` e `cf3a880`. Gate do Batch 4: **APROVADO**.
 
 ## Escopo
 

@@ -54,15 +54,14 @@ Classificações: `IMPLEMENTADO`, `PARCIAL`, `PLANEJADO`, `FORA DO ESCOPO ATUAL`
 
 ## 4. Roadmap oficial
 
-1. auditoria final da baseline;
-2. integração Amazon;
-3. integração eBay;
-4. sincronização de ordens;
-5. tracking automático independente;
-6. Financeiro;
-7. Vendas;
-8. Patrimônio;
-9. Analytics.
+1. integração Amazon;
+2. integração eBay;
+3. sincronização de ordens;
+4. tracking automático independente;
+5. Financeiro;
+6. Vendas;
+7. Patrimônio;
+8. Analytics.
 
 O tracking automático depende das integrações para ingestão, mas seu domínio não depende de um marketplace específico. Ordem sem tracking é válida; tracking pode surgir ou mudar depois; pedidos podem possuir múltiplos pacotes e códigos; e o fallback manual deve permanecer auditável.
 

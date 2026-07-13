@@ -1,6 +1,6 @@
 # Prontidão para produção
 
-**Baseline técnica:** `f413791` — Batches 0–7 consolidados. Esta classificação cobre código, migrations e testes; publicação continua condicionada à infraestrutura e aos segredos do ambiente.
+**Baseline técnica:** `f413791` — Batches 0–7 e Auditoria Independente aprovados. A consolidação documental posterior está em `342e0f3`. Esta classificação cobre código, migrations e testes; publicação continua condicionada à infraestrutura e aos segredos do ambiente.
 
 ## Segurança
 

@@ -35,6 +35,14 @@ O frontend é cliente fino. A API valida autenticação, RBAC, `lojaId`, transi�
 
 Páginas web são carregadas por rota com `React.lazy` e `Suspense`. Dependências estáveis são separadas em chunks de React, Material UI, formulários e server state para cache e carregamento previsíveis.
 
+Fluxo de dependência consolidado:
+
+```text
+web → API HTTP → routes/controllers → services → Prisma → PostgreSQL
+```
+
+O frontend não reconstrói RBAC, transições, elegibilidade, cálculo financeiro, estoque ou tracking. A staging global é um contexto autorizado próprio; após atribuição/materialização, toda operação volta ao tenant obrigatório por `lojaId`.
+
 ## 4. Persistência e segurança
 
 - PostgreSQL é a persistência operacional.
@@ -46,6 +54,9 @@ Páginas web são carregadas por rota com `React.lazy` e `Suspense`. Dependênci
 - Senhas e refresh tokens são persistidos somente em representação segura.
 - `AuditLog` é o mecanismo único de auditoria; não criar sistema paralelo.
 - Mutações críticas usam idempotência persistente e transações.
+- Falha de auditoria em mutação crítica provoca rollback; eventos confirmados não são editados ou apagados silenciosamente.
+- Chaves idempotentes são persistidas e vinculadas à operação e ao payload normalizado; replay divergente é conflito.
+- Migrations são aditivas, versionadas, testadas em banco limpo e baseline compatível; migrations aplicadas nunca são reescritas.
 
 ## 5. Regras permanentes
 
@@ -115,27 +126,27 @@ Implementado e coberto por testes:
 
 Não implementado:
 
-- integrações reais Amazon/eBay;
+- integrações reais Amazon/eBay e sincronização automática de ordens;
 - tracking automático;
 - integrações PayPal, bancárias ou de cartão;
 - e-mail, OCR operacional e QR Code;
 - documentos e anexos;
 - exportações PDF e Excel.
 
-## 9. Histórico da estabilização
+## 9. Histórico e gates oficiais
 
-| Batch                           | Commit                             | Resultado                                                                |
-| ------------------------------- | ---------------------------------- | ------------------------------------------------------------------------ |
-| 0 — higiene da baseline         | `4ac6336`                          | Node, Prisma, lockfile, ambiente e segredos normalizados                 |
-| 1 — testes                      | `2d4b0cb`                          | suítes API/web estabilizadas e infraestrutura jsdom criada               |
-| 2 — contrato normativo          | `3fbcc99`, `0ce36f6`               | Compras Unificadas e checkpoints definidos; decisões de produto fechadas |
-| 3 — UI-3C backend               | `6367fb3`, `79f5247`               | read models, RBAC, auditoria, idempotência e correções                   |
-| 4 — UI-3C frontend              | `fe658c8`, `cf3a880`               | interfaces operacionais e alinhamento estrito a `allowedActions`         |
-| 5 — Compras Unificadas backend  | `e9a9d9b`                          | staging, mappings, atribuição, conflitos e materialização                |
-| 6 — Compras Unificadas frontend | `968b2bf`                          | workflow global e pedidos operacionais separados                         |
-| 7 — production readiness        | `f413791`                          | code splitting, cache preciso, documentação master e validação final     |
+| Batch                           | Commits                            | Resultado                                                                | Gate final |
+| ------------------------------- | ---------------------------------- | ------------------------------------------------------------------------ | ---------- |
+| 0 — higiene da baseline         | `4ac6336`                          | Node, Prisma, lockfile, ambiente e segredos normalizados                 | APROVADO   |
+| 1 — testes                      | `2d4b0cb`                          | suítes API/web estabilizadas e infraestrutura jsdom criada               | APROVADO   |
+| 2 — contrato normativo          | `3fbcc99`, `0ce36f6`               | Compras Unificadas e checkpoints definidos; decisões de produto fechadas | APROVADO   |
+| 3 — UI-3C backend               | `6367fb3`, `79f5247`               | read models, RBAC, auditoria, idempotência e correções                   | APROVADO   |
+| 4 — UI-3C frontend              | `fe658c8`, `cf3a880`               | interfaces operacionais e alinhamento estrito a `allowedActions`         | APROVADO   |
+| 5 — Compras Unificadas backend  | `e9a9d9b`                          | staging, mappings, atribuição, conflitos e materialização                | APROVADO   |
+| 6 — Compras Unificadas frontend | `968b2bf`                          | workflow global e pedidos operacionais separados                         | APROVADO   |
+| 7 — production readiness        | `f413791`                          | code splitting, cache preciso, documentação master e validação final     | APROVADO   |
 
-Baseline documental consolidada após o Batch 7: `f413791` (`chore: harden production baseline`).
+A Auditoria Independente do Batch 7 foi aprovada sem correção de código. A consolidação documental subsequente está no commit `342e0f3`. A baseline funcional Production Ready permanece `f413791`; commits documentais posteriores não alteram comportamento.
 
 ## 10. Convenções de implementação
 
@@ -148,6 +159,8 @@ Baseline documental consolidada após o Batch 7: `f413791` (`chore: harden produ
 - Um `QueryClient` por teste, retries desabilitados e nenhum HTTP real em testes web.
 - Testes de API usam PostgreSQL exclusivo e fixtures autocontidas.
 - Não remover ou condicionar assertions para fazer a suíte passar.
+- Testes não usam registros incidentais, ordem de execução, guards silenciosos, `skip` ou sleeps para mascarar falhas.
+- Baseline aprovada: 114 testes de API e 78 web, total de 192 por execução, sem ignorados e com duas execuções globais consecutivas.
 - Mudanças de performance exigem medição antes/depois.
 
 ## 11. Operação e validação
@@ -177,15 +190,14 @@ Produção exige secrets distintos, `WEB_ORIGIN` HTTPS explícito, PostgreSQL pe
 
 Próximos módulos só podem iniciar em batches aprovados e independentes:
 
-1. auditoria final da baseline;
-2. integração Amazon;
-3. integração eBay;
-4. sincronização de ordens;
-5. tracking automático independente;
-6. Financeiro;
-7. Vendas;
-8. Patrimônio;
-9. Analytics.
+1. integração Amazon;
+2. integração eBay;
+3. sincronização de ordens;
+4. tracking automático independente;
+5. Financeiro;
+6. Vendas;
+7. Patrimônio;
+8. Analytics.
 
 Cada módulo deve preservar os contratos existentes, isolamento por loja, auditoria e migrations incrementais. Este roadmap não declara esses itens implementados nem autoriza iniciá-los automaticamente.
 
@@ -203,6 +215,8 @@ Cada módulo deve preservar os contratos existentes, isolamento por loja, audito
 ## 13. Riscos residuais conhecidos
 
 - A API V1 não lista contas externas ou merchants; a UI aceita IDs conhecidos e não inventa opções.
+- Integrações Amazon/eBay ainda exigem contrato de credenciais, rate limits, retries, webhooks/polling e recuperação sem armazenar segredos nas entidades de domínio.
+- O futuro tracking precisa normalizar múltiplos pacotes/códigos e eventos fora de ordem sem acoplamento ao provider; a baseline atual não possui esse motor.
 - Contratos antigos de Relatórios ainda usam estruturas genéricas em alguns pontos; sua evolução exige batch próprio para não alterar respostas existentes.
 - Existem casts legados em rotas e analytics da API; removê-los exige tipagem dos contratos afetados e testes específicos.
 - A janela “quinta-feira de manhã” continua sem limites horários normativos e não deve gerar bloqueio horário inventado.

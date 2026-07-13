@@ -55,7 +55,7 @@ Status atual:
 
 ## Roadmap
 
-O roadmap oficial está em `docs/PROJECT_CONTEXT_MASTER.md`. A próxima sequência começa pela auditoria final da baseline, seguida por Amazon, eBay, sincronização de ordens e tracking automático independente; Financeiro, Vendas, Patrimônio e Analytics vêm depois. O contrato de tracking preservará ordens sem código, múltiplos pacotes/códigos, atualizações posteriores e fallback manual auditável.
+O roadmap oficial está em `docs/PROJECT_CONTEXT_MASTER.md`. A próxima sequência começa por Amazon, eBay, sincronização de ordens e tracking automático independente; Financeiro, Vendas, Patrimônio e Analytics vêm depois. O contrato de tracking preservará ordens sem código, múltiplos pacotes/códigos, atualizações posteriores e fallback manual auditável.
 
 ## Itens não implementados ainda
 

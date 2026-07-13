@@ -2,7 +2,7 @@
 
 ## Status
 
-Implementação técnica concluída no Batch 5, commit `e9a9d9b`, subordinada a `AGENTS.md` e a `COMPRAS_UNIFICADAS_E_CHECKPOINTS_V1.md`. Este documento descreve o código implementado; não substitui o contrato normativo.
+Implementação técnica concluída e aprovada no Batch 5, commit `e9a9d9b`, subordinada a `AGENTS.md` e a `COMPRAS_UNIFICADAS_E_CHECKPOINTS_V1.md`. Gate: **APROVADO**. Este documento descreve o código implementado; não substitui o contrato normativo.
 
 ## Modelo de domínio
 

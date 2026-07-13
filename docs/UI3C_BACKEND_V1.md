@@ -2,7 +2,7 @@
 
 ## Estado implementado
 
-O backend da UI-3C foi concluído nos commits `6367fb3` e `79f5247`. Ele fornece read models tenant-safe, RBAC granular, snapshot de rota, idempotência persistente, auditoria estruturada e eventos corretivos. O frontend foi implementado posteriormente nos commits `fe658c8` e `cf3a880`, documentados em `UI3C_FRONTEND_V1.md`.
+O backend da UI-3C foi concluído e aprovado nos commits `6367fb3` e `79f5247`. Gate do Batch 3: **APROVADO**. Ele fornece read models tenant-safe, RBAC granular, snapshot de rota, idempotência persistente, auditoria estruturada e eventos corretivos. O frontend foi implementado posteriormente nos commits `fe658c8` e `cf3a880`, documentados em `UI3C_FRONTEND_V1.md`.
 
 ## Rotas e checkpoints
 

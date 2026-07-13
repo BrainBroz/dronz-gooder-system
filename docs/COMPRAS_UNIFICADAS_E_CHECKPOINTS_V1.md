@@ -1,6 +1,6 @@
 # Compras Unificadas e Checkpoints V1
 
-**Status:** contrato normativo aprovado e implementado nos Batches 3–6
+**Status:** contrato normativo aprovado, implementado e validado nos Batches 3–6
 
 **Data:** 2026-07-12
 
@@ -790,12 +790,11 @@ O briefing-fonte integral não foi localizado no repositório, no histórico pes
 
 | Ordem | Batch futuro | Objetivo | Dependências | Aceite mínimo |
 |---:|---|---|---|---|
-| 1 | Auditoria final da baseline | comprovar a baseline consolidada antes de novo domínio | Batches 0–7 | testes, migrations, RBAC e isolamento revalidados |
-| 2 | Integração Amazon | conectar conta e importar dados sem guardar segredo no domínio | arquitetura de credenciais e contrato de staging | ingestão idempotente, auditada e recuperável |
-| 3 | Integração eBay | adaptar eBay ao mesmo contrato canônico | fundação de integração e staging | mesmas garantias da Amazon sem regra duplicada |
-| 4 | Sincronização de ordens | reconciliar ordens, itens, pacotes e atualizações | conectores Amazon/eBay | upsert determinístico e conflitos explícitos |
-| 5 | Tracking automático independente | acompanhar códigos normalizados sem acoplamento ao marketplace | ordens e envios sincronizados | eventos fora de ordem tratados e histórico auditável |
-| 6–9 | Financeiro, Vendas, Patrimônio e Analytics | evoluções funcionais posteriores | contratos próprios e aprovação | isolamento, auditoria e migrations incrementais |
+| 1 | Integração Amazon | conectar conta e importar dados sem guardar segredo no domínio | arquitetura de credenciais e contrato de staging | ingestão idempotente, auditada e recuperável |
+| 2 | Integração eBay | adaptar eBay ao mesmo contrato canônico | fundação de integração e staging | mesmas garantias da Amazon sem regra duplicada |
+| 3 | Sincronização de ordens | reconciliar ordens, itens, pacotes e atualizações | conectores Amazon/eBay | upsert determinístico e conflitos explícitos |
+| 4 | Tracking automático independente | acompanhar códigos normalizados sem acoplamento ao marketplace | ordens e envios sincronizados | eventos fora de ordem tratados e histórico auditável |
+| 5–8 | Financeiro, Vendas, Patrimônio e Analytics | evoluções funcionais posteriores | contratos próprios e aprovação | isolamento, auditoria e migrations incrementais |
 
 ### 37.1 Decisões oficiais de tracking
 
@@ -813,4 +812,4 @@ Parte técnica dos Batches 3–6: implementada e validada.
 
 P-01 a P-07 estão aprovadas e incorporadas. P-08 permanece decisão exclusiva do Product Owner, mas não bloqueia a baseline nem qualquer endpoint que não calcule atraso por horário de quinta-feira.
 
-Gate documental: Batches 3–6 concluídos. O próximo gate é a auditoria final da baseline; integrações e tracking continuam planejados, não implementados.
+Gate documental: Batches 3–6 e Auditoria Independente do Batch 7 aprovados. A próxima etapa oficial é a Integração Amazon; integrações e tracking continuam planejados, não implementados.
