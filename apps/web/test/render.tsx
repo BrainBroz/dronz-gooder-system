@@ -12,6 +12,7 @@ type RenderOptions = {
   user?: AuthUser | null;
   stores?: Store[];
   activeStoreId?: string | null;
+  permissions?: string[];
 };
 
 const testClients = new Set<QueryClient>();
@@ -57,6 +58,7 @@ export function renderWithProviders(ui: ReactElement, options: RenderOptions = {
     accessToken: options.accessToken === undefined ? "access-test" : options.accessToken,
     user: options.user === undefined ? testUser : options.user,
     stores,
+    permissions: options.permissions ?? ["CHECKPOINT_CORRIGIR"],
     activeStoreId:
       options.activeStoreId === undefined ? (stores[0]?.id ?? null) : options.activeStoreId
   });

@@ -11,11 +11,13 @@ export type AuthState = {
   accessToken: string | null;
   user: AuthUser | null;
   stores: Store[];
+  permissions: string[];
   activeStoreId: string | null;
   setSession: (payload: {
     accessToken: string;
     user: AuthUser;
     stores: Store[];
+    permissions?: string[];
   }) => void;
   setActiveStoreId: (storeId: string) => void;
   clear: () => void;
@@ -25,6 +27,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   accessToken: null,
   user: null,
   stores: [],
+  permissions: [],
   activeStoreId: null,
   setSession: (payload) => {
     const current = get();
@@ -33,12 +36,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       accessToken: payload.accessToken,
       user: payload.user,
       stores: payload.stores,
+      permissions: payload.permissions ?? current.permissions,
       activeStoreId: isValidStore ? current.activeStoreId : payload.stores[0]?.id ?? null
     });
   },
   setActiveStoreId: (activeStoreId) => set({ activeStoreId }),
   clear: () =>
-    set({ accessToken: null, user: null, stores: [], activeStoreId: null })
+    set({ accessToken: null, user: null, stores: [], permissions: [], activeStoreId: null })
 }));
 
 export function authHeader() {

@@ -33,6 +33,7 @@ import { ProductsPage } from "./pages/ProductsPage";
 import { LogisticsPage } from "./pages/LogisticsPage";
 import { InventoryPage } from "./pages/InventoryPage";
 import { FinancePage } from "./pages/FinancePage";
+import { OperationsPage } from "./pages/OperationsPage";
 
 const loginSchema = z.object({
   email: z.string().email("Informe um e-mail válido"),
@@ -54,7 +55,8 @@ export async function loadSession() {
           slug: s.slug,
           nome: s.nome
         })
-      )
+      ),
+      permissions: (response.data.permissoes ?? []).map((permission: { code: string }) => permission.code)
     });
   } catch {
     useAuthStore.getState().clear();
@@ -88,7 +90,8 @@ export function LoginPage() {
       useAuthStore.getState().setSession({
         accessToken: response.data.accessToken,
         user: response.data.user,
-        stores: response.data.stores
+        stores: response.data.stores,
+        permissions: (response.data.permissions ?? []).map((permission: { code: string }) => permission.code)
       });
       navigate("/operacao");
     } catch (error) {
@@ -188,6 +191,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             ))}
             {[
               ["Operação", "/operacao"],
+              ["Checkpoints", "/checkpoints"],
               ["Produtos", "/produtos"],
               ["Fornecedores", "/fornecedores"],
               ["Compras", "/pedidos"],
@@ -247,6 +251,16 @@ export function AppRoutes() {
               <AuthGate>
                 <Shell>
                   <DashboardPage />
+                </Shell>
+              </AuthGate>
+            }
+          />
+          <Route
+            path="/checkpoints"
+            element={
+              <AuthGate>
+                <Shell>
+                  <OperationsPage />
                 </Shell>
               </AuthGate>
             }
