@@ -11,7 +11,7 @@ const json = (value: unknown): Prisma.InputJsonValue =>
 
 type AuditInput = {
   usuarioId: string;
-  lojaId: string;
+  lojaId?: string;
   permissionCode: string;
   action: string;
   entity: string;
@@ -21,11 +21,15 @@ type AuditInput = {
   reason?: string;
   before?: unknown;
   after?: unknown;
+  origin?: string;
 };
 
 let auditFailureForTests: ((input: AuditInput) => boolean) | undefined;
-export function setAuditFailureForTests(predicate?: (input: AuditInput) => boolean) {
-  if (process.env.NODE_ENV !== "test") throw new Error("test hook unavailable outside tests");
+export function setAuditFailureForTests(
+  predicate?: (input: AuditInput) => boolean
+) {
+  if (process.env.NODE_ENV !== "test")
+    throw new Error("test hook unavailable outside tests");
   auditFailureForTests = predicate;
 }
 
@@ -39,11 +43,22 @@ export async function idempotentMutation<T>(input: {
 }): Promise<T> {
   if (!input.key) {
     try {
-      return await prisma.$transaction((tx) => input.execute(tx, randomUUID()), {
-        isolationLevel: Prisma.TransactionIsolationLevel.Serializable
-      });
+      return await prisma.$transaction(
+        (tx) => input.execute(tx, randomUUID()),
+        {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable
+        }
+      );
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2034"
+      )
+        throw new AppError(409, "concurrent_modification");
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      )
         throw new AppError(409, "already_confirmed");
       throw error;
     }
@@ -59,26 +74,38 @@ export async function idempotentMutation<T>(input: {
   };
   const existing = await prisma.idempotencyRecord.findUnique({ where });
   if (existing) {
-    if (existing.requestHash !== hash) throw new AppError(409, "idempotency_conflict");
+    if (existing.requestHash !== hash)
+      throw new AppError(409, "idempotency_conflict");
     return existing.responseData as T;
   }
   try {
-    return await prisma.$transaction(async (tx) => {
-      const result = await input.execute(tx, randomUUID());
-      await tx.idempotencyRecord.create({
-        data: {
-          lojaId: input.lojaId,
-          operation: input.operation,
-          entityId: input.entityId,
-          idempotencyKey: input.key!,
-          requestHash: hash,
-          responseData: json(result)
-        }
-      });
-      return result;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    return await prisma.$transaction(
+      async (tx) => {
+        const result = await input.execute(tx, randomUUID());
+        await tx.idempotencyRecord.create({
+          data: {
+            lojaId: input.lojaId,
+            operation: input.operation,
+            entityId: input.entityId,
+            idempotencyKey: input.key!,
+            requestHash: hash,
+            responseData: json(result)
+          }
+        });
+        return result;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+    );
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2034"
+    )
+      throw new AppError(409, "concurrent_modification");
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
       const replay = await prisma.idempotencyRecord.findUnique({ where });
       if (replay?.requestHash === hash) return replay.responseData as T;
       throw new AppError(409, "idempotency_conflict");
@@ -102,7 +129,7 @@ export async function audit(tx: Prisma.TransactionClient, input: AuditInput) {
       reason: input.reason,
       beforeData: input.before === undefined ? undefined : json(input.before),
       afterData: input.after === undefined ? undefined : json(input.after),
-      origin: "API_UI3C"
+      origin: input.origin ?? "API_UI3C"
     }
   });
 }

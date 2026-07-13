@@ -42,7 +42,15 @@ async function main() {
     "RECEBIMENTO_CONFIRMAR",
     "ENTRADA_DEFINITIVA_VISUALIZAR",
     "ENTRADA_DEFINITIVA_CONFIRMAR",
-    "CHECKPOINT_CORRIGIR"
+    "CHECKPOINT_CORRIGIR",
+    "COMPRAS_IMPORTADAS_VISUALIZAR",
+    "COMPRAS_IMPORTADAS_IMPORTAR",
+    "COMPRAS_IMPORTADAS_REVISAR",
+    "COMPRAS_IMPORTADAS_ATRIBUIR",
+    "COMPRAS_IMPORTADAS_MATERIALIZAR",
+    "CONTA_EXTERNA_GERENCIAR",
+    "MAPPING_FORNECEDOR_GERENCIAR",
+    "MAPPING_PRODUTO_GERENCIAR"
   ] as const;
   const permissions = await Promise.all(
     permissionCodes.map((code) =>
@@ -85,17 +93,26 @@ async function main() {
   for (const permission of permissions) {
     await prisma.perfilPermissao.upsert({
       where: {
-        perfilId_permissaoId: { perfilId: profile.id, permissaoId: permission.id }
+        perfilId_permissaoId: {
+          perfilId: profile.id,
+          permissaoId: permission.id
+        }
       },
       update: {},
       create: { perfilId: profile.id, permissaoId: permission.id }
     });
   }
-  for (const code of ["MIAMI_RECEBIMENTO_VISUALIZAR", "MIAMI_RECEBIMENTO_CONFIRMAR"] as const) {
+  for (const code of [
+    "MIAMI_RECEBIMENTO_VISUALIZAR",
+    "MIAMI_RECEBIMENTO_CONFIRMAR"
+  ] as const) {
     const permission = permissions.find((entry) => entry.code === code)!;
     await prisma.perfilPermissao.upsert({
       where: {
-        perfilId_permissaoId: { perfilId: miamiProfile.id, permissaoId: permission.id }
+        perfilId_permissaoId: {
+          perfilId: miamiProfile.id,
+          permissaoId: permission.id
+        }
       },
       update: {},
       create: { perfilId: miamiProfile.id, permissaoId: permission.id }
