@@ -35,4 +35,4 @@ Os stashes anteriores a esta baseline foram preservados apenas como histórico. 
 
 O `npm audit` de 2026-07-11 reporta vulnerabilidades na toolchain de testes Vitest 2/Vite transitivo, incluindo um alerta crítico ligado ao servidor de UI do Vitest. Essa UI não é iniciada pelos scripts do projeto e os pacotes são de desenvolvimento, não do runtime publicado. A correção indicada exige upgrade major do Vitest; por restrição de dependências, deve ser tratada em batch próprio com validação de compatibilidade. Não exponha servidores Vite/Vitest à rede pública.
 
-O bundle web atual gera aviso de chunk principal acima de 500 kB. A aplicação compila corretamente; code splitting deve ser medido e tratado em trabalho específico de performance, sem mudança arquitetural incidental.
+O frontend usa lazy routes e chunks estáveis de vendor. O Batch 7 reduziu o maior chunk de 789,22 kB para 297,25 kB e eliminou o aviso do Vite para chunks acima de 500 kB, sem alterar comportamento ou dependências.

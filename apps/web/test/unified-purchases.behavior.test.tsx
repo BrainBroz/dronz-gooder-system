@@ -278,7 +278,10 @@ describe("Compras Unificadas", () => {
   });
 
   it("atribui quantidade usando versão, tenant e idempotência", async () => {
-    renderWithProviders(<UnifiedPurchasesPage />, { permissions });
+    const { queryClient } = renderWithProviders(<UnifiedPurchasesPage />, {
+      permissions
+    });
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
     await openDetail();
     fireEvent.change(screen.getByLabelText("Quantidade atribuída"), {
       target: { value: "4" }
@@ -298,6 +301,19 @@ describe("Compras Unificadas", () => {
         })
       }
     ]);
+    expect(invalidate).toHaveBeenCalledTimes(3);
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ["unified-purchases", "overview"]
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ["unified-purchases", "list"]
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ["unified-purchases", "detail", "purchase-1"]
+    });
+    expect(invalidate).not.toHaveBeenCalledWith({
+      queryKey: ["unified-purchases"]
+    });
   });
 
   it("troca de loja carrega produtos tenantados e não reutiliza ID anterior", async () => {
@@ -366,7 +382,10 @@ describe("Compras Unificadas", () => {
   });
 
   it("cadastra conta sem inventar endpoint de listagem", async () => {
-    renderWithProviders(<UnifiedPurchasesPage />, { permissions });
+    const { queryClient } = renderWithProviders(<UnifiedPurchasesPage />, {
+      permissions
+    });
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
     await screen.findByText("ORDER-ÁbC-1");
     await userEvent.click(screen.getByRole("button", { name: "Nova conta" }));
     const dialog = await screen.findByRole("dialog");
@@ -402,6 +421,7 @@ describe("Compras Unificadas", () => {
         .mocked(api.get)
         .mock.calls.some(([url]) => url === "/imported-purchases/accounts")
     ).toBe(false);
+    expect(invalidate).not.toHaveBeenCalled();
   });
 
   it("cadastra merchant preservando sua identidade externa", async () => {

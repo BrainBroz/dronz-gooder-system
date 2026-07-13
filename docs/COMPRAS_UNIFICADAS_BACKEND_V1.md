@@ -98,4 +98,4 @@ Nenhuma migration anterior foi editada e nenhuma coluna legada foi removida. O r
 - Não há resolução pós-materialização que altere patrimônio; conflitos permanecem bloqueados e auditáveis.
 - Moeda diferente de USD não é convertida silenciosamente; a materialização é bloqueada.
 - Sugestões automáticas de produto/fornecedor não foram implementadas.
-- O frontend pertence ao Batch 6 e não foi alterado.
+- O frontend foi implementado separadamente no Batch 6 e está documentado em `COMPRAS_UNIFICADAS_FRONTEND_V1.md`; este contrato permanece restrito ao backend.

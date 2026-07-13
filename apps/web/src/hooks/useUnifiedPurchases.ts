@@ -60,38 +60,41 @@ export function useUnifiedPurchaseDetail(id: string | null) {
 
 export function useUnifiedPurchaseMutations() {
   const client = useQueryClient();
-  const invalidate = async (purchaseId?: string) => {
-    await client.invalidateQueries({ queryKey: unifiedPurchasesQueryKeys.all });
+  const invalidatePurchases = async (purchaseId?: string) => {
+    const invalidations = [
+      client.invalidateQueries({
+        queryKey: unifiedPurchasesQueryKeys.overview()
+      }),
+      client.invalidateQueries({ queryKey: unifiedPurchasesQueryKeys.lists() })
+    ];
     if (purchaseId) {
-      await client.invalidateQueries({
-        queryKey: unifiedPurchasesQueryKeys.detail(purchaseId)
-      });
-      await client.invalidateQueries({
-        queryKey: unifiedPurchasesQueryKeys.history(purchaseId)
-      });
+      invalidations.push(
+        client.invalidateQueries({
+          queryKey: unifiedPurchasesQueryKeys.detail(purchaseId)
+        })
+      );
     }
+    await Promise.all(invalidations);
   };
   return {
     createAccount: useMutation({
       mutationFn: (input: { payload: object; idempotencyKey: string }) =>
         api.post("/imported-purchases/accounts", input.payload, {
           headers: mutationHeaders(input.idempotencyKey)
-        }),
-      onSuccess: () => invalidate()
+        })
     }),
     createMerchant: useMutation({
       mutationFn: (input: { payload: object; idempotencyKey: string }) =>
         api.post("/imported-purchases/merchants", input.payload, {
           headers: mutationHeaders(input.idempotencyKey)
-        }),
-      onSuccess: () => invalidate()
+        })
     }),
     importPurchase: useMutation({
       mutationFn: (input: { payload: object; idempotencyKey: string }) =>
         api.post("/imported-purchases", input.payload, {
           headers: mutationHeaders(input.idempotencyKey)
         }),
-      onSuccess: () => invalidate()
+      onSuccess: () => invalidatePurchases()
     }),
     createManualPurchase: useMutation({
       mutationFn: (input: {
@@ -102,7 +105,7 @@ export function useUnifiedPurchaseMutations() {
         api.post("/imported-purchases/manual", input.payload, {
           headers: storeHeaders(input.storeId, input.idempotencyKey)
         }),
-      onSuccess: () => invalidate()
+      onSuccess: () => invalidatePurchases()
     }),
     setAssignment: useMutation({
       mutationFn: (input: {
@@ -117,7 +120,7 @@ export function useUnifiedPurchaseMutations() {
           input.payload,
           { headers: storeHeaders(input.storeId, input.idempotencyKey) }
         ),
-      onSuccess: (_response, input) => invalidate(input.purchaseId)
+      onSuccess: (_response, input) => invalidatePurchases(input.purchaseId)
     }),
     removeAssignment: useMutation({
       mutationFn: (input: {
@@ -134,7 +137,7 @@ export function useUnifiedPurchaseMutations() {
             headers: storeHeaders(input.storeId, input.idempotencyKey)
           }
         ),
-      onSuccess: (_response, input) => invalidate(input.purchaseId)
+      onSuccess: (_response, input) => invalidatePurchases(input.purchaseId)
     }),
     setProductMapping: useMutation({
       mutationFn: (input: {
@@ -153,7 +156,7 @@ export function useUnifiedPurchaseMutations() {
           },
           { headers: storeHeaders(input.storeId, input.idempotencyKey) }
         ),
-      onSuccess: (_response, input) => invalidate(input.purchaseId)
+      onSuccess: (_response, input) => invalidatePurchases(input.purchaseId)
     }),
     setSupplierMapping: useMutation({
       mutationFn: (input: {
@@ -172,7 +175,7 @@ export function useUnifiedPurchaseMutations() {
           },
           { headers: storeHeaders(input.storeId, input.idempotencyKey) }
         ),
-      onSuccess: (_response, input) => invalidate(input.purchaseId)
+      onSuccess: (_response, input) => invalidatePurchases(input.purchaseId)
     }),
     materialize: useMutation({
       mutationFn: (input: {
@@ -186,7 +189,7 @@ export function useUnifiedPurchaseMutations() {
           { expectedPurchaseVersion: input.expectedPurchaseVersion },
           { headers: storeHeaders(input.storeId, input.idempotencyKey) }
         ),
-      onSuccess: (_response, input) => invalidate(input.purchaseId)
+      onSuccess: (_response, input) => invalidatePurchases(input.purchaseId)
     }),
     resolveConflict: useMutation({
       mutationFn: (input: {
@@ -200,7 +203,7 @@ export function useUnifiedPurchaseMutations() {
           { motivo: input.motivo },
           { headers: mutationHeaders(input.idempotencyKey) }
         ),
-      onSuccess: (_response, input) => invalidate(input.purchaseId)
+      onSuccess: (_response, input) => invalidatePurchases(input.purchaseId)
     })
   };
 }
