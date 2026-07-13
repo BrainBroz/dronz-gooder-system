@@ -34,23 +34,23 @@ Construir um sistema operacional para Dronz e Gooder com separação rigorosa en
 
 ## Estado da fundação
 
-A baseline técnica dos Batches 0–7 está concluída no commit `f413791`. Estão implementados e validados: autenticação cookie-only, Categorias, Produtos, Fornecedores, Pedidos Operacionais, Compras Unificadas, UI-3C, logística internacional, recebimento, entrada definitiva, estoque, financeiro manual, Dashboard e Relatórios. O Batch 8 adiciona a fundação comum de integrações; adapters reais Amazon/eBay, tracking automático, integrações PayPal/bancárias, e-mail e QR Code permanecem futuros.
+A baseline técnica dos Batches 0–7 está concluída no commit `f413791`. Estão implementados e validados: autenticação cookie-only, Categorias, Produtos, Fornecedores, Pedidos Operacionais, Compras Unificadas, UI-3C, logística internacional, recebimento, entrada definitiva, estoque, financeiro manual, Dashboard e Relatórios. O Batch 8 adiciona uma fundação técnica comum de integrações, preservada para fontes futuras. O caso principal aprovado é `buyer purchase ingestion`: importar compras realizadas por Dronz e Gooder. Adapters seller Amazon/eBay ficam adiados; tracking automático, integrações PayPal/bancárias, e-mail operacional e QR Code permanecem futuros.
 
 ## Roadmap oficial
 
 Executar em batches separados e nesta ordem:
 
-1. fundação comum Amazon/eBay;
-2. adapter e sincronização real Amazon;
-3. adapter e sincronização real eBay;
-4. normalização operacional de envios e pacotes;
-5. tracking automático independente;
-6. Financeiro;
-7. Vendas;
-8. Patrimônio;
-9. Analytics.
+1. Batch 8.1 — correção documental buyer versus seller;
+2. Batch 9 — contrato normativo de Buyer Purchase Ingestion;
+3. Batch 10 — ingestão por e-mail autorizado;
+4. Batch 11 — ingestão por documentos, invoices e CSV;
+5. Batch 12 — consolidação de envios, pacotes e trackings;
+6. Batch 13 — motor automático de tracking independente;
+7. Batch 14 — Financeiro e conciliação;
+8. Batch 15 — Vendas e baixa patrimonial;
+9. Batch 16 — Analytics avançado.
 
-Integrações reais precedem o tracking automático porque fornecem ordens, envios e códigos externos. O domínio de tracking, porém, permanece independente do marketplace: uma ordem pode existir sem tracking, o tracking pode surgir ou mudar posteriormente, um pedido pode possuir múltiplos pacotes e códigos, e deve existir fallback manual auditável. Nunca presumir um único tracking por pedido nem acoplar a máquina de tracking diretamente ao provider.
+O contrato buyer e as fontes autorizadas de ingestão precedem o tracking automático porque podem fornecer compras, envios e códigos externos. Amazon e eBay são possíveis origens dos dados, não a arquitetura central do domínio. O tracking permanece independente da fonte: uma ordem pode existir sem tracking, o tracking pode surgir ou mudar posteriormente, um pedido pode possuir múltiplos envios, pacotes e códigos, e deve existir fallback manual auditável. Nunca presumir um único tracking por pedido nem acoplar a máquina de tracking diretamente ao marketplace, e-mail ou documento.
 
 ## Padrões arquiteturais vigentes
 

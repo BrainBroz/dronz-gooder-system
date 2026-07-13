@@ -55,11 +55,12 @@ Status atual:
 
 ## Roadmap
 
-O roadmap oficial está em `docs/PROJECT_CONTEXT_MASTER.md`. A sequência aprovada é: fundação comum Amazon/eBay, adapter Amazon, adapter eBay, normalização operacional de envios/pacotes e tracking automático independente; Financeiro, Vendas, Patrimônio e Analytics vêm depois. O contrato de tracking preserva ordens sem código, múltiplos pacotes/códigos, atualizações posteriores e fallback manual auditável.
+O roadmap oficial está em `docs/PROJECT_CONTEXT_MASTER.md`. Dronz e Gooder usam marketplaces como compradores; a próxima sequência começa pelo contrato independente de `buyer purchase ingestion`, seguido por fontes autorizadas de e-mail, documentos/invoices e CSV. Depois vêm consolidação de envios/pacotes, tracking automático independente, Financeiro, Vendas e Analytics. O contrato de tracking preserva ordens sem código, múltiplos envios/pacotes/códigos, atualizações posteriores e fallback manual auditável.
 
 ## Itens não implementados ainda
 
-- adapters reais Amazon/eBay e sincronização agendada de ordens (a fundação comum existe, mas permanece `NOT_CONFIGURED`);
+- ingestão automática de compras realizadas por contas buyer;
+- adapters seller Amazon/eBay, adiados até existir necessidade específica de importar vendas recebidas;
 - tracking automático e integrações com transportadoras;
 - PayPal, bancos e cartões como integrações (PAYPAL atual é classificação manual);
 - e-mail e QR Code;

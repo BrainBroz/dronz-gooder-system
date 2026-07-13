@@ -63,4 +63,4 @@ Os testes comportamentais em jsdom cobrem:
 
 ## Fora de escopo
 
-Integração real com providers, sincronização automática, listagem de contas/merchants, matching automático, Dashboard, Relatórios, UI-3C e qualquer mutação de estoque, logística ou financeiro. Tracking futuro será consumido por domínio independente e não será inferido pelo frontend de Compras Unificadas.
+Ingestão automática por e-mail/documentos/CSV, APIs externas, listagem de contas/merchants, matching automático, Dashboard, Relatórios, UI-3C e qualquer mutação de estoque, logística ou financeiro. Tracking futuro será consumido por domínio independente da fonte e não será inferido pelo frontend de Compras Unificadas.

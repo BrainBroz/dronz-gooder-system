@@ -1,6 +1,6 @@
 # Prontidão para produção
 
-**Baseline técnica:** `f413791` — Batches 0–7 e Auditoria Independente aprovados. A consolidação documental posterior está em `342e0f3`. Esta classificação cobre código, migrations e testes; publicação continua condicionada à infraestrutura e aos segredos do ambiente.
+**Baseline técnica:** `8644188` — Batches 0–8 e auditorias independentes aprovados. A fundação de integração do Batch 8 permanece desabilitada para providers reais até existir fonte compatível com o caso buyer. Esta classificação cobre código, migrations e testes; publicação continua condicionada à infraestrutura e aos segredos do ambiente.
 
 ## Segurança
 
@@ -17,9 +17,9 @@
 4. Execute `npm run typecheck`, `npm run lint`, `npm run test` e `npm run build`.
 5. Inicie a API e valide `GET /health` atrás do proxy HTTPS.
 
-O seed cria dados administrativos e deve ser executado deliberadamente, somente com `SEED_ADMIN_*` definidos para o ambiente correto. O Batch 8 prepara conexões e sincronização explícita por adapters, mas adapters reais Amazon/eBay, agendamento, tracking automático, e-mail, QR Code, PDF e Excel não fazem parte desta versão.
+O seed cria dados administrativos e deve ser executado deliberadamente, somente com `SEED_ADMIN_*` definidos para o ambiente correto. O Batch 8 prepara conexões e sincronização explícita por adapters, mas ingestão automática de compras buyer, tracking automático, e-mail operacional, QR Code, PDF e Excel não fazem parte desta versão.
 
-Referências `env:MARKETPLACE_*` não são credenciais: são ponteiros. Valores devem existir somente no ambiente/secret manager e nunca em banco, logs, respostas ou commits. Como os programas oficiais encontrados são orientados principalmente a seller, nenhuma conexão deve ser ativada em produção antes de confirmar o tipo e a elegibilidade da conta.
+Referências `env:MARKETPLACE_*` não são credenciais: são ponteiros. Valores devem existir somente no ambiente/secret manager e nunca em banco, logs, respostas ou commits. Dronz e Gooder operam como compradores. Amazon SP-API e eBay Sell Fulfillment não atendem ao histórico geral de compras consumer; portanto, os adapters seller permanecem adiados e nenhuma conexão desse tipo deve ser ativada como solução do fluxo buyer.
 
 Os testes de integração exigem `DATABASE_TEST_URL` apontando para um PostgreSQL exclusivo de testes. A suíte aplica migrations e seed nesse banco antes da execução e nunca deve receber a URL do banco de desenvolvimento ou produção.
 
@@ -41,4 +41,4 @@ O `npm audit` de 2026-07-13 reporta cinco vulnerabilidades na toolchain de desen
 
 O frontend usa lazy routes e chunks estáveis de vendor. O Batch 7 reduziu o maior chunk de 789,22 kB para 297,25 kB e eliminou o aviso do Vite para chunks acima de 500 kB, sem alterar comportamento ou dependências.
 
-Na validação do Batch 7, Prisma validate/generate, lint, typecheck, builds e duas execuções globais passaram. A baseline registrou 114 testes de API e 78 testes web, totalizando 192 testes por execução, sem ignorados.
+Na validação do Batch 8, Prisma validate/generate, lint, typecheck, builds e duas execuções globais passaram. A baseline registrou 126 testes de API e 78 testes web, totalizando 204 testes por execução, sem ignorados.
