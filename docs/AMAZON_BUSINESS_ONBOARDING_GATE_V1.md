@@ -211,3 +211,5 @@ As capabilities progressivas não bloqueiam o núcleo. Qualquer uma indisponíve
 `ONBOARDING NÃO INICIADO — BATCH 10 BLOQUEADO`
 
 O desenho é compatível com a documentação oficial, mas não existe prova material de autorização ou acesso da conta real.
+
+O procedimento manual para eliminar esses bloqueios está em `AMAZON_BUSINESS_ONBOARDING_RUNBOOK_V1.md`.

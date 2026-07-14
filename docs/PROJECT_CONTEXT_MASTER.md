@@ -86,6 +86,7 @@ O frontend não reconstrói RBAC, transições, elegibilidade, cálculo financei
 - `EBAY_BUYER_INVESTIGATION_V1.md`: evidência oficial, limitações e gate do futuro adapter eBay buyer.
 - `BUYER_PURCHASE_INGESTION_CONTRACT_V1.md`: evidências multicanal, reconciliação, aprovação humana, atribuição e visão mensal.
 - `AMAZON_BUSINESS_ONBOARDING_GATE_V1.md`: Gate 9.1, papéis/capabilities oficiais, checklist do responsável e comprovação pendente da conta real.
+- `AMAZON_BUSINESS_ONBOARDING_RUNBOOK_V1.md`: Gate 9.2, pacote operacional preenchível para Marco executar onboarding, consentimento e prova sanitizada.
 - `PRODUCTION_READINESS.md`: requisitos de ambiente, publicação e riscos operacionais.
 
 ## 7. Fluxo operacional implementado
@@ -249,6 +250,7 @@ Cada módulo deve preservar os contratos existentes, isolamento por loja, audito
 - O sistema legado citado pelo Product Owner não está disponível nos repositórios acessíveis. Para eBay ainda devem ser comprovados keyset, versão efetiva, autorização, frequência, quota e origem real do tracking.
 - Para o Batch 10, permanecem externos/abertos: onboarding, papel Amazon Business Analytics, papéis de Package Tracking/Document/Reconciliation, IDs e campos reais, rate limits, referência segura de secrets, tolerância monetária e escopo final de atribuição dos operadores.
 - O Gate 9.1 confirmou apenas capacidades documentadas: o onboarding Amazon Business não foi iniciado, nenhum papel ou credential foi comprovado e nenhuma chamada real foi executada. `ORDERS` e `ORDER_ITEMS` são o núcleo mínimo; remessas, tracking, documentos, reconciliação e User Management são progressivos e não bloqueiam esse núcleo quando indisponíveis.
+- O Gate 9.2 fornece o runbook operacional, mas não altera o bloqueio: o Batch 10 só pode iniciar após Analytics, LWA, consentimento, secret manager e acesso produtivo sanitizado a pedidos e itens.
 - Para os Batches 11–13, permanecem abertas as decisões de contas eBay, caixas autorizadas, retenção de e-mail, pesos/faixas de confiança, tolerância monetária, rateio de encargos, arredondamento, eventual fechamento mensal e planilha histórica. Cada uma bloqueia apenas a implementação que dependa diretamente dela.
 - O serviço atual trata mudança incompatível no payload de uma compra já importada como conflito. O contrato buyer determina evidências versionadas e reconciliação, mas essa evolução ainda não está implementada.
 - O futuro tracking precisa normalizar múltiplos pacotes/códigos e eventos fora de ordem sem acoplamento ao provider; a baseline atual não possui esse motor.
