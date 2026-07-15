@@ -40,7 +40,7 @@ A reconstrução preservará infraestrutura e comportamento comprovado, mas subs
 | Dashboard | redesenhar completamente | Home operacional acionável e, progressivamente, econômica |
 | Categorias | eliminar como página principal | filtro em Produtos e gestão em Administração |
 | Produtos | redesenhar | catálogo, busca, ficha e mappings contextuais |
-| Fornecedores | eliminar da jornada principal | entidade interna acessada sob demanda e em Administração |
+| Fornecedores | eliminar da jornada principal | entidade interna acessada sob demanda e em Administração; a interface operacional exibe o merchant/marketplace de origem da compra, nunca o fornecedor interno como cadastro cotidiano |
 | Compras Unificadas | redesenhar | fila, detalhe, revisão, mapping, atribuição e materialização |
 | Pedidos Operacionais | fundir | etapa e vínculo no detalhe da compra/envio, com busca direta preservada |
 | Checkpoints | fundir | ações e histórico na timeline de Envios e Logística |
@@ -238,6 +238,7 @@ O read model transversal futuro é calculado no backend, respeita identidade, pe
 - Dronz, Gooder e Pendente usam rótulo textual, ícone/chip e cor de apoio.
 - Preço de venda zero é exibido como `A definir`.
 - Item sem loja, mapping ou preço suficiente para uma projeção é exibido como `NÃO CALCULÁVEL`.
+- A origem visível de uma compra é o merchant e o marketplace/conta externa; o fornecedor interno aparece somente em contexto técnico autorizado.
 
 ## 11. Home operacional e econômica
 
