@@ -99,7 +99,11 @@ function ReportsContent() {
           title={reportConfigs.find(c => c.value === reportType)?.label || "Relatório"}
           description={`${report.data.length} registro(s)`}
         >
-          <TableContainer component={Paper} variant="outlined">
+          <TableContainer
+            component={Paper}
+            variant="outlined"
+            sx={{ maxWidth: "100%", overflowX: "auto" }}
+          >
             <Table size="small">
               <TableHead sx={{ backgroundColor: "#f5f5f5" }}>
                 <TableRow>
