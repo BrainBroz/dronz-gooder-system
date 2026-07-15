@@ -86,6 +86,7 @@ O frontend não reconstrói RBAC, transições, elegibilidade, cálculo financei
 - `EBAY_BUYER_INVESTIGATION_V1.md`: investigação histórica anterior ao onboarding; superada pela comprovação operacional do gate.
 - `EBAY_BUYER_SPECIFICATION_V1.md`: especificação oficial comprovada para OAuth e Trading API `GetOrders` buyer, campos, paginação, tracking, quota e segurança.
 - `BUYER_PURCHASE_INGESTION_CONTRACT_V1.md`: evidências multicanal, reconciliação, aprovação humana, atribuição e visão mensal.
+- `UX_OPERATIONAL_FOUNDATION_V1.md`: contrato aprovado para a futura reconstrução incremental da experiência, com navegação por jornada, três projeções ortogonais, camada econômica, decisões F-1 a F-12, gaps e roadmap FIX-0/UX-0 a UX-9.
 - `AMAZON_BUSINESS_ONBOARDING_GATE_V1.md`: Gate 9.1, papéis/capabilities oficiais, checklist do responsável e comprovação pendente da conta real.
 - `AMAZON_BUSINESS_ONBOARDING_RUNBOOK_V1.md`: Gate 9.2, pacote operacional preenchível para Marco executar onboarding, consentimento e prova sanitizada.
 - `PRODUCTION_READINESS.md`: requisitos de ambiente, publicação e riscos operacionais.
@@ -217,7 +218,28 @@ Próximos módulos só podem iniciar em batches aprovados e independentes:
 
 Cada módulo deve preservar os contratos existentes, isolamento por loja, auditoria e migrations incrementais. Este roadmap não declara esses itens implementados nem autoriza iniciá-los automaticamente.
 
-### 12.1 Buyer purchase ingestion e tracking
+### 12.1 Fundação operacional de UX
+
+`UX_OPERATIONAL_FOUNDATION_V1.md` é o contrato normativo para uma trilha incremental de reconstrução da interface. Seu registro não altera o roadmap de Buyer Purchase Ingestion nem autoriza implementação automática.
+
+Ordem aprovada da trilha:
+
+1. `FIX-0` — corrigir somente defeitos comprovados em alocação versus disponibilidade, uso de `valor`/`valorMercado` e recuperação global de sessão, sempre com testes de regressão;
+2. `UX-0` — inventário, decisões visuais, acessibilidade, navegação, ícones, bundle, screenshots e baseline de testes;
+3. Compras e Home — fila, detalhe, mapping, atribuição, materialização e Home acionável em duas ondas;
+4. Base Miami — recebimento, conferência e posição operacional após os contratos necessários;
+5. Envios e Logística — posições, volumes, preparação, transporte e timeline;
+6. Paraguai e Brasil — conferências e transições dependentes da rota;
+7. Estoque — entrada definitiva, posição patrimonial, disponibilidade e futura reserva persistente;
+8. demais áreas — Financeiro, Relatórios, Produtos e Administração.
+
+A Home transversal completa depende do read model futuro `BE-HOME`. A interface não combina caches para reconstruir saldos ou regras entre domínios. A experiência usa três projeções independentes — comercial/staging, física/logística/patrimonial e econômica — e nenhuma movimenta automaticamente outra.
+
+Decisões aprovadas incluem rateio proporcional ao valor líquido com `ROUND_HALF_UP`, reembolso pré-materialização fora da quantidade elegível, compensação auditável pós-materialização, câmbio manual V1, bloqueio da mala acima de 23 kg, reserva persistente como regra-alvo, RBAC econômico no backend e o termo `CAPITAL COMPROMETIDO NO CICLO OPERACIONAL` antes da entrada definitiva.
+
+Continuam abertas e bloqueiam somente seus batches: vigência de cotação (`E-2`), visibilidade de cancelados/reembolsados (`E-3`), competência de encargos tardios (`E-4`), aprovador de perda/ajuste/compensação (`E-5`), nomes de novas entidades físicas, solução definitiva de fornecedor e política de anexos.
+
+### 12.2 Buyer purchase ingestion e tracking
 
 - Dronz e Gooder utilizam Amazon, eBay e outros marketplaces como compradores. O fluxo principal importa compras realizadas, não vendas recebidas por contas seller.
 - O contrato buyer é independente da fonte; Amazon Business, eBay, e-mail, invoice, CSV e entrada manual são origens possíveis e preservadas como evidências.
@@ -250,6 +272,11 @@ Cada módulo deve preservar os contratos existentes, isolamento por loja, audito
 - A planilha histórica só será aposentada após importação, reconciliação, comparação de totais, operação paralela e aceite operacional.
 
 ## 13. Riscos residuais conhecidos
+
+- A reconstrução de UX está somente contratada, não implementada. `FIX-0`, `UX-0` e as fases seguintes exigem autorização e commits independentes.
+- A Home transversal depende de `BE-HOME`; até sua implementação, cada visão deve declarar os domínios e o instante de referência cobertos.
+- Identidade física unitária, posição operacional genérica, compensação pós-materialização, reserva persistente com ator/timestamp, fonte textual de câmbio e filtragem econômica por permissão são gaps de backend ou schema, não capacidades atuais.
+- As três projeções do contrato de UX não podem ser colapsadas no frontend. Materialização comercial não prova localização física e reembolso econômico não move mercadoria automaticamente.
 
 - A API V1 não lista contas externas ou merchants; a UI aceita IDs conhecidos e não inventa opções.
 - A fundação técnica do Batch 8 permanece útil, mas ainda não contém adapter real. Amazon SP-API e eBay Sell Fulfillment continuam seller-side. Amazon Business Reporting API e Trading API `GetOrders` exigem adapters próprios.
