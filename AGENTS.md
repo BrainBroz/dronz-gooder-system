@@ -34,13 +34,13 @@ Construir um sistema operacional para Dronz e Gooder com separação rigorosa en
 
 ## Estado da fundação
 
-A baseline técnica dos Batches 0–7 está concluída no commit `f413791`. Estão implementados e validados: autenticação cookie-only, Categorias, Produtos, Fornecedores, Pedidos Operacionais, Compras Unificadas, UI-3C, logística internacional, recebimento, entrada definitiva, estoque, financeiro manual, Dashboard e Relatórios. O Batch 8 adiciona uma fundação técnica comum de integrações, preservada para fontes futuras. O caso principal aprovado é `buyer purchase ingestion`: importar compras realizadas por Dronz e Gooder. O Batch 9 define o contrato multicanal de evidências, reconciliação, aprovação humana, atribuição por loja e visão mensal, sem implementar adapters. eBay `GetMyeBayBuying` é a primeira integração estruturada a ser validada. E-mail autorizado será a fonte inicial para Amazon e uma fonte complementar para eBay. A Amazon Business Reporting API continua candidata, com estado `PENDENTE_DE_ONBOARDING_EXTERNO`, e será retomada quando a Amazon autorizar o acesso. Adapters seller ficam adiados; tracking automático, integrações PayPal/bancárias e QR Code permanecem futuros.
+A baseline técnica dos Batches 0–7 está concluída no commit `f413791`. Estão implementados e validados: autenticação cookie-only, Categorias, Produtos, Fornecedores, Pedidos Operacionais, Compras Unificadas, UI-3C, logística internacional, recebimento, entrada definitiva, estoque, financeiro manual, Dashboard e Relatórios. O Batch 8 adiciona uma fundação técnica comum de integrações, preservada para fontes futuras. O caso principal aprovado é `buyer purchase ingestion`: importar compras realizadas por Dronz e Gooder. O Batch 9 define o contrato multicanal de evidências, reconciliação, aprovação humana, atribuição por loja e visão mensal, sem implementar adapters. O Gate eBay Buyer comprovou OAuth Production e Trading API `GetOrders` com `OrderRole=Buyer`, inclusive tracking; `GetMyeBayBuying` permanece fonte auxiliar, não a chamada principal do adapter. E-mail autorizado será a fonte inicial para Amazon e uma fonte complementar para eBay. A Amazon Business Reporting API continua candidata, com estado `PENDENTE_DE_ONBOARDING_EXTERNO`, e será retomada quando a Amazon autorizar o acesso. Adapters seller ficam adiados; tracking automático, integrações PayPal/bancárias e QR Code permanecem futuros.
 
 ## Roadmap oficial
 
 Executar em batches separados e nesta ordem:
 
-1. Gate eBay Buyer — validar a integração existente, autenticação, chamada, campos, janela, paginação, quota e tracking;
+1. Gate eBay Buyer — concluído documentalmente com OAuth, `GetOrders`, campos, janela, paginação, quota e tracking comprovados;
 2. Batch 10 — pipeline comum de evidências, conciliação e aprovação;
 3. Batch 11 — adapter eBay Buyer;
 4. Batch 12 — ingestão autorizada por e-mail Amazon/eBay e reconciliação multicanal;

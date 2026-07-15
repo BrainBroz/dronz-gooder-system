@@ -43,7 +43,8 @@ Caso secundário futuro:
 | -------------------------- | ------------: | ---------------------: | --------------------------------- |
 | Amazon Business Reporting  |           Não |                    Sim | Adapter buyer futuro              |
 | Amazon SP-API              |           Sim |                    Não | Seller adiado                     |
-| eBay `GetMyeBayBuying`     |           Não |                    Sim | Adapter buyer futuro              |
+| eBay Trading `GetOrders`   |           Não |                    Sim | Fonte principal comprovada do adapter buyer futuro |
+| eBay `GetMyeBayBuying`     |           Não |                    Sim | Fonte auxiliar comprovada         |
 | eBay Sell Fulfillment      |           Sim |                    Não | Seller adiado                     |
 | eBay Buy Order API         |           Não |      Somente fluxo Buy | Não atende compras comuns         |
 | E-mail autorizado          | Não aplicável |           Parcial/útil | Fonte complementar candidata      |
@@ -64,7 +65,7 @@ CsvBuyerAdapter ────────────┼─ NormalizedBuyerPurcha
 ManualBuyerAdapter ─────────┘
 ```
 
-O Batch 9 define o contrato normativo comum antes de qualquer adapter. O fluxo oficial é fonte → evidência imutável → normalização → reconciliação → candidato → aprovação humana → `CompraImportada` → atribuição quantitativa → materialização explícita. A ordem vigente é: validar eBay Buyer, implementar o pipeline comum, implementar o adapter eBay e então a ingestão autorizada por e-mail Amazon/eBay. A Amazon Business API permanece `PENDENTE_DE_ONBOARDING_EXTERNO` e será adicionada posteriormente como fonte de evidência, sem transformar um canal em autoridade absoluta e sem materialização automática.
+O Batch 9 define o contrato normativo comum antes de qualquer adapter. O fluxo oficial é fonte → evidência imutável → normalização → reconciliação → candidato → aprovação humana → `CompraImportada` → atribuição quantitativa → materialização explícita. O Gate eBay Buyer foi concluído com `GetOrders` buyer comprovado. A ordem vigente é: implementar o pipeline comum, implementar o adapter eBay e então a ingestão autorizada por e-mail Amazon/eBay. A Amazon Business API permanece `PENDENTE_DE_ONBOARDING_EXTERNO` e será adicionada posteriormente como fonte de evidência, sem transformar um canal em autoridade absoluta e sem materialização automática.
 
 Evidências preservam origem, identidade, hash, versão, correlação, confiança de extração e classificação de sensibilidade. Mudanças externas criam eventos imutáveis e atualizam uma projeção reconstruível; não se adota event sourcing genérico. `ConfiancaConciliacao` é calculada no backend, explicável e versionada, e serve apenas para priorizar/reduzir ruído de revisão. Nunca substitui aprovação humana nem decide loja, conflito ou materialização.
 
@@ -110,6 +111,7 @@ Toda compra entra em staging e aprovação humana. Backfill não cria pedido ope
 Fontes oficiais consultadas em 2026-07-13:
 
 - [OAuth credentials and authorization](https://developer.ebay.com/api-docs/static/oauth-credentials.html): aplicação, client credentials e user access tokens por ambiente.
+- [Trading API — GetOrders](https://www.developer.ebay.com/devzone/xml/docs/reference/ebay/GetOrders.html): pedidos do usuário autenticado como buyer ou seller, paginação e tracking.
 - [Trading API — GetMyeBayBuying](https://developer.ebay.com/Devzone/XML/docs/Reference/eBay/GetMyeBayBuying.html): dados da área de compras da conta autenticada, incluindo `WonList`, transações e paginação.
 - [Making a Trading API call](https://developer.ebay.com/devzone/xml/docs/Concepts/MakingACall.html): OAuth usa User access token em `X-EBAY-API-IAF-TOKEN`; Auth'n'Auth legado permanece documentado.
 - [API Deprecation Status](https://developer.ebay.com/develop/get-started/api-deprecation-status): `GetMyeBayBuying` não constava entre as capacidades descontinuadas ou com desligamento anunciado na consulta de 2026-07-13.
@@ -118,9 +120,9 @@ Fontes oficiais consultadas em 2026-07-13:
 - [Platform notifications](https://developer.ebay.com/api-docs/static/platform-notifications-landing.html): notificações disponíveis dependem do programa e tópico.
 - [Notification API release notes](https://developer.ebay.com/api-docs/commerce/notification/release-notes.html): alterações do contrato de notificações devem ser verificadas no adapter real.
 
-Conclusão corrigida: `GetMyeBayBuying` retorna dados do usuário comprador autenticado e `WonList` cobre itens ganhos/comprados. `WonList.DurationInDays` aceita de 0 a 60 dias, possui paginação por `EntriesPerPage` e `PageNumber` e retorna `PaginationResult`. A resposta documenta identidades de item/transação/linha, quantidade, valores, pagamento, envio e cancelamento. Sell Fulfillment continua seller-side e Buy Order API continua restrita ao seu próprio fluxo. O adapter eBay buyer é tecnicamente possível, mas ainda depende da confirmação do keyset, consentimento/token, quota e comportamento produtivo da aplicação.
+Conclusão pós-gate: o OAuth Production e a leitura buyer foram comprovados diretamente. `GetOrders` com `OrderRole=Buyer` é a fonte principal escolhida porque retornou pedidos, linhas, cancelamentos, refunds e `ShipmentTrackingDetails`; `GetMyeBayBuying/WonList` também retornou compras, mas sem tracking na resposta real observada. Sell Fulfillment continua seller-side e Buy Order API continua restrita ao seu próprio fluxo.
 
-O sistema legado informado pelo Product Owner não foi encontrado nos repositórios ou históricos acessíveis. Permanecem sem evidência local: chamada e versão efetivamente usadas, autenticação, containers, frequência, retenção, quota, ambiente e origem do código de tracking. A referência atual de `GetMyeBayBuying` expõe `ShippedTime`, mas não foi localizado `ShipmentTrackingDetails`; portanto, tracking bruto não deve ser prometido sem resposta real ou fonte complementar comprovada.
+Na validação sanitizada de 2026-07-14, `GetOrders` retornou 37 pedidos, 44 linhas e 34 registros de tracking em uma janela de 30 dias, com até três trackings no mesmo pedido. A renovação por refresh token foi comprovada e a Developer Analytics API informou limite de 5.000 chamadas por janela diária para `GetOrders`. A especificação oficial é `EBAY_BUYER_SPECIFICATION_V1.md`.
 
 ### 2.3 Dependências externas ainda necessárias
 
@@ -132,7 +134,7 @@ O sistema legado informado pelo Product Owner não foi encontrado nos repositór
 - referência de secrets mantida em secret manager, sem registrar valores no domínio;
 - credenciais mantidas em secret manager, nunca no banco de domínio;
 - confirmação de rate limits, retenção, dados restritos e compliance vigentes na implementação de cada adapter;
-- confirmação do keyset/aplicação e da conta eBay que já opera no sistema legado;
+- secret manager de produção, frequência/sobreposição operacional e política de retenção/minimização do adapter eBay;
 - contrato e critérios das fontes complementares de buyer purchase ingestion.
 
 ## 3. Contrato comum
@@ -250,7 +252,7 @@ Há drift preexistente entre partes do schema Prisma e migrations antigas, relac
 
 Fontes oficiais candidatas, sem precedência absoluta entre evidências, mas com prioridade de execução definida:
 
-- **eBay `GetMyeBayBuying`:** primeira integração estruturada, condicionada ao Gate eBay Buyer sobre aplicação, chamada, autenticação, keyset, permissões e resposta real. A janela de até 60 dias exige sincronização recorrente e retenção local.
+- **eBay Trading `GetOrders`:** primeira integração estruturada comprovada. O gate validou aplicação, OAuth, refresh, resposta buyer, tracking e quota em Production. O adapter futuro deve usar janela incremental com sobreposição, paginação de até 100 pedidos e retenção local.
 - **E-mail autorizado Amazon/eBay:** fonte inicial Amazon e complementar eBay, sempre produzindo evidência sujeita a reconciliação e aprovação.
 - **Amazon Business Reporting API:** fonte futura para uma conta `SHARED`, Amazon.com/EUA e USD, com estado `PENDENTE_DE_ONBOARDING_EXTERNO`. Quando autorizada, deve reconciliar com compras já criadas por e-mail sem duplicá-las.
 
@@ -278,7 +280,7 @@ Critérios obrigatórios: autorização verificável, minimização de dados, id
 
 ## 13. Limitações e gates seguintes
 
-- Gate eBay Buyer: validar a integração existente, sem adapter produtivo.
+- Gate eBay Buyer: concluído documentalmente, sem adapter produtivo.
 - Batch 10: pipeline comum de evidências, conciliação e aprovação.
 - Batch 11: adapter eBay Buyer.
 - Batch 12: ingestão autorizada por e-mail Amazon/eBay e reconciliação multicanal.
@@ -290,4 +292,4 @@ Critérios obrigatórios: autorização verificável, minimização de dados, id
 
 O painel mensal do Batch 13 é um read model dinâmico, derivado das compras aprovadas, itens, atribuições, materializações e eventos. Não cria base paralela. A planilha histórica permanece em operação paralela até importação, reconciliação, comparação de totais e aceite formal.
 
-O Batch 9 é exclusivamente documental. Nenhum adapter seguinte está iniciado. Adapters seller Amazon/eBay permanecem adiados até existir necessidade específica de importar vendas recebidas. Amazon Business e eBay buyer são trilhas distintas dentro do mesmo contrato de evidências; a validação eBay é o próximo gate, enquanto a API Amazon aguarda onboarding e e-mail autorizado assume sua fonte inicial.
+O Batch 9 e o Gate eBay Buyer são exclusivamente documentais. Nenhum adapter seguinte está iniciado. Adapters seller Amazon/eBay permanecem adiados até existir necessidade específica de importar vendas recebidas. Amazon Business e eBay buyer são trilhas distintas dentro do mesmo contrato de evidências; o eBay está pronto para implementação depois do pipeline comum, enquanto a API Amazon aguarda onboarding e e-mail autorizado assume sua fonte inicial.

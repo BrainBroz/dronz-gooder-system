@@ -89,7 +89,7 @@ Classificações: `IMPLEMENTADO`, `PARCIAL`, `PLANEJADO`, `FORA DO ESCOPO ATUAL`
 
 ## 4. Roadmap oficial
 
-1. Gate eBay Buyer — validar aplicação, API, autenticação, resposta, paginação, janela, quota e tracking existentes;
+1. Gate eBay Buyer — concluído; OAuth Production, `GetOrders` buyer, resposta, tracking, paginação do recorte e quota comprovados;
 2. Batch 10 — pipeline comum de evidências, conciliação e aprovação;
 3. Batch 11 — adapter eBay Buyer;
 4. Batch 12 — ingestão autorizada por e-mail Amazon/eBay e reconciliação multicanal;
@@ -106,5 +106,5 @@ O tracking automático depende de dados ingeridos por fontes autorizadas, mas se
 - briefing integral não localizado;
 - definição horária P-08 ainda pendente;
 - responsabilidades adicionais de galpão, remessa, viajante e frete não comprovadas;
-- contrato buyer, evidências imutáveis, eventos/projeções, aprovação humana e decisões iniciais Amazon estão definidos; a API Amazon está `PENDENTE_DE_ONBOARDING_EXTERNO` e não bloqueia o roadmap; aplicação/contas eBay, autorização de e-mail/caixa, pesos/faixas de confiança, privacidade, retenção, rateio, arredondamento, eventual fechamento mensal e planilha histórica permanecem pendentes nos trabalhos que dependem deles;
+- contrato buyer, evidências imutáveis, eventos/projeções, aprovação humana e decisões iniciais Amazon estão definidos; a API Amazon está `PENDENTE_DE_ONBOARDING_EXTERNO` e não bloqueia o roadmap; OAuth e `GetOrders` eBay foram comprovados, enquanto quantidade/escopo futuro de contas, secret manager, frequência, autorização de e-mail/caixa, pesos/faixas de confiança, privacidade, retenção, rateio, arredondamento, eventual fechamento mensal e planilha histórica permanecem pendentes nos trabalhos que dependem deles;
 - Financeiro ampliado, Vendas, Patrimônio e Analytics exigem contratos próprios.

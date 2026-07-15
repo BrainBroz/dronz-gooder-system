@@ -83,7 +83,8 @@ O frontend não reconstrói RBAC, transições, elegibilidade, cálculo financei
 - `UI3C_BACKEND_V1.md`: read models, RBAC, auditoria e correções dos checkpoints.
 - `UI3C_FRONTEND_V1.md`: interfaces operacionais governadas por `allowedActions`.
 - `MARKETPLACE_INTEGRATION_FOUNDATION_V1.md`: fundação comum de providers, conexões, sincronização e normalização, com eBay priorizado e Amazon por e-mail como fonte inicial.
-- `EBAY_BUYER_INVESTIGATION_V1.md`: evidência oficial, limitações e gate operacional imediato para validar a integração eBay buyer existente.
+- `EBAY_BUYER_INVESTIGATION_V1.md`: investigação histórica anterior ao onboarding; superada pela comprovação operacional do gate.
+- `EBAY_BUYER_SPECIFICATION_V1.md`: especificação oficial comprovada para OAuth e Trading API `GetOrders` buyer, campos, paginação, tracking, quota e segurança.
 - `BUYER_PURCHASE_INGESTION_CONTRACT_V1.md`: evidências multicanal, reconciliação, aprovação humana, atribuição e visão mensal.
 - `AMAZON_BUSINESS_ONBOARDING_GATE_V1.md`: Gate 9.1, papéis/capabilities oficiais, checklist do responsável e comprovação pendente da conta real.
 - `AMAZON_BUSINESS_ONBOARDING_RUNBOOK_V1.md`: Gate 9.2, pacote operacional preenchível para Marco executar onboarding, consentimento e prova sanitizada.
@@ -157,7 +158,8 @@ Não implementado:
 | 9 — contrato buyer multicanal   | `01224db`            | define evidências, reconciliação, aprovação, atribuição e visão mensal   | BLOQUEADO POR DECISÕES |
 | 9 — complemento Amazon Business | `09062fa`            | registra conta, backfill, capabilities, aprovação e atribuição           | APROVADO DOCUMENTALMENTE |
 | 9 — onboarding Amazon Business  | `bf91487`, `79e9ec4` | documenta gate e runbook; acesso externo continua pendente                | `PENDENTE_DE_ONBOARDING_EXTERNO` |
-| 9 — redirecionamento operacional | commit deste batch  | prioriza eBay Buyer e Amazon por e-mail sem iniciar adapters              | APROVADO PARA GATE EBAY |
+| 9 — redirecionamento operacional | `afff787`           | prioriza eBay Buyer e Amazon por e-mail sem iniciar adapters              | APROVADO PARA GATE EBAY |
+| Gate eBay Buyer                  | este commit         | comprova OAuth Production, `GetOrders` buyer, tracking, paginação e quota | PRONTO PARA ADAPTER APÓS BATCH 10 |
 
 As auditorias independentes dos Batches 7 e 8 foram aprovadas. A baseline funcional mais recente é `8644188`; os Batches 8.1, 8.2 e 9 alteram somente documentação e não modificam comportamento. O Batch 8.2 supera apenas a conclusão incorreta de que não havia fonte oficial para compras buyer do eBay. O Batch 9 supera o roadmap provider-first e define primeiro o contrato multicanal comum.
 
@@ -203,7 +205,7 @@ Produção exige secrets distintos, `WEB_ORIGIN` HTTPS explícito, PostgreSQL pe
 
 Próximos módulos só podem iniciar em batches aprovados e independentes:
 
-1. Gate eBay Buyer — validar aplicação existente, API/chamada, autenticação, conta, paginação, janela, campos, quota e histórico;
+1. Gate eBay Buyer — concluído; OAuth, `GetOrders`, conta autorizada, campos, tracking, paginação do recorte e quota comprovados;
 2. Batch 10 — pipeline comum de evidências, conciliação e aprovação;
 3. Batch 11 — adapter eBay Buyer;
 4. Batch 12 — ingestão autorizada por e-mail Amazon/eBay e reconciliação multicanal;
@@ -221,14 +223,14 @@ Cada módulo deve preservar os contratos existentes, isolamento por loja, audito
 - O contrato buyer é independente da fonte; Amazon Business, eBay, e-mail, invoice, CSV e entrada manual são origens possíveis e preservadas como evidências.
 - A Amazon Business Reporting API `2025-06-09` é uma fonte buyer empresarial oficial com pedidos, itens e remessas; não deve ser confundida com SP-API seller. Seu estado é `PENDENTE_DE_ONBOARDING_EXTERNO`, não cancelado, e sua ativação depende de onboarding e papéis concedidos pela Amazon Business.
 - Enquanto o onboarding Amazon estiver pendente, e-mails autorizados de confirmação, atualização, cancelamento, reembolso, remessa, tracking e invoice serão a fonte inicial Amazon. Nenhum e-mail cria operação automaticamente.
-- A primeira integração estruturada a ser validada é eBay Buyer. O gate deve comprovar a aplicação/API existente antes de qualquer adapter produtivo.
+- A primeira integração estruturada validada é eBay Buyer. O gate comprovou OAuth Production e Trading API `GetOrders` com `OrderRole=Buyer`; o adapter produtivo ainda não foi implementado.
 - A futura Amazon Business API deverá reconciliar por `(provider, externalAccountId, normalizedExternalOrderId)` com compras já sustentadas por e-mail, adicionando evidência sem duplicar ou apagar o histórico.
 - A V1 Amazon usa uma conta Amazon Business `SHARED`, Amazon.com/EUA e USD, mantendo arquitetura multi-conta. Marco é o responsável administrativo pela conexão.
 - O backfill inicial Amazon é configurável e começa em 15 dias; toda compra histórica entra em staging/revisão e nunca cria operação, estoque ou logística automaticamente.
 - Sincronização manual autorizada é obrigatória; a automática é configurável, inicialmente recomendada a cada quatro horas.
 - Capabilities desejadas são ativadas progressivamente: pedidos, itens, remessas, itens de remessa, Package Tracking, documentos e reconciliação. Ausência de uma capability não é simulada nem bloqueia as autorizadas.
 - Anselmo, Brunno e Marco podem receber permissões por perfil/vínculo para revisão e aprovação; nomes não integram regras hardcoded. A decisão de atribuição e a configuração como compradores internos permanecem abertas.
-- eBay buyer purchase ingestion é tecnicamente possível por `GetMyeBayBuying`, sujeito à autorização do usuário, janela de até 60 dias, paginação, quotas e disponibilidade do keyset/aplicação.
+- eBay buyer purchase ingestion foi comprovada em Production por `GetOrders` com `OrderRole=Buyer`. O recorte real de 30 dias retornou pedidos, linhas, cancelamentos, refunds e tracking, inclusive múltiplos códigos por pedido. `GetMyeBayBuying` permanece auxiliar e não é a chamada principal escolhida.
 - Gmail e Outlook são evidências independentes, com OAuth, escopo mínimo, leitura seletiva, retenção e privacidade definidos antes da implementação.
 - Toda detecção automática exige reconciliação e aprovação humana antes de atribuição ou materialização.
 - O fluxo normativo é fonte → evidência imutável → normalização → reconciliação → candidato → aprovação humana → `CompraImportada` → atribuição → materialização explícita.
@@ -250,8 +252,8 @@ Cada módulo deve preservar os contratos existentes, isolamento por loja, audito
 ## 13. Riscos residuais conhecidos
 
 - A API V1 não lista contas externas ou merchants; a UI aceita IDs conhecidos e não inventa opções.
-- A fundação técnica do Batch 8 permanece útil, mas ainda não contém adapter real. Amazon SP-API e eBay Sell Fulfillment continuam seller-side. Amazon Business Reporting API e `GetMyeBayBuying` exigem adapters próprios e validação externa.
-- O sistema legado citado pelo Product Owner não está disponível nos repositórios acessíveis. Para eBay ainda devem ser comprovados keyset, versão efetiva, autorização, frequência, quota e origem real do tracking.
+- A fundação técnica do Batch 8 permanece útil, mas ainda não contém adapter real. Amazon SP-API e eBay Sell Fulfillment continuam seller-side. Amazon Business Reporting API e Trading API `GetOrders` exigem adapters próprios.
+- O sistema legado citado pelo Product Owner não está disponível nos repositórios acessíveis. Isso deixou de bloquear o eBay: keyset, OAuth, refresh, chamada `GetOrders`, schema version, quota e tracking foram comprovados diretamente no gate. Permanecem abertas frequência operacional, sobreposição, secret manager de produção e validação de paginação real com mais de uma página.
 - Para a futura retomada da Amazon Business API, permanecem externos/abertos: onboarding, papel Amazon Business Analytics, papéis de Package Tracking/Document/Reconciliation, IDs e campos reais, rate limits, referência segura de secrets, tolerância monetária e escopo final de atribuição dos operadores. Esses itens não bloqueiam eBay, e-mail, conciliação ou painel mensal.
 - O Gate 9.1 confirmou apenas capacidades documentadas: o onboarding Amazon Business não foi iniciado, nenhum papel ou credential foi comprovado e nenhuma chamada real foi executada. `ORDERS` e `ORDER_ITEMS` são o núcleo mínimo; remessas, tracking, documentos, reconciliação e User Management são progressivos e não bloqueiam esse núcleo quando indisponíveis.
 - O Gate 9.2 fornece o runbook operacional e permanece válido para a futura retomada Amazon. Somente o adapter Amazon fica bloqueado até Analytics, LWA, consentimento, secret manager e acesso produtivo sanitizado a pedidos e itens.

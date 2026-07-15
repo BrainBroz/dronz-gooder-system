@@ -98,7 +98,7 @@ Identidade forte canônica:
 (provider, externalAccountId, normalizedExternalOrderId)
 ```
 
-Para Amazon Business, `externalAccountId` identifica a conta/organização autorizada e `externalOrderId` o pedido do relatório. Para eBay, identifica a conta buyer autorizada e o pedido/linha retornado por `GetMyeBayBuying`.
+Para Amazon Business, `externalAccountId` identifica a conta/organização autorizada e `externalOrderId` o pedido do relatório. Para eBay, identifica a conta buyer autorizada e o pedido retornado por Trading API `GetOrders`; `OrderLineItemID` é a identidade preferencial da linha.
 
 Normalização de ID aplica trim externo, Unicode NFC e a regra de caixa documentada pelo provider. Qualquer remoção adicional de pontuação ou transformação deve ser comprovadamente irrelevante para aquele provider. Correlação heurística nunca consolida registros sem decisão humana.
 
@@ -291,15 +291,17 @@ O adapter deve persistir cursores, respeitar paginação e janela, reter IDs ofi
 
 ## 11. eBay buyer
 
-Adapter prioritário: `EbayBuyerAdapter` sobre Trading API `GetMyeBayBuying`. Antes da implementação, o Gate eBay Buyer deve validar empiricamente a aplicação/API existente.
+Adapter prioritário: `EbayBuyerAdapter` sobre Trading API `GetOrders` com `OrderRole=Buyer`. O Gate eBay Buyer comprovou em Production:
 
-- autenticação por token de usuário autorizado;
-- `WonList` representa itens ganhos/comprados;
-- janela documentada de até 60 dias;
-- paginação por `EntriesPerPage` e `PageNumber` com `PaginationResult`;
-- identidades de item/transação/linha, quantidade, valores, pagamento, envio e cancelamento.
+- OAuth User Token com escopo base e renovação por refresh token;
+- pedidos e linhas buyer reais;
+- `OrderID`, `OrderLineItemID`, `TransactionID` e `ItemID`;
+- quantidades, valores, moeda, pagamento, envio, cancelamento e refunds;
+- `ShipmentTrackingDetails`, carrier e código, inclusive múltiplos trackings por pedido;
+- paginação por `EntriesPerPage`/`PageNumber` e `HasMoreOrders`;
+- quota de 5.000 chamadas por janela diária para o keyset validado.
 
-O adapter deve sincronizar de forma recorrente para não perder a janela histórica, reter dados localmente e transformar paginação por página em cursor interno opaco. Elegibilidade do keyset, quota e comportamento real em produção são gates externos. Tracking bruto não é prometido enquanto não houver campo/resposta ou fonte complementar comprovada.
+`GetMyeBayBuying/WonList` permanece fonte auxiliar, mas não é a chamada principal porque não expôs tracking na resposta real do gate. O adapter deve usar janela incremental por modificação com sobreposição, reter dados localmente e transformar paginação por página em cursor interno opaco. Frequência, secret manager de produção e retenção/minimização permanecem decisões de implementação. O contrato detalhado está em `EBAY_BUYER_SPECIFICATION_V1.md`.
 
 ## 12. E-mail autorizado
 
@@ -449,7 +451,7 @@ Evidências devem aplicar minimização, criptografia em trânsito e repouso, se
 
 ## 20. Estratégia incremental
 
-1. Gate eBay Buyer — validação da aplicação/API existente, sem adapter produtivo.
+1. Gate eBay Buyer — concluído; OAuth, `GetOrders`, resposta buyer, tracking, paginação e quota comprovados, sem adapter produtivo.
 2. Batch 10 — pipeline comum de evidências, conciliação e aprovação.
 3. Batch 11 — adapter eBay Buyer.
 4. Batch 12 — ingestão autorizada por e-mail Amazon/eBay e reconciliação multicanal.
@@ -625,9 +627,11 @@ Já fechadas: uma conta Amazon Business inicial, `SHARED`, Amazon.com/EUA, USD, 
 
 ### eBay
 
+- [GetOrders](https://www.developer.ebay.com/devzone/xml/docs/reference/ebay/GetOrders.html)
 - [GetMyeBayBuying](https://developer.ebay.com/Devzone/XML/docs/Reference/eBay/GetMyeBayBuying.html)
 - [Making a Trading API call](https://developer.ebay.com/devzone/xml/docs/Concepts/MakingACall.html)
 - [OAuth credentials](https://developer.ebay.com/api-docs/static/oauth-credentials.html)
+- [Developer Analytics API](https://developer.ebay.com/develop/api/sell/developer_analytics_api)
 - [API deprecation status](https://developer.ebay.com/develop/get-started/api-deprecation-status)
 
 ### Gmail
@@ -648,4 +652,4 @@ Já fechadas: uma conta Amazon Business inicial, `SHARED`, Amazon.com/EUA, USD, 
 
 ## 23. Status
 
-O contrato técnico Amazon está definido e permanece `PENDENTE_DE_ONBOARDING_EXTERNO`; somente o futuro adapter Amazon depende da comprovação externa de onboarding, papel Amazon Business Analytics, capabilities concedidas, resposta real sanitizada, limites aplicáveis e referência segura de secrets. O próximo gate é a validação eBay Buyer, seguido pelo pipeline comum. As demais decisões da seção 21 bloqueiam apenas os respectivos trabalhos que dependem delas. Nenhum adapter, endpoint, schema, migration ou tela foi criado neste redirecionamento.
+O contrato técnico Amazon está definido e permanece `PENDENTE_DE_ONBOARDING_EXTERNO`; somente o futuro adapter Amazon depende da comprovação externa de onboarding, papel Amazon Business Analytics, capabilities concedidas, resposta real sanitizada, limites aplicáveis e referência segura de secrets. O Gate eBay Buyer foi concluído com `GetOrders` Production, OAuth, tracking e quota comprovados. O próximo trabalho é o pipeline comum do Batch 10; depois, o adapter eBay do Batch 11. As demais decisões da seção 21 bloqueiam apenas os respectivos trabalhos que dependem delas. Nenhum adapter, endpoint, schema, migration ou tela foi criado pelo gate.
