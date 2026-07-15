@@ -235,6 +235,8 @@ Ordem aprovada da trilha:
 
 A Home transversal completa depende do read model futuro `BE-HOME`. A interface não combina caches para reconstruir saldos ou regras entre domínios. A experiência usa três projeções independentes — comercial/staging, física/logística/patrimonial e econômica — e nenhuma movimenta automaticamente outra.
 
+A logística-alvo reconhece Miami como base operacional permanente com responsável próprio e posições operacionais temporárias vinculadas a viagem ou operação, encerradas por sugestão automática com confirmação manual e preservadas no histórico. O papel do viajante é contextual: partindo de Miami, retira a mala pronta e transporta; fora de Miami, pode assumir temporariamente recebimento, conferência e preparação somente na própria posição. Base como entidade, posições temporárias, autorização contextual e vínculo `Viajante`–`Usuario` permanecem gaps de backend.
+
 Decisões aprovadas incluem rateio proporcional ao valor líquido com `ROUND_HALF_UP`, reembolso pré-materialização fora da quantidade elegível, compensação auditável pós-materialização, câmbio manual V1, bloqueio da mala acima de 23 kg, reserva persistente como regra-alvo, RBAC econômico no backend e o termo `CAPITAL COMPROMETIDO NO CICLO OPERACIONAL` antes da entrada definitiva.
 
 Continuam abertas e bloqueiam somente seus batches: vigência de cotação (`E-2`), visibilidade de cancelados/reembolsados (`E-3`), competência de encargos tardios (`E-4`), aprovador de perda/ajuste/compensação (`E-5`), nomes de novas entidades físicas, solução definitiva de fornecedor e política de anexos.

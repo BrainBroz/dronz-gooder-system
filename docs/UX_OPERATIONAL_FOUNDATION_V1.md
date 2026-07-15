@@ -101,6 +101,16 @@ Atalhos contextuais incluem busca por referência externa, pedido e tracking, de
 
 O fluxo físico não é uma sequência linear obrigatória: Paraguai é condicional, tracking pode surgir ou mudar posteriormente e reservas podem ser liberadas. Cada detalhe apresenta trilhas comercial, física e econômica separadas, além do histórico de auditoria.
 
+### 6.1 Posições operacionais e papel contextual
+
+**Base permanente Miami.** Miami é a base operacional permanente e principal. Ela possui responsável operacional próprio, que acompanha compras destinadas à base e seu tracking, recebe pacotes, confere produtos e quantidades, registra divergências, verifica condição física e funcionamento quando aplicável, organiza a disponibilidade operacional, seleciona itens, monta caixas e malas, calcula pesos, redistribui produtos entre volumes, fecha volumes, registra recibos e evidências, entrega caixas ao transportador e entrega malas prontas aos viajantes. Miami como entidade de base é gap de backend registrado na matriz de capacidades.
+
+**Posições operacionais temporárias.** Compras podem ser direcionadas a endereços ligados a uma viagem (por exemplo Texas, Nova York ou Orlando). Nesses casos o sistema representa uma posição operacional temporária vinculada à operação/viagem, com responsável contextual, período ativo, compras destinadas, pacotes e tracking, itens a caminho, recebidos, conferidos, divergências, disponíveis, reservados, malas em preparação, peso acumulado e pendências. Uma posição temporária não é estoque permanente de nenhuma cidade e não cria patrimônio.
+
+**Encerramento.** O encerramento de posição temporária usa **sugestão automática do sistema mais confirmação humana explícita**: quando todas as compras foram recebidas ou tratadas, os volumes fechados, a viagem concluída, os produtos chegaram ao Brasil e as pendências foram resolvidas, o sistema sugere o encerramento e o responsável confirma. A posição encerrada sai das operações ativas, permanece consultável no histórico e não apaga eventos; reabertura exige motivo e auditoria.
+
+**Papel contextual do viajante.** A responsabilidade é contextual, temporária, vinculada à posição e/ou viagem, limitada por autorização e encerrada ao final da operação — nunca derivada de nome de pessoa nem de classificação permanente. Quando o viajante parte de Miami, ele não recebe compras, não administra disponibilidade e não prepara a mala: recebe a mala pronta e fechada pela base, confirma retirada, transporta e confirma chegada e ocorrências. Fora de Miami, o viajante pode assumir temporariamente recebimento, conferência, organização, preparação e fechamento da própria mala, somente para a sua posição, sem acesso a outras posições. A autorização considera permissão funcional, vínculo com loja, vínculo com posição e viagem/envio, período de validade e `allowedActions` do backend. Autorização contextual por posição/viagem/período é gap de backend, assim como o vínculo técnico entre `Viajante` e `Usuario`.
+
 ## 7. Três projeções ortogonais
 
 ### 7.1 Comercial e staging
@@ -332,6 +342,8 @@ Cada batch substitui uma área por vez. Rotas anteriores podem permanecer como r
 ### UX-5 — Envios e Logística
 
 - posições, volumes, preparação, transporte e timeline;
+- Base Miami permanente e posições operacionais temporárias com encerramento por sugestão automática e confirmação manual;
+- papel contextual do viajante conforme a seção 6.1, sem hardcode de pessoas;
 - `CAIXA_FRETE_AEREO` é principal e `MALA_VIAJANTE` permanece modalidade real;
 - limite de 23 kg preservado;
 - migração do legado preserva histórico.
