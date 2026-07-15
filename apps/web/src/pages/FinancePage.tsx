@@ -81,8 +81,9 @@ function FinanceContent() {
       api.post(
         "/finance/exchange-rates",
         {
-          ...v,
-          valor: Number(v.valor),
+          moedaOrigem: v.moedaOrigem,
+          moedaDestino: v.moedaDestino,
+          valorMercado: Number(v.valor),
           cotadoEm: v.cotadoEm || new Date().toISOString()
         },
         { headers }
