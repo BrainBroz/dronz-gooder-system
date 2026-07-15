@@ -6,9 +6,9 @@
 
 **Responsável administrativo:** Marco
 
-**Estado:** pronto para execução manual; onboarding externo ainda não iniciado
+**Estado:** `PENDENTE_DE_ONBOARDING_EXTERNO`; runbook preservado para retomada futura
 
-Este runbook transforma o diagnóstico do Gate 9.1 em um pacote operacional. Ele não autoriza integração, não contém credenciais e não substitui instruções recebidas diretamente da Amazon Business. Toda evidência fornecida ao projeto deve ser sanitizada.
+Este runbook transforma o diagnóstico do Gate 9.1 em um pacote operacional. Ele não autoriza integração, não contém credenciais e não substitui instruções recebidas diretamente da Amazon Business. Toda evidência fornecida ao projeto deve ser sanitizada. A espera externa não bloqueia o gate eBay, o pipeline comum, e-mail autorizado ou painel mensal; quando a API Amazon for autorizada, ela será incorporada como fonte adicional.
 
 ## 1. Contexto e objetivo
 
@@ -338,7 +338,7 @@ Inventário adicional:
 
 `localhost` nunca será registrado como produção. A URI configurada no SPP deve coincidir exatamente com a usada no OAuth.
 
-## 9. Prova de acesso mínima antes do Batch 10
+## 9. Prova de acesso mínima antes do adapter Amazon
 
 Executar fora do repositório, sem persistência no banco:
 
@@ -415,7 +415,7 @@ Em revogação, incidente ou desistência:
 9. comunicar Marco e o responsável técnico;
 10. reabrir acesso somente após nova prova controlada.
 
-## 13. Critérios para liberar o Batch 10
+## 13. Critérios para liberar o futuro batch do adapter Amazon
 
 Todos precisam estar comprovados:
 
@@ -462,6 +462,6 @@ As capabilities progressivas não bloqueiam o núcleo e só podem ser implementa
 
 ## 16. Gate atual
 
-`RUNBOOK PRONTO — AGUARDANDO ONBOARDING EXTERNO`
+`RUNBOOK PRESERVADO — PENDENTE_DE_ONBOARDING_EXTERNO`
 
-Este documento não inicia o Batch 10 e não comprova acesso à conta.
+Este documento não inicia adapter Amazon e não comprova acesso à conta. Enquanto isso, a fonte inicial Amazon planejada é e-mail autorizado, sempre sujeita a reconciliação e aprovação humana.

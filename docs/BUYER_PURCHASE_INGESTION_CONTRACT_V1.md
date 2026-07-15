@@ -24,7 +24,7 @@ fonte externa → evidência imutável → normalização → reconciliação
 
 ## 2. Decisões definitivas
 
-1. Amazon, eBay, Gmail, Outlook, CSV, invoice e entrada manual são fontes; nenhuma é o domínio central.
+1. eBay Buyer API, e-mail Amazon/eBay, futura Amazon Business API, CSV, documento e entrada manual são fontes; nenhuma é o domínio central.
 2. Uma mensagem, linha de relatório ou resposta de API é uma evidência, não uma compra operacional.
 3. Evidências de fontes distintas podem representar a mesma compra e devem ser correlacionadas sem serem apagadas ou fundidas destrutivamente.
 4. Toda compra detectada automaticamente exige aprovação humana antes da atribuição/materialização.
@@ -59,6 +59,13 @@ O contrato normalizado reconhece estas origens conceituais:
 - `INVOICE` e `DOCUMENTO` — documento autorizado, posterior à fundação de storage, retenção e extração;
 - `CSV` — importação controlada com preview e mapping;
 - `MANUAL` — registro humano auditável.
+
+Prioridade operacional vigente:
+
+- `EBAY_BUYER_API`: primeira integração estruturada, condicionada ao gate de validação da aplicação existente;
+- `EMAIL_AMAZON`: fonte inicial Amazon enquanto o onboarding externo permanecer pendente;
+- `EMAIL_EBAY`: evidência complementar da API eBay;
+- `AMAZON_BUSINESS_API`: fonte futura, com estado `PENDENTE_DE_ONBOARDING_EXTERNO`.
 
 Nomes técnicos já usados pela fundação, como `AMAZON_BUSINESS_REPORTING`, `EBAY_MY_BUYING`, `GMAIL_AUTHORIZED`, `MICROSOFT_GRAPH_MAIL`, `CSV_IMPORT` e `DOCUMENT_IMPORT`, são identificadores de adapter ou transporte. Eles devem mapear para uma das origens conceituais acima e não criam uma segunda taxonomia de domínio.
 
@@ -260,7 +267,7 @@ O read model mensal é dinâmico e auditável na V1, derivado de `CompraImportad
 
 ## 10. Amazon Business buyer
 
-Adapter futuro: `AmazonBusinessBuyerAdapter`.
+Adapter futuro: `AmazonBusinessBuyerAdapter`, com estado `PENDENTE_DE_ONBOARDING_EXTERNO`. Esse bloqueio não impede eBay Buyer, e-mail autorizado, conciliação ou painel mensal.
 
 Fonte oficial atual: Amazon Business Reporting API `2025-06-09`, não SP-API seller. Capacidades comprovadas:
 
@@ -278,13 +285,13 @@ Papéis/onboarding:
 - integração depende de aprovação/onboarding da Amazon Business;
 - Reporting API exige papel Amazon Business Analytics;
 - Reconciliation e Document APIs exigem Business Purchase Reconciliation;
-- Package Tracking integra o programa/role aplicável e permanece fora do Batch 10.
+- Package Tracking integra o programa/role aplicável e permanece fora do núcleo inicial do futuro adapter Amazon.
 
-O adapter deve persistir cursores, respeitar paginação e janela, reter IDs oficiais e normalizar pedidos/itens sem materializar. Reconciliation e Document são evidências adicionais futuras, não pré-requisitos para importar pedidos.
+O adapter deve persistir cursores, respeitar paginação e janela, reter IDs oficiais e normalizar pedidos/itens sem materializar. Reconciliation e Document são evidências adicionais futuras, não pré-requisitos para importar pedidos. Quando autorizado, o adapter deve reconciliar com compras já detectadas por e-mail usando a identidade forte canônica; ele não pode duplicar `CompraImportada`, apagar evidência de e-mail, sobrescrever decisão humana ou alterar materialização silenciosamente.
 
 ## 11. eBay buyer
 
-Adapter futuro: `EbayBuyerAdapter` sobre Trading API `GetMyeBayBuying`.
+Adapter prioritário: `EbayBuyerAdapter` sobre Trading API `GetMyeBayBuying`. Antes da implementação, o Gate eBay Buyer deve validar empiricamente a aplicação/API existente.
 
 - autenticação por token de usuário autorizado;
 - `WonList` representa itens ganhos/comprados;
@@ -296,7 +303,11 @@ O adapter deve sincronizar de forma recorrente para não perder a janela histór
 
 ## 12. E-mail autorizado
 
-E-mail é segunda evidência independente, não fallback silencioso da API.
+E-mail é evidência independente. Para Amazon, é a fonte inicial enquanto o onboarding da API estiver pendente; para eBay, complementa a API. Não é fallback silencioso nem cria operação automaticamente.
+
+Mensagens inicialmente previstas: confirmação de ordem, pagamento aprovado, envio, tracking, cancelamento, reembolso, invoice e alteração de item ou quantidade. Quando disponíveis, a extração busca Amazon/eBay Order ID, data, conta/mailbox, merchant, itens, quantidades, valores, moeda, status, shipment, tracking e invoice. Mensagem sem Order ID confiável fica `AGUARDANDO_IDENTIFICACAO`.
+
+Uma mensagem duplicada não cria evidência duplicada. Mensagens diferentes da mesma ordem atualizam o mesmo candidato por eventos/evidências distintas. Encaminhamento deve preservar identificadores quando possível, e conteúdo original ou referência segura deve ser mantido conforme retenção e minimização aprovadas.
 
 ### Gmail
 
@@ -438,16 +449,15 @@ Evidências devem aplicar minimização, criptografia em trânsito e repouso, se
 
 ## 20. Estratégia incremental
 
-1. Batch 9 — contrato buyer, evidências e painel mensal, sem código.
-2. Batch 10 — Amazon Business Buyer Integration.
-3. Batch 11 — eBay Buyer Integration.
-4. Batch 12 — e-mail autorizado e reconciliação multicanal.
+1. Gate eBay Buyer — validação da aplicação/API existente, sem adapter produtivo.
+2. Batch 10 — pipeline comum de evidências, conciliação e aprovação.
+3. Batch 11 — adapter eBay Buyer.
+4. Batch 12 — ingestão autorizada por e-mail Amazon/eBay e reconciliação multicanal.
 5. Batch 13 — painel mensal e migração da planilha histórica.
 6. Batch 14 — consolidação de remessas, pacotes e tracking.
 7. Batch 15 — motor de tracking e alertas.
-8. Batch 16 — Financeiro e conciliação.
-9. Batch 17 — Vendas e baixa patrimonial.
-10. Batch 18 — Analytics.
+8. Batches 16–18 — Financeiro/conciliação, Vendas/baixa patrimonial e Analytics.
+9. Amazon Business API — retomada em batch próprio quando o onboarding externo for aprovado.
 
 Cada implementação exige migration aditiva quando aplicável, banco limpo e baseline, seed idempotente, testes PostgreSQL reais, isolamento/RBAC, auditoria e rollback conceitual.
 
@@ -533,7 +543,7 @@ Dronz + Gooder + Pendente = Quantidade Elegível
 
 ### 21.1 Pendências específicas do Amazon Business
 
-Após as decisões do complemento do Batch 9, permanecem abertas somente:
+O estado normativo é `PENDENTE_DE_ONBOARDING_EXTERNO`. Após as decisões do complemento do Batch 9, permanecem abertas somente:
 
 1. status do onboarding da aplicação;
 2. concessão do papel Amazon Business Analytics;
@@ -638,4 +648,4 @@ Já fechadas: uma conta Amazon Business inicial, `SHARED`, Amazon.com/EUA, USD, 
 
 ## 23. Status
 
-O contrato técnico Amazon está definido para auditoria. O início do Batch 10 permanece condicionado à comprovação externa de onboarding, papel Amazon Business Analytics, capabilities concedidas, resposta real sanitizada, limites aplicáveis e referência segura de secrets. As demais decisões da seção 21 bloqueiam seus respectivos batches posteriores. Nenhum adapter, endpoint, schema, migration ou tela foi criado neste complemento.
+O contrato técnico Amazon está definido e permanece `PENDENTE_DE_ONBOARDING_EXTERNO`; somente o futuro adapter Amazon depende da comprovação externa de onboarding, papel Amazon Business Analytics, capabilities concedidas, resposta real sanitizada, limites aplicáveis e referência segura de secrets. O próximo gate é a validação eBay Buyer, seguido pelo pipeline comum. As demais decisões da seção 21 bloqueiam apenas os respectivos trabalhos que dependem delas. Nenhum adapter, endpoint, schema, migration ou tela foi criado neste redirecionamento.

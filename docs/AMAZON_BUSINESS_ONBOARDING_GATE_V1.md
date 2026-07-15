@@ -4,7 +4,7 @@
 
 **Escopo:** comprovação de prontidão externa para o futuro adapter buyer Amazon Business
 
-**Estado:** onboarding não iniciado; Batch 10 bloqueado
+**Estado:** `PENDENTE_DE_ONBOARDING_EXTERNO`; somente o futuro adapter Amazon está bloqueado
 
 Este documento separa capacidade documentada, estado comprovado da conta e decisão técnica. Informação pública não prova autorização da conta real. Nenhum segredo, token, resposta comercial ou dado pessoal foi coletado.
 
@@ -74,7 +74,7 @@ O repositório contém somente a abstração `secretReference` e um provider loc
 | `RECONCILIATION` | Business Purchase Reconciliation | Progressivo | Não | Não comprovado | Não |
 | `USER_MANAGEMENT` | User Management, solicitação offline | Não; fora do núcleo V1 | Não | Não comprovado | Não |
 
-`ORDERS` e `ORDER_ITEMS` são o único mínimo funcional do Batch 10. Remessas não bloqueiam o núcleo; tracking, documentos, reconciliação e gestão de usuários devem ser ativados separadamente conforme os papéis concedidos.
+`ORDERS` e `ORDER_ITEMS` são o único mínimo funcional do futuro adapter Amazon. Remessas não bloqueiam o núcleo; tracking, documentos, reconciliação e gestão de usuários devem ser ativados separadamente conforme os papéis concedidos.
 
 ### 4.1 Classificação atual
 
@@ -192,7 +192,7 @@ O futuro backfill usa 15 dias, janela sobreposta e idempotência. Reexecução n
 
 ## 12. Critério de liberação e pendências
 
-O Batch 10 permanece bloqueado até todos os itens abaixo estarem comprovados:
+O futuro batch do adapter Amazon Business permanece bloqueado até todos os itens abaixo estarem comprovados. Esse gate não bloqueia a validação eBay Buyer, o pipeline comum, a ingestão por e-mail ou o painel mensal:
 
 1. app e developer profile aprovados;
 2. papel Amazon Business Analytics concedido;
@@ -208,8 +208,10 @@ As capabilities progressivas não bloqueiam o núcleo. Qualquer uma indisponíve
 
 ## 13. Veredito
 
-`ONBOARDING NÃO INICIADO — BATCH 10 BLOQUEADO`
+`PENDENTE_DE_ONBOARDING_EXTERNO — ADAPTER AMAZON BLOQUEADO`
 
 O desenho é compatível com a documentação oficial, mas não existe prova material de autorização ou acesso da conta real.
+
+Enquanto esse estado persistir, e-mail autorizado é a fonte inicial Amazon. A futura API deverá reconciliar pelo mesmo Order ID e conta, adicionando evidência à compra existente sem duplicá-la nem apagar o histórico de e-mail.
 
 O procedimento manual para eliminar esses bloqueios está em `AMAZON_BUSINESS_ONBOARDING_RUNBOOK_V1.md`.

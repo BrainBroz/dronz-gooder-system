@@ -6,9 +6,11 @@
 
 **Escopo:** correção documental; nenhum adapter, credencial ou integração implementado
 
+**Prioridade atual:** próximo gate operacional; validar a integração existente antes do pipeline/adapters produtivos
+
 ## 1. Evidência disponível
 
-O Product Owner informou que um sistema existente importa compras da própria conta eBay. Esse sistema, seu repositório, configuração e histórico não foram encontrados nos diretórios Git acessíveis nesta execução. Também não há referência a `GetMyeBayBuying`, `WonList` ou Trading API no histórico do repositório Dronz & Gooder.
+O Product Owner informou que um sistema/API existente importa compras da própria conta eBay e está disponível para investigação operacional. Esse sistema, seu repositório, configuração e histórico não foram encontrados nos diretórios Git acessíveis nesta execução. Também não há referência a `GetMyeBayBuying`, `WonList` ou Trading API no histórico do repositório Dronz & Gooder.
 
 Faltam, portanto, evidências locais para comprovar:
 
@@ -48,7 +50,7 @@ Na consulta de 2026-07-13, `GetMyeBayBuying` não constava na página oficial de
 | eBay `GetMyeBayBuying` | Sim, do usuário autenticado | Não é o foco | `DurationInDays` 0–60 | `ShippedTime` documentado; código não comprovado | Referência ativa; keyset e Production a confirmar |
 | eBay Sell Fulfillment | Não | Sim | Conforme contrato seller | Seller fulfillment | GA, fora do caso buyer |
 | eBay Buy Order API | Somente pedidos do próprio fluxo Buy API | Não | Conforme contrato restrito | Conforme o fluxo | Limited Release/restrita |
-| Amazon APIs | Em investigação separada | SP-API atende seller | Não definida | Não definido | A confirmar por fonte buyer |
+| Amazon Business Reporting | Sim, conta Business autorizada | Não | Conforme API | Capability separada | `PENDENTE_DE_ONBOARDING_EXTERNO`; e-mail é fonte inicial Amazon |
 
 ## 4. Compatibilidade com a fundação do Batch 8
 
@@ -82,15 +84,17 @@ A frequência não foi definida porque o comportamento do sistema existente e a 
 
 ## 6. Gate do adapter
 
-O contrato documental do Batch 9 foi concluído sem depender do keyset. O adapter eBay do Batch 11 não deve iniciar até obter evidência mínima da aplicação existente ou de um keyset legitimamente autorizado:
+O contrato documental do Batch 9 foi concluído sem depender do keyset. O próximo trabalho é o Gate eBay Buyer, que deve obter evidência mínima da aplicação existente ou de um keyset legitimamente autorizado antes do adapter do Batch 11:
 
-1. ambiente e keyset;
-2. fluxo de consentimento e tipo de token;
-3. chamada/versão e request XML reais, sem segredos;
-4. resposta sanitizada de Sandbox ou Production;
-5. paginação e janela efetivas;
-6. quota aplicável;
-7. origem comprovada de tracking;
-8. política de atualização incremental e retenção.
+1. aplicação eBay e keyset realmente usados;
+2. API/chamada efetiva (`GetMyeBayBuying` ou outra), versão e request sanitizado;
+3. autenticação OAuth ou token legado, ambiente e conta buyer, sem registrar secrets;
+4. scopes/permissões concedidos e fluxo de consentimento;
+5. resposta sanitizada de Sandbox ou Production;
+6. paginação, janela histórica e frequência atuais;
+7. `OrderID`, `OrderLineItemID`, `TransactionID`, `ItemID`, valores, moeda, quantidade e status retornados;
+8. cancelamento, reembolso, shipment e tracking efetivamente disponíveis;
+9. rate limits/quota aplicáveis;
+10. histórico persistido pelo sistema legado e política de atualização incremental/retenção.
 
-Amazon buyer é uma trilha separada no Batch 10, baseada na Amazon Business Reporting API e condicionada ao onboarding próprio. Não se presume que a solução eBay seja transferível para Amazon.
+Amazon buyer permanece trilha separada, baseada futuramente na Amazon Business Reporting API e, inicialmente, em e-mail autorizado. A API está `PENDENTE_DE_ONBOARDING_EXTERNO`; não se presume que a solução eBay seja transferível para Amazon e seu bloqueio não impede este gate.

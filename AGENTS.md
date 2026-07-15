@@ -34,24 +34,23 @@ Construir um sistema operacional para Dronz e Gooder com separação rigorosa en
 
 ## Estado da fundação
 
-A baseline técnica dos Batches 0–7 está concluída no commit `f413791`. Estão implementados e validados: autenticação cookie-only, Categorias, Produtos, Fornecedores, Pedidos Operacionais, Compras Unificadas, UI-3C, logística internacional, recebimento, entrada definitiva, estoque, financeiro manual, Dashboard e Relatórios. O Batch 8 adiciona uma fundação técnica comum de integrações, preservada para fontes futuras. O caso principal aprovado é `buyer purchase ingestion`: importar compras realizadas por Dronz e Gooder. O Batch 9 define o contrato multicanal de evidências, reconciliação, aprovação humana, atribuição por loja e visão mensal, sem implementar adapters. Amazon Business Reporting API e eBay `GetMyeBayBuying` são fontes buyer oficiais candidatas, sujeitas a onboarding, autorização e validação real. E-mail autorizado é evidência independente. Adapters seller ficam adiados; tracking automático, integrações PayPal/bancárias e QR Code permanecem futuros.
+A baseline técnica dos Batches 0–7 está concluída no commit `f413791`. Estão implementados e validados: autenticação cookie-only, Categorias, Produtos, Fornecedores, Pedidos Operacionais, Compras Unificadas, UI-3C, logística internacional, recebimento, entrada definitiva, estoque, financeiro manual, Dashboard e Relatórios. O Batch 8 adiciona uma fundação técnica comum de integrações, preservada para fontes futuras. O caso principal aprovado é `buyer purchase ingestion`: importar compras realizadas por Dronz e Gooder. O Batch 9 define o contrato multicanal de evidências, reconciliação, aprovação humana, atribuição por loja e visão mensal, sem implementar adapters. eBay `GetMyeBayBuying` é a primeira integração estruturada a ser validada. E-mail autorizado será a fonte inicial para Amazon e uma fonte complementar para eBay. A Amazon Business Reporting API continua candidata, com estado `PENDENTE_DE_ONBOARDING_EXTERNO`, e será retomada quando a Amazon autorizar o acesso. Adapters seller ficam adiados; tracking automático, integrações PayPal/bancárias e QR Code permanecem futuros.
 
 ## Roadmap oficial
 
 Executar em batches separados e nesta ordem:
 
-1. Batch 9 — contrato buyer, evidências e painel mensal;
-2. Batch 10 — Amazon Business Buyer Integration;
-3. Batch 11 — eBay Buyer Integration;
-4. Batch 12 — e-mail autorizado e reconciliação multicanal;
+1. Gate eBay Buyer — validar a integração existente, autenticação, chamada, campos, janela, paginação, quota e tracking;
+2. Batch 10 — pipeline comum de evidências, conciliação e aprovação;
+3. Batch 11 — adapter eBay Buyer;
+4. Batch 12 — ingestão autorizada por e-mail Amazon/eBay e reconciliação multicanal;
 5. Batch 13 — painel mensal e migração da planilha histórica;
 6. Batch 14 — consolidação de remessas, pacotes e tracking;
 7. Batch 15 — motor de tracking e alertas;
-8. Batch 16 — Financeiro e conciliação;
-9. Batch 17 — Vendas e baixa patrimonial;
-10. Batch 18 — Analytics.
+8. Batches 16–18 — Financeiro/conciliação, Vendas/baixa patrimonial e Analytics;
+9. Amazon Business API — retomar em batch próprio assim que o onboarding externo for aprovado.
 
-Amazon, eBay e e-mail precedem o tracking automático porque fornecem evidências de compras, envios e códigos externos. Nenhuma fonte é a arquitetura central do domínio. Toda compra detectada automaticamente exige reconciliação e aprovação humana antes da atribuição/materialização. O tracking permanece independente da fonte: uma ordem pode existir sem tracking, o tracking pode surgir ou mudar posteriormente, um pedido pode possuir múltiplos envios, pacotes e códigos, e deve existir fallback manual auditável. Nunca presumir um único tracking por pedido nem acoplar a máquina de tracking diretamente ao marketplace, e-mail ou documento.
+eBay e e-mail precedem o tracking automático porque fornecem evidências de compras, envios e códigos externos; a Amazon Business API será somada futuramente sem substituir evidências já ingeridas por e-mail. Nenhuma fonte é a arquitetura central do domínio. Toda compra detectada automaticamente exige reconciliação e aprovação humana antes da atribuição/materialização. O tracking permanece independente da fonte: uma ordem pode existir sem tracking, o tracking pode surgir ou mudar posteriormente, um pedido pode possuir múltiplos envios, pacotes e códigos, e deve existir fallback manual auditável. Nunca presumir um único tracking por pedido nem acoplar a máquina de tracking diretamente ao marketplace, e-mail ou documento.
 
 Evidências externas são imutáveis e versionadas; a situação corrente é projeção reconstruível. Scores de confiança servem somente para priorização e explicação da conciliação e nunca podem aprovar, atribuir, resolver conflito ou materializar automaticamente.
 

@@ -55,11 +55,11 @@ Status atual:
 
 ## Roadmap
 
-O roadmap oficial está em `docs/PROJECT_CONTEXT_MASTER.md`. Dronz e Gooder usam marketplaces como compradores. O Batch 9 documenta um contrato multicanal: Amazon Business, eBay buyer, e-mail autorizado, planilha e entrada manual produzem evidências imutáveis, eventos versionados e candidatos reconciliados antes da aprovação humana, atribuição e materialização. Um score explicável de confiança poderá priorizar a revisão, mas nunca aprovar ou operar automaticamente. Para Amazon Business, a V1 foi definida com uma conta compartilhada em Amazon.com/EUA, USD, backfill inicial de 15 dias e sincronização manual mais automática configurável; implementação continua condicionada ao onboarding e aos papéis oficiais. Depois vêm eBay buyer, e-mail/reconciliação, painel mensal com migração controlada da planilha, consolidação de remessas/pacotes e motor de tracking, seguidos de Financeiro, Vendas e Analytics.
+O roadmap oficial está em `docs/PROJECT_CONTEXT_MASTER.md`. Dronz e Gooder usam marketplaces como compradores. O Batch 9 documenta um contrato multicanal: APIs buyer, e-mail autorizado, planilha e entrada manual produzem evidências imutáveis, eventos versionados e candidatos reconciliados antes da aprovação humana, atribuição e materialização. Um score explicável de confiança poderá priorizar a revisão, mas nunca aprovar ou operar automaticamente. O próximo gate valida a integração eBay Buyer existente; depois vêm o pipeline comum de evidências, o adapter eBay, e-mail autorizado Amazon/eBay, painel mensal com migração controlada da planilha, consolidação de remessas/pacotes e motor de tracking. A Amazon Business API permanece `PENDENTE_DE_ONBOARDING_EXTERNO` e será incorporada futuramente como evidência adicional, sem duplicar compras já criadas por e-mail.
 
 ## Itens não implementados ainda
 
-- adapters Amazon Business buyer e eBay buyer;
+- adapter eBay buyer e futura retomada do adapter Amazon Business buyer após onboarding;
 - e-mail autorizado, reconciliação multicanal e migração da planilha;
 - painel mensal de compras reconciliadas;
 - adapters seller Amazon/eBay, adiados até existir necessidade específica de importar vendas recebidas;

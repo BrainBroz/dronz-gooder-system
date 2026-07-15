@@ -64,7 +64,7 @@ CsvBuyerAdapter ────────────┼─ NormalizedBuyerPurcha
 ManualBuyerAdapter ─────────┘
 ```
 
-O Batch 9 define o contrato normativo comum antes de qualquer adapter. O fluxo oficial é fonte → evidência imutável → normalização → reconciliação → candidato → aprovação humana → `CompraImportada` → atribuição quantitativa → materialização explícita. Amazon Business, eBay e e-mail serão implementados em batches separados, sem transformar uma fonte em autoridade absoluta e sem materialização automática.
+O Batch 9 define o contrato normativo comum antes de qualquer adapter. O fluxo oficial é fonte → evidência imutável → normalização → reconciliação → candidato → aprovação humana → `CompraImportada` → atribuição quantitativa → materialização explícita. A ordem vigente é: validar eBay Buyer, implementar o pipeline comum, implementar o adapter eBay e então a ingestão autorizada por e-mail Amazon/eBay. A Amazon Business API permanece `PENDENTE_DE_ONBOARDING_EXTERNO` e será adicionada posteriormente como fonte de evidência, sem transformar um canal em autoridade absoluta e sem materialização automática.
 
 Evidências preservam origem, identidade, hash, versão, correlação, confiança de extração e classificação de sensibilidade. Mudanças externas criam eventos imutáveis e atualizam uma projeção reconstruível; não se adota event sourcing genérico. `ConfiancaConciliacao` é calculada no backend, explicável e versionada, e serve apenas para priorizar/reduzir ruído de revisão. Nunca substitui aprovação humana nem decide loja, conflito ou materialização.
 
@@ -125,7 +125,7 @@ O sistema legado informado pelo Product Owner não foi encontrado nos repositór
 ### 2.3 Dependências externas ainda necessárias
 
 - cadastro e aprovação das aplicações nos programas aplicáveis;
-- confirmação do onboarding Amazon Business e concessão do papel Amazon Business Analytics;
+- confirmação futura do onboarding Amazon Business e concessão do papel Amazon Business Analytics, sem bloquear o roadmap eBay/e-mail;
 - confirmação dos papéis/capabilities de Reporting, Package Tracking, Document e Reconciliation;
 - IDs reais de organização, grupos e usuários e campos efetivamente retornados;
 - rate limits aplicáveis à conta Amazon Business;
@@ -248,14 +248,15 @@ Há drift preexistente entre partes do schema Prisma e migrations antigas, relac
 
 ## 11. Fontes de Buyer Purchase Ingestion
 
-Fontes oficiais candidatas, sem prioridade absoluta entre canais:
+Fontes oficiais candidatas, sem precedência absoluta entre evidências, mas com prioridade de execução definida:
 
-- **Amazon Business Reporting API:** adapter buyer do Batch 10 para uma conta `SHARED`, Amazon.com/EUA e USD, condicionado a onboarding, papéis, resposta real e limites aplicáveis.
-- **eBay `GetMyeBayBuying`:** adapter buyer do Batch 11, condicionado à validação do keyset e das permissões. A janela de até 60 dias exige sincronização recorrente e retenção local.
+- **eBay `GetMyeBayBuying`:** primeira integração estruturada, condicionada ao Gate eBay Buyer sobre aplicação, chamada, autenticação, keyset, permissões e resposta real. A janela de até 60 dias exige sincronização recorrente e retenção local.
+- **E-mail autorizado Amazon/eBay:** fonte inicial Amazon e complementar eBay, sempre produzindo evidência sujeita a reconciliação e aprovação.
+- **Amazon Business Reporting API:** fonte futura para uma conta `SHARED`, Amazon.com/EUA e USD, com estado `PENDENTE_DE_ONBOARDING_EXTERNO`. Quando autorizada, deve reconciliar com compras já criadas por e-mail sem duplicá-las.
 
 Fontes independentes do Batch 12 e posteriores:
 
-- **E-mail autorizado:** confirmação, atualização, envio, tracking, cancelamento, reembolso, múltiplos pacotes e múltiplas mensagens correlacionadas ao mesmo pedido.
+- **E-mail autorizado:** confirmação, pagamento aprovado, atualização, envio, tracking, cancelamento, reembolso, invoice, múltiplos pacotes e múltiplas mensagens correlacionadas ao mesmo pedido.
 - **Caixa dedicada:** encaminhamento automático, regras por remetente e correlação por `externalOrderId`.
 - **Gmail/Outlook autorizados:** OAuth, escopos mínimos, leitura seletiva, retenção, deduplicação e privacidade.
 - **Invoice e comprovantes:** upload de PDF/imagem, extração estruturada e vínculo ou criação de compra.
@@ -277,15 +278,16 @@ Critérios obrigatórios: autorização verificável, minimização de dados, id
 
 ## 13. Limitações e gates seguintes
 
-- Batch 9: contrato buyer, evidências e painel mensal.
-- Batch 10: Amazon Business Buyer Integration.
-- Batch 11: eBay Buyer Integration.
-- Batch 12: e-mail autorizado e reconciliação multicanal.
+- Gate eBay Buyer: validar a integração existente, sem adapter produtivo.
+- Batch 10: pipeline comum de evidências, conciliação e aprovação.
+- Batch 11: adapter eBay Buyer.
+- Batch 12: ingestão autorizada por e-mail Amazon/eBay e reconciliação multicanal.
 - Batch 13: painel mensal e migração da planilha histórica.
 - Batch 14: consolidação de remessas, pacotes e tracking.
 - Batch 15: motor de tracking e alertas.
 - Batches 16–18: Financeiro/conciliação, Vendas/baixa patrimonial e Analytics.
+- Amazon Business API: retomada em batch próprio após aprovação do onboarding externo.
 
 O painel mensal do Batch 13 é um read model dinâmico, derivado das compras aprovadas, itens, atribuições, materializações e eventos. Não cria base paralela. A planilha histórica permanece em operação paralela até importação, reconciliação, comparação de totais e aceite formal.
 
-O Batch 9 é exclusivamente documental. Nenhum adapter seguinte está iniciado. Adapters seller Amazon/eBay permanecem adiados até existir necessidade específica de importar vendas recebidas. Amazon Business e eBay buyer são trilhas distintas dentro do mesmo contrato de evidências e exigem confirmação externa antes da implementação.
+O Batch 9 é exclusivamente documental. Nenhum adapter seguinte está iniciado. Adapters seller Amazon/eBay permanecem adiados até existir necessidade específica de importar vendas recebidas. Amazon Business e eBay buyer são trilhas distintas dentro do mesmo contrato de evidências; a validação eBay é o próximo gate, enquanto a API Amazon aguarda onboarding e e-mail autorizado assume sua fonte inicial.
