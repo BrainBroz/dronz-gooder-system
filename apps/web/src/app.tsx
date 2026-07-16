@@ -75,9 +75,9 @@ const OperationsPage = React.lazy(() =>
     default: module.OperationsPage
   }))
 );
-const UnifiedPurchasesPage = React.lazy(() =>
-  import("./pages/UnifiedPurchasesPage").then((module) => ({
-    default: module.UnifiedPurchasesPage
+const PurchaseQueuePage = React.lazy(() =>
+  import("./pages/PurchaseQueuePage").then((module) => ({
+    default: module.PurchaseQueuePage
   }))
 );
 
@@ -393,7 +393,7 @@ export function AppRoutes() {
               element={
                 <AuthGate>
                   <Shell>
-                    <UnifiedPurchasesPage />
+                    <PurchaseQueuePage />
                   </Shell>
                 </AuthGate>
               }
