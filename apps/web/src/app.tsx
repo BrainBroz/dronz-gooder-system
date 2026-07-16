@@ -220,7 +220,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     ["Categorias", "/categorias"],
     ["Produtos", "/produtos"],
     ["Fornecedores", "/fornecedores"],
-    ["Compras Unificadas", "/compras"],
+    ["Compras", "/compras"],
     ["Pedidos Operacionais", "/pedidos"],
     ["Logística", "/logistica"],
     ["Estoque", "/estoque"],

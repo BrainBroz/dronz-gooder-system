@@ -18,7 +18,7 @@ import { useUnifiedPurchaseMutations, newIdempotencyKey } from "../../hooks/useU
 import { useProducts } from "../../hooks/useCatalog";
 import { useAuthStore } from "../../stores/auth";
 import type { UnifiedPurchaseItemDetail } from "../../types/unified-purchases";
-import type { MutationError } from "./types";
+import { readMutationError, type MutationError } from "./types";
 
 export function ItemMappingDrawer({
   purchaseId,
@@ -75,9 +75,8 @@ export function ItemMappingDrawer({
       setSearchQuery("");
       setSelectedProductId(null);
       onSuccess?.();
-    } catch (err: any) {
-      const status = err.response?.status;
-      const message = err.response?.data?.message || err.message;
+    } catch (err) {
+      const { status, message } = readMutationError(err);
 
       if (status === 409) {
         setError({

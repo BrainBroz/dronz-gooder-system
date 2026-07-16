@@ -17,7 +17,7 @@ import {
 } from "../../hooks/useUnifiedPurchases";
 import { useAuthStore } from "../../stores/auth";
 import type { UnifiedPurchaseItemDetail } from "../../types/unified-purchases";
-import type { MutationError } from "./types";
+import { readMutationError, type MutationError } from "./types";
 
 type StoreKey = "dronz" | "gooder";
 
@@ -116,9 +116,8 @@ export function ItemAssignmentDrawer({
 
       setAssignments({ dronz: 0, gooder: 0 });
       onSuccess?.();
-    } catch (err: any) {
-      const status = err.response?.status;
-      const message = err.response?.data?.message || err.message;
+    } catch (err) {
+      const { status, message } = readMutationError(err);
 
       if (message === "store_not_found:dronz" || message === "store_not_found:gooder") {
         setError({
@@ -194,6 +193,7 @@ export function ItemAssignmentDrawer({
                 </Typography>
               </Stack>
               <Slider
+                aria-label="Quantidade para Dronz"
                 min={0}
                 max={item.quantidade}
                 value={assignments.dronz}
@@ -217,6 +217,7 @@ export function ItemAssignmentDrawer({
                 </Typography>
               </Stack>
               <Slider
+                aria-label="Quantidade para Gooder"
                 min={0}
                 max={item.quantidade}
                 value={assignments.gooder}

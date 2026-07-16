@@ -18,6 +18,7 @@ import { ItemMappingDrawer } from "./ItemMappingDrawer";
 import { ItemAssignmentDrawer } from "./ItemAssignmentDrawer";
 import { MaterializationConfirmDialog } from "./MaterializationConfirmDialog";
 import { ConflictResolutionDrawer } from "./ConflictResolutionDrawer";
+import type { MaterializationSummary } from "./types";
 import type { UnifiedPurchaseDetail } from "../../types/unified-purchases";
 
 type DrawerState = {
@@ -25,13 +26,6 @@ type DrawerState = {
   itemId?: string;
   conflictId?: string;
   storeId?: string;
-};
-
-type MaterializationSummary = {
-  storeId: string;
-  storeName: string;
-  itemCount: number;
-  totalUnits: number;
 };
 
 function nextItemAction(item: { mapeamentos: unknown[]; atribuicoes: unknown[] }) {
@@ -79,6 +73,10 @@ export function PurchaseDetailDrawer({
   const detailQuery = useUnifiedPurchaseDetail(purchaseId);
   const detail = detailQuery.data;
   const [drawerState, setDrawerState] = React.useState<DrawerState>({ type: "none" });
+  const materializationByStore = React.useMemo(
+    () => (detail ? materializationSummaries(detail) : []),
+    [detail]
+  );
 
   const closeDrawer = () => setDrawerState({ type: "none" });
   const handleMutationSuccess = () => {
@@ -221,7 +219,7 @@ export function PurchaseDetailDrawer({
             </Typography>
             {detail.allowedActions.includes("MATERIALIZE_STORE_ALLOCATION") ? (
               <Stack gap={1}>
-                {materializationSummaries(detail).map((summary) => (
+                {materializationByStore.map((summary) => (
                   <Button
                     key={`materialize-${summary.storeId}`}
                     variant="contained"
@@ -358,9 +356,7 @@ export function PurchaseDetailDrawer({
               purchaseId={purchaseId!}
               storeId={drawerState.storeId}
               summary={
-                materializationSummaries(detail).find(
-                  (s) => s.storeId === drawerState.storeId
-                )!
+                materializationByStore.find((s) => s.storeId === drawerState.storeId)!
               }
               purchaseVersion={detail.version}
               open={true}

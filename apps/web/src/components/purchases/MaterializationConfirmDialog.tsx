@@ -11,14 +11,11 @@ import {
   Typography
 } from "@mui/material";
 import { useUnifiedPurchaseMutations, newIdempotencyKey } from "../../hooks/useUnifiedPurchases";
-import type { MutationError } from "./types";
-
-type MaterializationSummary = {
-  storeId: string;
-  storeName: string;
-  itemCount: number;
-  totalUnits: number;
-};
+import {
+  readMutationError,
+  type MaterializationSummary,
+  type MutationError
+} from "./types";
 
 export function MaterializationConfirmDialog({
   purchaseId,
@@ -52,9 +49,8 @@ export function MaterializationConfirmDialog({
       });
 
       onSuccess?.();
-    } catch (err: any) {
-      const status = err.response?.status;
-      const message = err.response?.data?.message || err.message;
+    } catch (err) {
+      const { status, message } = readMutationError(err);
 
       if (status === 409) {
         setError({

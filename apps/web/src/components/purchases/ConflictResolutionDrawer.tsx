@@ -12,7 +12,7 @@ import {
 } from "@mui/material";
 import { useUnifiedPurchaseMutations, newIdempotencyKey } from "../../hooks/useUnifiedPurchases";
 import type { PurchaseConflict } from "../../types/unified-purchases";
-import type { MutationError } from "./types";
+import { readMutationError, type MutationError } from "./types";
 
 export function ConflictResolutionDrawer({
   purchaseId,
@@ -47,9 +47,8 @@ export function ConflictResolutionDrawer({
 
       setMotivo("");
       onSuccess?.();
-    } catch (err: any) {
-      const status = err.response?.status;
-      const message = err.response?.data?.message || err.message;
+    } catch (err) {
+      const { status, message } = readMutationError(err);
 
       if (status === 409) {
         setError({
@@ -128,6 +127,7 @@ export function ConflictResolutionDrawer({
           onChange={(e) => setMotivo(e.target.value)}
           placeholder="Explique por que este conflito pode ser ignorado..."
           fullWidth
+          autoFocus
           helperText={`${motivo.length} / 1000 caracteres (mínimo 5)`}
           error={motivo.length > 0 && motivo.length < 5}
           disabled={resolveConflict.isPending}
