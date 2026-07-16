@@ -154,20 +154,23 @@ describe("UX-1B — Fila de Compras (estrutural, somente leitura)", () => {
     expect(screen.queryByLabelText("Prioridade Alto")).toBeNull();
   });
 
-  it("abre o drawer em modo leitura, sem nenhuma ação habilitada para mutação", async () => {
+  it("abre o drawer com ações operacionais conforme allowedActions", async () => {
     renderWithProviders(<PurchaseQueuePage />, { permissions });
     await userEvent.click(await screen.findByText("ORDER-CONFLICT"));
     expect(await screen.findByText("Notebook externo")).toBeTruthy();
     expect(screen.getByText("Bloqueios")).toBeTruthy();
     expect(screen.getByText("Compra possui conflito aberto.")).toBeTruthy();
-    const materialize = screen.getByRole("button", {
-      name: /Materializar \(disponível no UX-1C\)/
-    }) as HTMLButtonElement;
-    expect(materialize.disabled).toBe(true);
-    const mapAction = screen.getByRole("button", {
-      name: "Mapear produto"
-    }) as HTMLButtonElement;
-    expect(mapAction.disabled).toBe(true);
+
+    // Item sem mapeamentos: botão "Mapear produto" aparece e habilitado
+    expect(screen.getByRole("button", { name: "Mapear produto" })).toBeTruthy();
+
+    // Seção de ações operacionais vazia (sem atribuições para materializar)
+    expect(
+      screen.getByText("Sem ações operacionais disponíveis.")
+    ).toBeTruthy();
+
+    // Seção de conflitos com botão resolver
+    expect(screen.getByRole("button", { name: "Resolver" })).toBeTruthy();
   });
 
   it("filtra a fila por categoria sem alterar o número global do card de urgência", async () => {

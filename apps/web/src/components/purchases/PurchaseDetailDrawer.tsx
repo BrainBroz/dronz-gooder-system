@@ -9,17 +9,64 @@ import {
   Drawer,
   IconButton,
   Stack,
-  Tooltip,
   Typography
 } from "@mui/material";
 import { useUnifiedPurchaseDetail } from "../../hooks/useUnifiedPurchases";
 import { PurchaseTimeline } from "./PurchaseTimeline";
 import { BlockedReasonChip } from "./BlockedReasonChip";
+import { ItemMappingDrawer } from "./ItemMappingDrawer";
+import { ItemAssignmentDrawer } from "./ItemAssignmentDrawer";
+import { MaterializationConfirmDialog } from "./MaterializationConfirmDialog";
+import { ConflictResolutionDrawer } from "./ConflictResolutionDrawer";
+import type { UnifiedPurchaseDetail } from "../../types/unified-purchases";
+
+type DrawerState = {
+  type: "none" | "mapping" | "assignment" | "materialize" | "conflict";
+  itemId?: string;
+  conflictId?: string;
+  storeId?: string;
+};
+
+type MaterializationSummary = {
+  storeId: string;
+  storeName: string;
+  itemCount: number;
+  totalUnits: number;
+};
 
 function nextItemAction(item: { mapeamentos: unknown[]; atribuicoes: unknown[] }) {
   if (item.mapeamentos.length === 0) return "Mapear produto";
   if (item.atribuicoes.length === 0) return "Atribuir";
   return null;
+}
+
+/**
+ * A materialização é por COMPRA + LOJA (não por item): o backend agrega todos
+ * os itens elegíveis daquela loja em um único PedidoCompra por chamada.
+ * Por isso a ação é sempre agregada por loja aqui — nunca apresentada como
+ * operação de um item isolado.
+ */
+function materializationSummaries(detail: UnifiedPurchaseDetail): MaterializationSummary[] {
+  const byStore = new Map<string, MaterializationSummary>();
+  for (const item of detail.itens) {
+    for (const assignment of item.atribuicoes) {
+      const materialized = item.itensMaterializados.find(
+        (m) => m.lojaId === assignment.lojaId
+      );
+      const pendingQty = assignment.quantidade - (materialized?.quantidade ?? 0);
+      if (pendingQty <= 0) continue;
+      const current = byStore.get(assignment.lojaId) ?? {
+        storeId: assignment.lojaId,
+        storeName: assignment.loja.nome,
+        itemCount: 0,
+        totalUnits: 0
+      };
+      current.itemCount += 1;
+      current.totalUnits += pendingQty;
+      byStore.set(assignment.lojaId, current);
+    }
+  }
+  return Array.from(byStore.values());
 }
 
 export function PurchaseDetailDrawer({
@@ -31,6 +78,12 @@ export function PurchaseDetailDrawer({
 }) {
   const detailQuery = useUnifiedPurchaseDetail(purchaseId);
   const detail = detailQuery.data;
+  const [drawerState, setDrawerState] = React.useState<DrawerState>({ type: "none" });
+
+  const closeDrawer = () => setDrawerState({ type: "none" });
+  const handleMutationSuccess = () => {
+    void detailQuery.refetch();
+  };
 
   return (
     <Drawer
@@ -101,15 +154,28 @@ export function PurchaseDetailDrawer({
                           {item.quantidade} un · {item.precoUnitario} {item.moeda}
                         </Typography>
                       </Box>
-                      {pendingAction && (
-                        <Tooltip title="Disponível no UX-1C">
-                          <span>
-                            <Button size="small" disabled>
-                              {pendingAction}
-                            </Button>
-                          </span>
-                        </Tooltip>
-                      )}
+                      {pendingAction === "Mapear produto" &&
+                        detail.allowedActions.includes("SET_PRODUCT_MAPPING") && (
+                          <Button
+                            size="small"
+                            onClick={() =>
+                              setDrawerState({ type: "mapping", itemId: item.id })
+                            }
+                          >
+                            {pendingAction}
+                          </Button>
+                        )}
+                      {pendingAction === "Atribuir" &&
+                        detail.allowedActions.includes("ASSIGN_TO_STORE") && (
+                          <Button
+                            size="small"
+                            onClick={() =>
+                              setDrawerState({ type: "assignment", itemId: item.id })
+                            }
+                          >
+                            {pendingAction}
+                          </Button>
+                        )}
                     </Stack>
                     <Stack direction="row" gap={0.5} flexWrap="wrap" mt={1}>
                       {item.mapeamentos.length === 0 ? (
@@ -151,15 +217,33 @@ export function PurchaseDetailDrawer({
 
           <Stack gap={1}>
             <Typography component="h3" variant="subtitle1" fontWeight={700}>
-              Ações
+              Ações Operacionais
             </Typography>
-            <Tooltip title="Ações operacionais chegam no UX-1C">
-              <span>
-                <Button variant="contained" disabled fullWidth>
-                  Materializar (disponível no UX-1C)
-                </Button>
-              </span>
-            </Tooltip>
+            {detail.allowedActions.includes("MATERIALIZE_STORE_ALLOCATION") ? (
+              <Stack gap={1}>
+                {materializationSummaries(detail).map((summary) => (
+                  <Button
+                    key={`materialize-${summary.storeId}`}
+                    variant="contained"
+                    size="small"
+                    onClick={() =>
+                      setDrawerState({
+                        type: "materialize",
+                        storeId: summary.storeId
+                      })
+                    }
+                    fullWidth
+                  >
+                    Materializar {summary.storeName} ({summary.itemCount}{" "}
+                    {summary.itemCount === 1 ? "item" : "itens"}, {summary.totalUnits} un)
+                  </Button>
+                ))}
+              </Stack>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                Sem ações operacionais disponíveis.
+              </Typography>
+            )}
           </Stack>
 
           <Divider />
@@ -173,11 +257,36 @@ export function PurchaseDetailDrawer({
                 Nenhum conflito registrado.
               </Typography>
             ) : (
-              detail.conflitos.map((conflict) => (
-                <Typography key={conflict.id} variant="body2">
-                  {conflict.tipo} · {conflict.status}
-                </Typography>
-              ))
+              <Stack gap={1}>
+                {detail.conflitos.map((conflict) => (
+                  <Stack
+                    key={conflict.id}
+                    direction="row"
+                    justifyContent="space-between"
+                    alignItems="center"
+                    sx={{ p: 1.5, border: "1px solid", borderColor: "divider", borderRadius: 1 }}
+                  >
+                    <Box>
+                      <Typography variant="body2" fontWeight={600}>
+                        {conflict.tipo}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Status: {conflict.status}
+                      </Typography>
+                    </Box>
+                    {conflict.status === "ABERTO" && detail.allowedActions.includes("RESOLVE_CONFLICT") && (
+                      <Button
+                        size="small"
+                        onClick={() =>
+                          setDrawerState({ type: "conflict", conflictId: conflict.id })
+                        }
+                      >
+                        Resolver
+                      </Button>
+                    )}
+                  </Stack>
+                ))}
+              </Stack>
             )}
           </Stack>
 
@@ -222,6 +331,53 @@ export function PurchaseDetailDrawer({
               </Stack>
             )}
           </Stack>
+
+          {/* Mutation Drawers */}
+          {drawerState.type === "mapping" && drawerState.itemId && (
+            <ItemMappingDrawer
+              purchaseId={purchaseId!}
+              item={detail.itens.find((i) => i.id === drawerState.itemId)!}
+              open={true}
+              onClose={closeDrawer}
+              onSuccess={handleMutationSuccess}
+            />
+          )}
+
+          {drawerState.type === "assignment" && drawerState.itemId && (
+            <ItemAssignmentDrawer
+              purchaseId={purchaseId!}
+              item={detail.itens.find((i) => i.id === drawerState.itemId)!}
+              open={true}
+              onClose={closeDrawer}
+              onSuccess={handleMutationSuccess}
+            />
+          )}
+
+          {drawerState.type === "materialize" && drawerState.storeId && (
+            <MaterializationConfirmDialog
+              purchaseId={purchaseId!}
+              storeId={drawerState.storeId}
+              summary={
+                materializationSummaries(detail).find(
+                  (s) => s.storeId === drawerState.storeId
+                )!
+              }
+              purchaseVersion={detail.version}
+              open={true}
+              onClose={closeDrawer}
+              onSuccess={handleMutationSuccess}
+            />
+          )}
+
+          {drawerState.type === "conflict" && drawerState.conflictId && (
+            <ConflictResolutionDrawer
+              purchaseId={purchaseId!}
+              conflict={detail.conflitos.find((c) => c.id === drawerState.conflictId)!}
+              open={true}
+              onClose={closeDrawer}
+              onSuccess={handleMutationSuccess}
+            />
+          )}
         </Stack>
       )}
     </Drawer>
