@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+commit_message="$(git log -1 --format=%B HEAD)"
+
+if ! printf '%s\n' "$commit_message" | grep -qx 'Agent-Review: required'; then
+  exit 0
+fi
+
+exec "$repo_root/scripts/run-local-agent-review.sh"
