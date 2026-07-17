@@ -158,6 +158,12 @@ async function cleanup() {
   await prisma.merchantExterno.deleteMany({
     where: { externalMerchantId: { startsWith: "merchant-batch8" } }
   });
+  await prisma.usuario.deleteMany({
+    where: { email: { startsWith: "batch8-scoped-" } }
+  });
+  await prisma.perfil.deleteMany({
+    where: { code: { startsWith: "BATCH8_SCOPED_" } }
+  });
 }
 
 beforeEach(cleanup);
@@ -236,6 +242,47 @@ async function connectionFixture(
     }
   });
   return { ...current, connectionId: response.body.id as string };
+}
+
+async function scopedUser(
+  currentSession: Awaited<ReturnType<typeof session>>,
+  permissionCodes: string[],
+  storeIds: string[],
+  suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`
+) {
+  const permissions = await prisma.permissao.findMany({
+    where: { code: { in: permissionCodes } }
+  });
+  const profile = await prisma.perfil.create({
+    data: {
+      code: `BATCH8_SCOPED_${suffix}`,
+      name: `Batch8 Scoped ${suffix}`,
+      permissoes: {
+        create: permissions.map((permission) => ({
+          permissaoId: permission.id
+        }))
+      }
+    }
+  });
+  const seededAdmin = await prisma.usuario.findUniqueOrThrow({
+    where: { email: "admin@example.com" },
+    select: { passwordHash: true }
+  });
+  const email = `batch8-scoped-${suffix}@example.com`;
+  await prisma.usuario.create({
+    data: {
+      name: `Batch8 Scoped ${suffix}`,
+      email,
+      passwordHash: seededAdmin.passwordHash,
+      lojas: { create: storeIds.map((lojaId) => ({ lojaId })) },
+      perfis: { create: { perfilId: profile.id } }
+    }
+  });
+  const login = await request(currentSession.app)
+    .post("/auth/login")
+    .send({ email, password: "change-me" });
+  expect(login.status).toBe(200);
+  return login.body.accessToken as string;
 }
 
 function order(externalOrderId: string, overrides: Partial<Order> = {}): Order {
@@ -818,5 +865,78 @@ describe("marketplace integration foundation", () => {
         }
       })
     ).toBe(1);
+  });
+});
+
+describe("visibilidade de conexões SHARED por RBAC (correção Codex)", () => {
+  it("usuário restrito a uma loja continua vendo conexões SHARED mesmo filtrando por lojaId", async () => {
+    const shared = await connectionFixture(
+      "AMAZON",
+      "SHARED",
+      `shared-vis-${Date.now()}`
+    );
+    const dedicated = await connectionFixture(
+      "EBAY",
+      "STORE_DEDICATED",
+      `dedic-dronz-${Date.now()}`,
+      "dronz"
+    );
+    const token = await scopedUser(
+      shared,
+      ["INTEGRACAO_MARKETPLACE_VISUALIZAR"],
+      [shared.dronz.id]
+    );
+    const response = await request(shared.app)
+      .get("/integrations/marketplaces/connections")
+      .query({ lojaId: shared.dronz.id })
+      .set(bearer(token));
+    expect(response.status).toBe(200);
+    const ids = response.body.map((connection: { id: string }) => connection.id);
+    expect(ids).toContain(shared.connectionId);
+    expect(ids).toContain(dedicated.connectionId);
+  });
+
+  it("gestor Dronz não recebe conexão dedicada exclusiva da Gooder", async () => {
+    const base = await connectionFixture(
+      "AMAZON",
+      "SHARED",
+      `base-${Date.now()}`
+    );
+    const gooderOnly = await connectionFixture(
+      "EBAY",
+      "STORE_DEDICATED",
+      `dedic-gooder-${Date.now()}`,
+      "gooder"
+    );
+    const token = await scopedUser(
+      base,
+      ["INTEGRACAO_MARKETPLACE_VISUALIZAR"],
+      [base.dronz.id]
+    );
+    const response = await request(base.app)
+      .get("/integrations/marketplaces/connections")
+      .set(bearer(token));
+    expect(response.status).toBe(200);
+    const ids = response.body.map((connection: { id: string }) => connection.id);
+    expect(ids).toContain(base.connectionId);
+    expect(ids).not.toContain(gooderOnly.connectionId);
+  });
+
+  it("não confia em lojaId de uma loja à qual o usuário não pertence", async () => {
+    const base = await connectionFixture(
+      "AMAZON",
+      "SHARED",
+      `notrust-${Date.now()}`
+    );
+    const token = await scopedUser(
+      base,
+      ["INTEGRACAO_MARKETPLACE_VISUALIZAR"],
+      [base.dronz.id]
+    );
+    const response = await request(base.app)
+      .get("/integrations/marketplaces/connections")
+      .query({ lojaId: base.gooder.id })
+      .set(bearer(token));
+    expect(response.status).toBe(403);
   });
 });

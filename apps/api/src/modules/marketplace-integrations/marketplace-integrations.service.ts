@@ -240,16 +240,30 @@ export async function listConnections(
   input: ListConnectionsInput
 ) {
   const allowedStoreIds = identity.lojas.map((store) => store.id);
+  // O lojaId do cliente nunca é confiado sozinho: se informado, precisa ser
+  // uma loja da própria identidade — nunca uma checagem implícita.
+  if (input.lojaId && !allowedStoreIds.includes(input.lojaId))
+    throw new AppError(403, "marketplace_connection_store_mismatch");
+
+  // SHARED é staging global (AGENTS.md: "não usa lojaId como tenant, exige
+  // RBAC global") — quem tem permissão para listar conexões enxerga SHARED
+  // independentemente de lojaId, inclusive quando o filtro está presente.
+  // Só a metade STORE_DEDICATED do OR respeita o filtro de loja; nunca a
+  // colocamos como filtro de nível superior (isso é o que fazia o Prisma
+  // excluir SHARED, já que lojaPermitidaId é null nessas conexões).
+  const storeDedicatedFilter = input.lojaId
+    ? { escopo: "STORE_DEDICATED" as const, lojaPermitidaId: input.lojaId }
+    : {
+        escopo: "STORE_DEDICATED" as const,
+        lojaPermitidaId: { in: allowedStoreIds }
+      };
+
   const connections = await prisma.conexaoMarketplace.findMany({
     where: {
       provider: input.provider,
       status: input.status,
       escopo: input.escopo,
-      lojaPermitidaId: input.lojaId,
-      OR: [
-        { escopo: "SHARED" },
-        { escopo: "STORE_DEDICATED", lojaPermitidaId: { in: allowedStoreIds } }
-      ]
+      OR: [{ escopo: "SHARED" as const }, storeDedicatedFilter]
     },
     include: { contaExterna: true, lojaPermitida: true },
     orderBy: [{ provider: "asc" }, { nome: "asc" }, { id: "asc" }]
