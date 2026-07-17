@@ -376,53 +376,81 @@ async function persistShippingData(
               transportadora: externalPackage.carrier
             }
           });
+          // Passo 1: garante que toda linha de tracking citada por `code`
+          // neste payload existe e tem status/timestamp atuais. Nunca toca
+          // `ativo`/`substituiTrackingId` de uma linha já existente aqui —
+          // isso só é resolvido no passo 2, depois que todos os códigos
+          // deste payload já existem no banco. Assim a ordem de chegada
+          // dentro do array nunca decide o resultado.
+          //
+          // A comparação de `ultimaAtualizacaoEm` torna o passo idempotente
+          // e protege contra payload atrasado: um evento mais antigo (ou
+          // igual) do que o já gravado nunca regride status/timestamp.
+          const rowIdByCode = new Map<string, string>();
           for (const tracking of externalPackage.trackings) {
-            const replaces = tracking.replacesCode
-              ? await tx.trackingExterno.findFirst({
-                  where: {
-                    pacoteExternoId: savedPackage.id,
-                    codigo: normalizeExternalId(tracking.replacesCode),
-                    ativo: true
-                  }
-                })
-              : null;
-            if (replaces)
-              await tx.trackingExterno.update({
-                where: { id: replaces.id },
-                data: { ativo: false }
-              });
             const normalizedCode = normalizeExternalId(tracking.code);
-            const savedTracking = await tx.trackingExterno.findFirst({
+            const updatedAt = new Date(tracking.updatedAt);
+            const existing = await tx.trackingExterno.findFirst({
               where: {
                 pacoteExternoId: savedPackage.id,
                 codigo: normalizedCode,
                 transportadora: tracking.carrier ?? null
               }
             });
-            const trackingData = {
-              statusExterno: tracking.status,
-              ativo: true,
-              substituiTrackingId: replaces?.id,
-              ultimaAtualizacaoEm: new Date(tracking.updatedAt)
-            };
-            if (savedTracking) {
-              await tx.trackingExterno.update({
-                where: { id: savedTracking.id },
-                data: trackingData
-              });
+
+            if (existing) {
+              if (existing.ultimaAtualizacaoEm < updatedAt) {
+                await tx.trackingExterno.update({
+                  where: { id: existing.id },
+                  data: {
+                    statusExterno: tracking.status,
+                    ultimaAtualizacaoEm: updatedAt
+                  }
+                });
+              }
+              rowIdByCode.set(normalizedCode, existing.id);
             } else {
-              await tx.trackingExterno.create({
+              const created = await tx.trackingExterno.create({
                 data: {
                   pacoteExternoId: savedPackage.id,
                   codigo: normalizedCode,
                   transportadora: tracking.carrier,
-                  ...trackingData,
+                  statusExterno: tracking.status,
+                  ativo: true,
+                  ultimaAtualizacaoEm: updatedAt,
                   criadoExternamenteEm: tracking.createdAt
                     ? new Date(tracking.createdAt)
                     : null
                 }
               });
+              rowIdByCode.set(normalizedCode, created.id);
             }
+          }
+
+          // Passo 2: resolve as relações de substituição. Todo código citado
+          // no payload já existe (passo 1), então a ordem original do array
+          // não afeta o resultado. Só desativa o código antigo — nunca
+          // reativa nada — e registra a linhagem no código novo.
+          for (const tracking of externalPackage.trackings) {
+            if (!tracking.replacesCode) continue;
+            const normalizedCode = normalizeExternalId(tracking.code);
+            const newRowId = rowIdByCode.get(normalizedCode);
+            if (!newRowId) continue;
+            const oldCode = normalizeExternalId(tracking.replacesCode);
+            const oldRow = await tx.trackingExterno.findFirst({
+              where: { pacoteExternoId: savedPackage.id, codigo: oldCode }
+            });
+            if (!oldRow || oldRow.id === newRowId) continue;
+            if (oldRow.ativo) {
+              await tx.trackingExterno.update({
+                where: { id: oldRow.id },
+                data: { ativo: false }
+              });
+            }
+            await tx.trackingExterno.update({
+              where: { id: newRowId },
+              data: { substituiTrackingId: oldRow.id }
+            });
           }
         }
       }

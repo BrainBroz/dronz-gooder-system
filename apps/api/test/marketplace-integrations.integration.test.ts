@@ -285,6 +285,29 @@ async function scopedUser(
   return login.body.accessToken as string;
 }
 
+async function syncOrderWithShipment(
+  fixture: Awaited<ReturnType<typeof connectionFixture>>,
+  externalOrderId: string,
+  shipment: NonNullable<Order["shipments"]>[number],
+  idempotencyKey: string
+) {
+  const identity = await getAuthenticatedUser(fixture.userId);
+  const marketplaceOrder = order(externalOrderId, { shipments: [shipment] });
+  const adapter = new FakeAdapter("AMAZON", [
+    { orders: [marketplaceOrder], nextCursor: `cursor-${idempotencyKey}` },
+    { orders: [] }
+  ]);
+  const result = await syncConnection(
+    identity,
+    fixture.connectionId,
+    { replay: false },
+    idempotencyKey,
+    disabledRegistry(adapter)
+  );
+  expect(result.status).toBe("SUCCEEDED");
+  return result;
+}
+
 function order(externalOrderId: string, overrides: Partial<Order> = {}): Order {
   return {
     externalOrderId,
@@ -938,5 +961,246 @@ describe("visibilidade de conexões SHARED por RBAC (correção Codex)", () => {
       .query({ lojaId: base.gooder.id })
       .set(bearer(token));
     expect(response.status).toBe(403);
+  });
+});
+
+describe("linhagem de tracking fora de ordem (correção Codex)", () => {
+  it("ressincronização parcial (só o código novo) preserva a linhagem do código antigo", async () => {
+    const fixture = await connectionFixture(
+      "AMAZON",
+      "SHARED",
+      `track-partial-${Date.now()}`
+    );
+    const externalOrderId = `batch8-track-partial-${Date.now()}`;
+
+    await syncOrderWithShipment(
+      fixture,
+      externalOrderId,
+      {
+        externalShipmentId: "shipment-1",
+        status: "SHIPPED",
+        updatedAt: "2026-07-13T12:00:00.000Z",
+        packages: [
+          {
+            externalPackageId: "package-1",
+            carrier: "UPS",
+            trackings: [
+              {
+                code: "OLD-CODE",
+                carrier: "UPS",
+                updatedAt: "2026-07-13T12:00:00.000Z"
+              }
+            ]
+          }
+        ]
+      },
+      `batch8-track-partial-sync1-${Date.now()}`
+    );
+
+    // ressincronização posterior só relata o tracking atual — não repete
+    // OLD-CODE no payload, como um marketplace real faria
+    await syncOrderWithShipment(
+      fixture,
+      externalOrderId,
+      {
+        externalShipmentId: "shipment-1",
+        status: "SHIPPED",
+        updatedAt: "2026-07-13T13:00:00.000Z",
+        packages: [
+          {
+            externalPackageId: "package-1",
+            carrier: "UPS",
+            trackings: [
+              {
+                code: "NEW-CODE",
+                carrier: "UPS",
+                replacesCode: "OLD-CODE",
+                updatedAt: "2026-07-13T13:00:00.000Z"
+              }
+            ]
+          }
+        ]
+      },
+      `batch8-track-partial-sync2-${Date.now()}`
+    );
+
+    const purchase = await prisma.compraImportada.findFirstOrThrow({
+      where: { externalOrderIdOriginal: externalOrderId },
+      include: {
+        enviosExternos: { include: { pacotes: { include: { trackings: true } } } }
+      }
+    });
+    const trackings = purchase.enviosExternos[0].pacotes.flatMap(
+      (externalPackage) => externalPackage.trackings
+    );
+    const oldRow = trackings.find((tracking) => tracking.codigo === "OLD-CODE")!;
+    const newRow = trackings.find((tracking) => tracking.codigo === "NEW-CODE")!;
+    expect(oldRow.ativo).toBe(false);
+    expect(newRow.ativo).toBe(true);
+    expect(newRow.substituiTrackingId).toBe(oldRow.id);
+  });
+
+  it("payload atrasado do código antigo não reativa um tracking já substituído", async () => {
+    const fixture = await connectionFixture(
+      "AMAZON",
+      "SHARED",
+      `track-late-${Date.now()}`
+    );
+    const externalOrderId = `batch8-track-late-${Date.now()}`;
+
+    await syncOrderWithShipment(
+      fixture,
+      externalOrderId,
+      {
+        externalShipmentId: "shipment-1",
+        status: "SHIPPED",
+        updatedAt: "2026-07-13T13:00:00.000Z",
+        packages: [
+          {
+            externalPackageId: "package-1",
+            carrier: "UPS",
+            trackings: [
+              {
+                code: "OLD-CODE",
+                carrier: "UPS",
+                updatedAt: "2026-07-13T12:00:00.000Z"
+              },
+              {
+                code: "NEW-CODE",
+                carrier: "UPS",
+                replacesCode: "OLD-CODE",
+                updatedAt: "2026-07-13T13:00:00.000Z"
+              }
+            ]
+          }
+        ]
+      },
+      `batch8-track-late-sync1-${Date.now()}`
+    );
+
+    // evento atrasado sobre o código antigo chega depois — não pode
+    // reativá-lo nem apagar a linhagem já registrada em NEW-CODE
+    await syncOrderWithShipment(
+      fixture,
+      externalOrderId,
+      {
+        externalShipmentId: "shipment-1",
+        status: "SHIPPED",
+        updatedAt: "2026-07-13T12:30:00.000Z",
+        packages: [
+          {
+            externalPackageId: "package-1",
+            carrier: "UPS",
+            trackings: [
+              {
+                code: "OLD-CODE",
+                carrier: "UPS",
+                status: "IN_TRANSIT_STALE",
+                updatedAt: "2026-07-13T12:30:00.000Z"
+              }
+            ]
+          }
+        ]
+      },
+      `batch8-track-late-sync2-${Date.now()}`
+    );
+
+    const purchase = await prisma.compraImportada.findFirstOrThrow({
+      where: { externalOrderIdOriginal: externalOrderId },
+      include: {
+        enviosExternos: { include: { pacotes: { include: { trackings: true } } } }
+      }
+    });
+    const trackings = purchase.enviosExternos[0].pacotes.flatMap(
+      (externalPackage) => externalPackage.trackings
+    );
+    const oldRow = trackings.find((tracking) => tracking.codigo === "OLD-CODE")!;
+    const newRow = trackings.find((tracking) => tracking.codigo === "NEW-CODE")!;
+    expect(oldRow.ativo).toBe(false);
+    expect(newRow.ativo).toBe(true);
+    expect(newRow.substituiTrackingId).toBe(oldRow.id);
+    // o status foi atualizado (12:30 é mais novo que os 12:00 gravados),
+    // mas isso não reativa a linha nem quebra a substituição
+    expect(oldRow.statusExterno).toBe("IN_TRANSIT_STALE");
+  });
+
+  it("reprocessar a mesma sincronização não altera o histórico de tracking", async () => {
+    const fixture = await connectionFixture(
+      "AMAZON",
+      "SHARED",
+      `track-idem-${Date.now()}`
+    );
+    const externalOrderId = `batch8-track-idem-${Date.now()}`;
+    const shipment: NonNullable<Order["shipments"]>[number] = {
+      externalShipmentId: "shipment-1",
+      status: "SHIPPED",
+      updatedAt: "2026-07-13T13:00:00.000Z",
+      packages: [
+        {
+          externalPackageId: "package-1",
+          carrier: "UPS",
+          trackings: [
+            {
+              code: "OLD-CODE",
+              carrier: "UPS",
+              updatedAt: "2026-07-13T12:00:00.000Z"
+            },
+            {
+              code: "NEW-CODE",
+              carrier: "UPS",
+              replacesCode: "OLD-CODE",
+              updatedAt: "2026-07-13T13:00:00.000Z"
+            }
+          ]
+        }
+      ]
+    };
+
+    await syncOrderWithShipment(
+      fixture,
+      externalOrderId,
+      shipment,
+      `batch8-track-idem-sync1-${Date.now()}`
+    );
+    const before = await prisma.compraImportada.findFirstOrThrow({
+      where: { externalOrderIdOriginal: externalOrderId },
+      include: {
+        enviosExternos: { include: { pacotes: { include: { trackings: true } } } }
+      }
+    });
+    const beforeTrackings = before.enviosExternos[0].pacotes
+      .flatMap((externalPackage) => externalPackage.trackings)
+      .map((tracking) => ({
+        id: tracking.id,
+        codigo: tracking.codigo,
+        ativo: tracking.ativo,
+        substituiTrackingId: tracking.substituiTrackingId
+      }))
+      .sort((a, b) => a.codigo.localeCompare(b.codigo));
+
+    // reprocessa exatamente o mesmo payload, como um replay de poll/webhook
+    await syncOrderWithShipment(
+      fixture,
+      externalOrderId,
+      shipment,
+      `batch8-track-idem-sync2-${Date.now()}`
+    );
+    const after = await prisma.compraImportada.findFirstOrThrow({
+      where: { externalOrderIdOriginal: externalOrderId },
+      include: {
+        enviosExternos: { include: { pacotes: { include: { trackings: true } } } }
+      }
+    });
+    const afterTrackings = after.enviosExternos[0].pacotes
+      .flatMap((externalPackage) => externalPackage.trackings)
+      .map((tracking) => ({
+        id: tracking.id,
+        codigo: tracking.codigo,
+        ativo: tracking.ativo,
+        substituiTrackingId: tracking.substituiTrackingId
+      }))
+      .sort((a, b) => a.codigo.localeCompare(b.codigo));
+
+    expect(afterTrackings).toEqual(beforeTrackings);
   });
 });
