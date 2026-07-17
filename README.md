@@ -28,6 +28,15 @@ Status atual:
 - `docs/` — documentação funcional e técnica
 - `tasks/` — tarefas do Codex
 
+## Colaboração e qualidade
+
+O fluxo de implementação, revisão e aprovação está documentado em
+[`docs/AGENT_COLLABORATION_PROTOCOL_V1.md`](docs/AGENT_COLLABORATION_PROTOCOL_V1.md).
+Pull requests usam o template versionado e passam pelo Quality gate do GitHub
+(PostgreSQL 16, lint, typecheck, build e testes). O modelo de handoff para
+implementador e revisores está em
+[`docs/handoffs/PR_HANDOFF_TEMPLATE.md`](docs/handoffs/PR_HANDOFF_TEMPLATE.md).
+
 ## Requisitos
 
 - Node.js 22, conforme `.nvmrc`
