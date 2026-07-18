@@ -47,7 +47,7 @@ todo commit trivial.
    worktree não é uma sandbox de filesystem completa; o processo ainda pode
    fazer acesso por caminhos absolutos se o modelo permitir ações de leitura
    fora do diretório. Um `trap EXIT` garante remoção do worktree mesmo em falha.
-3. Roda `codex exec -s read-only -a never` no worktree isolado, com timeout
+3. Roda `codex -a never exec -s read-only` no worktree isolado, com timeout
    configurável (`AGENT_REVIEW_TIMEOUT`, padrão 300 s). O timeout usa um
    processo em background + `kill -TERM`, compatível com macOS (sem depender
    de `timeout` GNU). Ao expirar, registra status e encerra com erro.
