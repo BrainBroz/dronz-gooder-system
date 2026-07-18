@@ -1,6 +1,6 @@
 # Prontidão para produção
 
-**Baseline técnica:** `f413791` — Batches 0–7 e Auditoria Independente aprovados. A consolidação documental posterior está em `342e0f3`. Esta classificação cobre código, migrations e testes; publicação continua condicionada à infraestrutura e aos segredos do ambiente.
+**Baseline técnica:** `8644188` — Batches 0–8 e auditorias independentes aprovados. Os Batches 8.1, 8.2, 9 e o Gate eBay Buyer são documentais. A fundação de integração permanece desabilitada para providers reais. O Gate eBay comprovou OAuth Production e Trading API `GetOrders` buyer, inclusive tracking e quota, mas o adapter, o pipeline comum e a política operacional de sincronização ainda não foram implementados. A Amazon Business Reporting API permanece `PENDENTE_DE_ONBOARDING_EXTERNO`. Esta classificação cobre código, migrations e testes; publicação continua condicionada à infraestrutura e aos segredos do ambiente.
 
 ## Segurança
 
@@ -17,7 +17,11 @@
 4. Execute `npm run typecheck`, `npm run lint`, `npm run test` e `npm run build`.
 5. Inicie a API e valide `GET /health` atrás do proxy HTTPS.
 
-O seed cria dados administrativos e deve ser executado deliberadamente, somente com `SEED_ADMIN_*` definidos para o ambiente correto. Integrações reais Amazon/eBay, sincronização automática de ordens, tracking automático, e-mail, QR Code, PDF e Excel não fazem parte desta versão.
+O seed cria dados administrativos e deve ser executado deliberadamente, somente com `SEED_ADMIN_*` definidos para o ambiente correto. O Batch 8 prepara conexões e sincronização explícita por adapters, mas ingestão automática de compras buyer, tracking automático, e-mail operacional, QR Code, PDF e Excel não fazem parte desta versão.
+
+Referências `env:MARKETPLACE_*` não são credenciais: são ponteiros. Valores devem existir somente no ambiente/secret manager e nunca em banco, logs, respostas ou commits. Dronz e Gooder operam como compradores. Amazon SP-API e eBay Sell Fulfillment são seller-side e permanecem adiados. O Gate eBay validou consentimento, refresh, quota e resposta Production usando `GetOrders` com `OrderRole=Buyer`; os secrets usados no gate ficaram fora do Git, e produção ainda exige secret manager integrado ao `SecretProvider`. Para Amazon, e-mail autorizado é a fonte inicial planejada; a Amazon Business Reporting API permanece `PENDENTE_DE_ONBOARDING_EXTERNO` e será retomada futuramente. Gmail/Outlook exigirão OAuth, escopos mínimos, retenção e privacidade aprovados antes de qualquer ativação.
+
+A conexão Amazon Business planejada para a V1 usa uma conta `SHARED`, Amazon.com/EUA e USD, com arquitetura multi-conta preservada. O backfill inicial configurável é de 15 dias. Sincronização manual autorizada é obrigatória e a automática será configurável, com recomendação inicial de quatro horas. Nenhuma dessas decisões ativa uma integração: produção ainda exige onboarding, papéis concedidos, resposta sanitizada real, limites confirmados e referência de secrets em secret manager.
 
 Os testes de integração exigem `DATABASE_TEST_URL` apontando para um PostgreSQL exclusivo de testes. A suíte aplica migrations e seed nesse banco antes da execução e nunca deve receber a URL do banco de desenvolvimento ou produção.
 
@@ -39,4 +43,6 @@ O `npm audit` de 2026-07-13 reporta cinco vulnerabilidades na toolchain de desen
 
 O frontend usa lazy routes e chunks estáveis de vendor. O Batch 7 reduziu o maior chunk de 789,22 kB para 297,25 kB e eliminou o aviso do Vite para chunks acima de 500 kB, sem alterar comportamento ou dependências.
 
-Na validação do Batch 7, Prisma validate/generate, lint, typecheck, builds e duas execuções globais passaram. A baseline registrou 114 testes de API e 78 testes web, totalizando 192 testes por execução, sem ignorados.
+Na validação do Batch 8, Prisma validate/generate, lint, typecheck, builds e duas execuções globais passaram. A baseline registrou 126 testes de API e 78 testes web, totalizando 204 testes por execução, sem ignorados.
+
+O Batch 9, seus complementos e o Gate eBay Buyer não alteram a classificação de produção nem a contagem de testes. Eles congelam o contrato documental, as decisões Amazon, o modelo de evidências/eventos, a prioridade do painel mensal e a especificação comprovada do eBay. Nenhum adapter foi implementado. `ConfiancaConciliacao` não é mecanismo de autorização nem aprovação. O Batch 10 trata o pipeline comum; o Batch 11, o adapter eBay baseado em `GetOrders`; e o Batch 12, e-mail autorizado e reconciliação. Somente a futura retomada do adapter Amazon depende de onboarding, Analytics, capabilities, campos/resposta reais, rate limits e referência segura de secrets.

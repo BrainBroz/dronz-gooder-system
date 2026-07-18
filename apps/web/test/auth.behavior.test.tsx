@@ -87,6 +87,21 @@ describe("sessão web", () => {
     }
   );
 
+  it("mantém Categorias acessível no menu e oferece navegação móvel", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <Routes>
+        <Route path="/operacao" element={<Shell>Conteúdo</Shell>} />
+        <Route path="/categorias" element={<div>Categorias acessíveis</div>} />
+      </Routes>,
+      { route: "/operacao" }
+    );
+
+    expect(screen.getByRole("button", { name: "Abrir menu" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Categorias" }));
+    expect(await screen.findByText("Categorias acessíveis")).toBeTruthy();
+  });
+
   it("restaura a sessão com uma única atualização e preserva loja autorizada", async () => {
     useAuthStore.setState({
       accessToken: "antigo",

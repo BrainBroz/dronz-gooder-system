@@ -304,6 +304,8 @@ async function createImportedPurchase(
             identificadorOferta: item.identificadorOferta,
             precoUnitario: item.precoUnitario,
             moeda: item.moeda,
+            quantidadeCancelada: item.quantidadeCancelada,
+            quantidadeReembolsada: item.quantidadeReembolsada,
             merchantExternoId: item.merchantExternoId,
             payloadSnapshot: item.snapshot
           };
@@ -507,9 +509,38 @@ export async function setAssignment(
       await tx.$queryRaw`SELECT id FROM "CompraImportadaItem" WHERE id = ${itemId} FOR UPDATE`;
       const item = await tx.compraImportadaItem.findUnique({
         where: { id: itemId },
-        include: { atribuicoes: true }
+        include: {
+          atribuicoes: true,
+          compraImportada: { include: { conexaoMarketplace: true } }
+        }
       });
       if (!item) throw new AppError(404, "not_found");
+      const connection = item.compraImportada.conexaoMarketplace;
+      if (
+        connection?.escopo === "STORE_DEDICATED" &&
+        connection.lojaPermitidaId !== lojaId
+      ) {
+        await prisma.$transaction((auditTx) =>
+          audit(auditTx, {
+            usuarioId: identity.user.id,
+            lojaId,
+            permissionCode: "COMPRAS_IMPORTADAS_ATRIBUIR",
+            action: "MARKETPLACE_STORE_ASSIGNMENT_REJECTED",
+            entity: "CompraImportadaItem",
+            entityId: item.id,
+            correlationId,
+            idempotencyKey: key,
+            reason: "marketplace_connection_store_mismatch",
+            after: {
+              connectionId: connection.id,
+              allowedStoreId: connection.lojaPermitidaId,
+              requestedStoreId: lojaId
+            },
+            origin: "API_MARKETPLACE_INTEGRATIONS"
+          })
+        );
+        throw new AppError(403, "marketplace_connection_store_mismatch");
+      }
       if (item.version !== input.expectedVersion)
         throw new AppError(409, "concurrent_modification");
       const current = item.atribuicoes.find(

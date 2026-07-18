@@ -101,6 +101,6 @@ Nenhuma migration anterior foi editada e nenhuma coluna legada foi removida. O r
 - Sugestões automáticas de produto/fornecedor não foram implementadas.
 - O frontend foi implementado separadamente no Batch 6 e está documentado em `COMPRAS_UNIFICADAS_FRONTEND_V1.md`; este contrato permanece restrito ao backend.
 
-## Limite com integrações futuras
+## Limite com fontes futuras de buyer purchase ingestion
 
-O módulo recebe payload interno controlado, mas não autentica nem sincroniza Amazon/eBay. Integrações futuras devem adaptar cada provider ao contrato de staging existente, preservando identidade, idempotência e auditoria. Ordens podem ser importadas antes de qualquer tracking. Pacotes, códigos e atualizações posteriores pertencem ao futuro domínio independente de tracking e não devem ser incorporados diretamente às regras de materialização.
+O módulo recebe payload interno controlado, mas não acessa e-mail, documentos, CSV ou APIs externas. Futuras fontes de `buyer purchase ingestion` devem adaptar dados ao contrato de staging existente, preservando identidade, idempotência e auditoria. Amazon e eBay são origens possíveis, não a arquitetura central; APIs seller não resolvem o caso principal de compras realizadas. Ordens podem ser importadas antes de qualquer tracking. Pacotes, códigos e atualizações posteriores pertencem ao futuro domínio independente de tracking e não devem ser incorporados diretamente às regras de materialização.

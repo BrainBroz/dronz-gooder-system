@@ -45,6 +45,7 @@ model Loja {
   mapeamentosProdutoExterno     MapeamentoItemProduto[]
   mapeamentosMerchantFornecedor MapeamentoMerchantFornecedor[]
   materializacoesCompra         MaterializacaoCompra[]
+  conexoesMarketplaceDedicadas  ConexaoMarketplace[]
 }
 
 model Usuario {
@@ -76,6 +77,7 @@ model Usuario {
   atribuicoesCompraExterna       AtribuicaoCompraItem[]
   materializacoesCompra          MaterializacaoCompra[]
   conflitosCompraResolvidos      ConflitoCompra[]
+  conexoesMarketplaceCriadas     ConexaoMarketplace[]
 }
 
 model Perfil {
@@ -353,6 +355,43 @@ enum StatusContaExterna {
   INATIVA
 }
 
+enum MarketplaceProvider {
+  AMAZON
+  EBAY
+}
+
+enum EscopoConexaoMarketplace {
+  SHARED
+  STORE_DEDICATED
+}
+
+enum StatusConexaoMarketplace {
+  NOT_CONFIGURED
+  ACTIVE
+  INACTIVE
+  AUTHORIZATION_EXPIRED
+  ERROR
+}
+
+enum StatusExecucaoSincronizacao {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  PARTIALLY_SUCCEEDED
+  FAILED
+}
+
+enum OrigemExecucaoSincronizacao {
+  MANUAL
+  REPLAY
+  SCHEDULED
+}
+
+enum OrigemTrackingExterno {
+  MARKETPLACE
+  MANUAL
+}
+
 enum StatusMerchantExterno {
   ATIVO
   INATIVO
@@ -425,11 +464,78 @@ model ContaExterna {
   createdAt               DateTime                @default(now())
   updatedAt               DateTime                @updatedAt
 
-  criadoPor Usuario           @relation(fields: [criadoPorId], references: [id], onDelete: Restrict)
+  criadoPor Usuario              @relation(fields: [criadoPorId], references: [id], onDelete: Restrict)
   compras   CompraImportada[]
+  conexoes  ConexaoMarketplace[]
 
   @@unique([plataforma, identificadorExterno])
   @@index([status, plataforma])
+}
+
+model ConexaoMarketplace {
+  id                    String                   @id @default(cuid())
+  provider              MarketplaceProvider
+  contaExternaId        String
+  nome                  String
+  identificadorExterno  String
+  regiao                String?
+  marketplace           String?
+  escopo                EscopoConexaoMarketplace
+  lojaPermitidaId       String?
+  secretReference       String?
+  status                StatusConexaoMarketplace @default(NOT_CONFIGURED)
+  capabilities          String[]                 @default([])
+  autorizadoEm          DateTime?
+  autorizacaoExpiraEm   DateTime?
+  ultimaSincronizacaoEm DateTime?
+  cursorSincronizacao   String?
+  ultimoErroSanitizado  String?
+  version               Int                      @default(1)
+  criadoPorId           String
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+
+  contaExterna      ContaExterna            @relation(fields: [contaExternaId], references: [id], onDelete: Restrict)
+  lojaPermitida     Loja?                   @relation(fields: [lojaPermitidaId], references: [id], onDelete: Restrict)
+  criadoPor         Usuario                 @relation(fields: [criadoPorId], references: [id], onDelete: Restrict)
+  execucoes         ExecucaoSincronizacao[]
+  comprasImportadas CompraImportada[]
+
+  @@unique([provider, identificadorExterno])
+  @@unique([contaExternaId])
+  @@index([provider, status])
+  @@index([escopo, lojaPermitidaId])
+}
+
+model ExecucaoSincronizacao {
+  id             String                      @id @default(cuid())
+  conexaoId      String
+  status         StatusExecucaoSincronizacao @default(PENDING)
+  origem         OrigemExecucaoSincronizacao
+  cursorInicial  String?
+  cursorFinal    String?
+  janelaInicio   DateTime?
+  janelaFim      DateTime?
+  processados    Int                         @default(0)
+  criados        Int                         @default(0)
+  atualizados    Int                         @default(0)
+  ignorados      Int                         @default(0)
+  conflitos      Int                         @default(0)
+  falhas         Int                         @default(0)
+  correlationId  String                      @unique
+  idempotencyKey String?
+  requestHash    String?
+  erroSanitizado String?
+  iniciadoEm     DateTime?
+  finalizadoEm   DateTime?
+  createdAt      DateTime                    @default(now())
+  updatedAt      DateTime                    @updatedAt
+
+  conexao ConexaoMarketplace @relation(fields: [conexaoId], references: [id], onDelete: Restrict)
+
+  @@unique([conexaoId, idempotencyKey])
+  @@index([conexaoId, createdAt])
+  @@index([status, createdAt])
 }
 
 model MerchantExterno {
@@ -480,6 +586,7 @@ model CompraImportada {
   estado                     EstadoCompraImportada   @default(EM_REVISAO)
   version                    Int                     @default(1)
   ultimaSincronizacaoEm      DateTime?
+  conexaoMarketplaceId       String?
 
   loja                Loja?                  @relation(fields: [lojaId], references: [id], onDelete: SetNull)
   itens               CompraImportadaItem[]  @relation("compraImportadaItens")
@@ -489,6 +596,8 @@ model CompraImportada {
   merchantExterno     MerchantExterno?       @relation(fields: [merchantExternoId], references: [id], onDelete: Restrict)
   materializacoes     MaterializacaoCompra[]
   conflitos           ConflitoCompra[]
+  conexaoMarketplace  ConexaoMarketplace?    @relation(fields: [conexaoMarketplaceId], references: [id], onDelete: Restrict)
+  enviosExternos      EnvioExterno[]
 
   @@unique([fornecedorId, numeroPedido])
   @@unique([plataforma, contaExternaId, externalOrderIdNormalizado])
@@ -500,6 +609,7 @@ model CompraImportada {
   @@index([merchantExternoId, importadaEm])
   @@index([estado, importadaEm])
   @@index([referenciaPesquisavel])
+  @@index([conexaoMarketplaceId, ultimaSincronizacaoEm])
 }
 
 model CompraImportadaItem {
@@ -672,6 +782,80 @@ model ConflitoCompra {
 
   @@index([compraImportadaId, status])
   @@index([tipo, status])
+}
+
+model EnvioExterno {
+  id                  String    @id @default(cuid())
+  compraImportadaId   String
+  externalShipmentId  String
+  statusExterno       String?
+  enviadoEm           DateTime?
+  ultimaAtualizacaoEm DateTime
+  payloadSnapshot     Json?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  compraImportada CompraImportada @relation(fields: [compraImportadaId], references: [id], onDelete: Restrict)
+  pacotes         PacoteExterno[]
+
+  @@unique([compraImportadaId, externalShipmentId])
+  @@index([compraImportadaId, ultimaAtualizacaoEm])
+}
+
+model PacoteExterno {
+  id                String   @id @default(cuid())
+  envioExternoId    String
+  externalPackageId String
+  transportadora    String?
+  payloadSnapshot   Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  envio     EnvioExterno      @relation(fields: [envioExternoId], references: [id], onDelete: Restrict)
+  trackings TrackingExterno[]
+
+  @@unique([envioExternoId, externalPackageId])
+  @@index([envioExternoId])
+}
+
+model TrackingExterno {
+  id                   String                @id @default(cuid())
+  pacoteExternoId      String
+  codigo               String
+  transportadora       String?
+  origem               OrigemTrackingExterno @default(MARKETPLACE)
+  statusExterno        String?
+  ativo                Boolean               @default(true)
+  substituiTrackingId  String?
+  criadoExternamenteEm DateTime?
+  ultimaAtualizacaoEm  DateTime
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  pacote      PacoteExterno           @relation(fields: [pacoteExternoId], references: [id], onDelete: Restrict)
+  substitui   TrackingExterno?        @relation("TrackingSubstituicao", fields: [substituiTrackingId], references: [id], onDelete: Restrict)
+  substitutos TrackingExterno[]       @relation("TrackingSubstituicao")
+  eventos     EventoTrackingExterno[]
+
+  // A unicidade com transportadora nullable usa índice funcional na migration.
+  @@index([pacoteExternoId, codigo])
+  @@index([codigo])
+  @@index([pacoteExternoId, ativo])
+}
+
+model EventoTrackingExterno {
+  id                String   @id @default(cuid())
+  trackingExternoId String
+  externalEventId   String?
+  statusExterno     String
+  ocorridoEm        DateTime
+  recebidoEm        DateTime @default(now())
+  payloadSnapshot   Json?
+
+  tracking TrackingExterno @relation(fields: [trackingExternoId], references: [id], onDelete: Restrict)
+
+  @@unique([trackingExternoId, externalEventId])
+  @@index([trackingExternoId, ocorridoEm])
 }
 
 model PedidoCompra {

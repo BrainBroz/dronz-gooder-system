@@ -176,7 +176,8 @@ export async function allocate(
   if (!item || !m || !v) throw new AppError(404, "not_found");
   if (!item.produto.peso) throw new AppError(409, "missing_weight");
   const used = item.alocacoesMala.reduce((s, a) => s + a.quantidade, 0);
-  if (d.quantidade < 1 || used + d.quantidade > item.quantidade)
+  // Alocação só pode consumir o que já foi fisicamente recebido em Miami.
+  if (d.quantidade < 1 || used + d.quantidade > item.quantidadeRecebidaMiami)
     throw new AppError(409, "conflict");
   const created = await prisma.alocacaoMala.create({
     data: { ...d, lojaId, pesoConteudoKg: item.produto.peso.mul(d.quantidade) }

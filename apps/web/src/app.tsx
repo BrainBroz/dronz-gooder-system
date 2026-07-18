@@ -75,9 +75,9 @@ const OperationsPage = React.lazy(() =>
     default: module.OperationsPage
   }))
 );
-const UnifiedPurchasesPage = React.lazy(() =>
-  import("./pages/UnifiedPurchasesPage").then((module) => ({
-    default: module.UnifiedPurchasesPage
+const PurchaseQueuePage = React.lazy(() =>
+  import("./pages/PurchaseQueuePage").then((module) => ({
+    default: module.PurchaseQueuePage
   }))
 );
 
@@ -213,6 +213,45 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const { user, stores, activeStoreId, setActiveStoreId, clear } =
     useAuthStore();
   const navigate = useNavigate();
+  const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
+  const navigationItems = [
+    ["Operação", "/operacao"],
+    ["Checkpoints", "/checkpoints"],
+    ["Categorias", "/categorias"],
+    ["Produtos", "/produtos"],
+    ["Fornecedores", "/fornecedores"],
+    ["Compras", "/compras"],
+    ["Pedidos Operacionais", "/pedidos"],
+    ["Logística", "/logistica"],
+    ["Estoque", "/estoque"],
+    ["Financeiro", "/financeiro"],
+    ["Relatórios", "/relatorios"]
+  ] as const;
+  const navigateFromMenu = (path: string) => {
+    setMobileMenuOpen(false);
+    navigate(path);
+  };
+  const drawerContent = (
+    <Box p={2} sx={{ width: 224 }}>
+      <Typography variant="h6">Dronz & Gooder</Typography>
+      <Stack mt={2} gap={1}>
+        {stores.map((store) => (
+          <Button
+            key={store.id}
+            variant={store.id === activeStoreId ? "contained" : "text"}
+            onClick={() => setActiveStoreId(store.id)}
+          >
+            {store.nome}
+          </Button>
+        ))}
+        {navigationItems.map(([label, path]) => (
+          <Button key={path} onClick={() => navigateFromMenu(path)}>
+            {label}
+          </Button>
+        ))}
+      </Stack>
+    </Box>
+  );
   const logout = async () => {
     try {
       await api.post("/auth/logout");
@@ -226,47 +265,48 @@ export function Shell({ children }: { children: React.ReactNode }) {
   };
   return (
     <Box sx={{ display: "flex" }}>
-      <Drawer variant="permanent">
-        <Box p={2}>
-          <Typography variant="h6">Dronz & Gooder</Typography>
-          <Stack mt={2} gap={1}>
-            {stores.map((store) => (
-              <Button
-                key={store.id}
-                variant={store.id === activeStoreId ? "contained" : "text"}
-                onClick={() => setActiveStoreId(store.id)}
-              >
-                {store.nome}
-              </Button>
-            ))}
-            {[
-              ["Operação", "/operacao"],
-              ["Checkpoints", "/checkpoints"],
-              ["Produtos", "/produtos"],
-              ["Fornecedores", "/fornecedores"],
-              ["Compras Unificadas", "/compras"],
-              ["Pedidos Operacionais", "/pedidos"],
-              ["Logística", "/logistica"],
-              ["Estoque", "/estoque"],
-              ["Financeiro", "/financeiro"],
-              ["Relatórios", "/relatorios"]
-            ].map(([label, path]) => (
-              <Button key={path} onClick={() => navigate(path)}>
-                {label}
-              </Button>
-            ))}
-          </Stack>
-        </Box>
+      <Drawer
+        variant="temporary"
+        open={mobileMenuOpen}
+        onClose={() => setMobileMenuOpen(false)}
+        sx={{ display: { xs: "block", md: "none" } }}
+        slotProps={{ paper: { sx: { width: 224 } } }}
+      >
+        {drawerContent}
       </Drawer>
-      <Box component="main" sx={{ flex: 1, ml: 28 }}>
+      <Drawer
+        variant="permanent"
+        sx={{ display: { xs: "none", md: "block" } }}
+      >
+        {drawerContent}
+      </Drawer>
+      <Box
+        component="main"
+        sx={{ flex: 1, minWidth: 0, ml: { xs: 0, md: 28 } }}
+      >
         <AppBar position="static">
-          <Toolbar>
-            <Typography sx={{ flex: 1 }}>{user?.email}</Typography>
+          <Toolbar sx={{ gap: 1 }}>
+            <Button
+              onClick={() => setMobileMenuOpen(true)}
+              sx={{ display: { xs: "inline-flex", md: "none" }, mr: 1 }}
+              aria-label="Abrir menu"
+            >
+              Menu
+            </Button>
+            <Typography
+              sx={{ flex: 1, display: { xs: "none", sm: "block" } }}
+            >
+              {user?.email}
+            </Typography>
             <Select
               size="small"
               value={activeStoreId ?? ""}
               onChange={(event) => setActiveStoreId(String(event.target.value))}
-              sx={{ mr: 2, minWidth: 140 }}
+              sx={{
+                ml: "auto",
+                mr: { xs: 0, sm: 1 },
+                minWidth: { xs: 110, sm: 140 }
+              }}
             >
               {stores.map((store) => (
                 <MenuItem key={store.id} value={store.id}>
@@ -353,7 +393,7 @@ export function AppRoutes() {
               element={
                 <AuthGate>
                   <Shell>
-                    <UnifiedPurchasesPage />
+                    <PurchaseQueuePage />
                   </Shell>
                 </AuthGate>
               }
