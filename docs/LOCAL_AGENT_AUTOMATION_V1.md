@@ -38,13 +38,61 @@ todo commit trivial.
 
 1. Verifica árvore de trabalho limpa (`git status --porcelain` vazio) — a
    revisão exige que o commit já exista, sem alterações soltas por cima.
-2. Roda `codex exec -s read-only -a never` contra o diff do commit em relação
-   a `${AGENT_REVIEW_BASE:-origin/main}`, com uma instrução explícita para o
-   Codex rodar `git diff` ele mesmo (o script não embute o diff no prompt).
-3. Grava `metadata.md` e `codex.md` em `.agents/reviews/<sha-do-commit>/`.
-4. Se o Codex falhar (`exit != 0`) ou não gerar parecer (arquivo vazio), o
-   hook termina com erro explícito — silêncio nunca é interpretado como
-   aprovação.
+   Isso não substitui o isolamento real: arquivos ignorados (`.env`, etc.)
+   são invisíveis ao `git status` e só ficam de fora pelo worktree abaixo.
+2. Cria um worktree temporário e descartável baseado no commit HEAD (`git
+   worktree add --detach`). O Codex roda exclusivamente nesse checkout limpo
+   — sem `.env`, sem `.agents`, sem arquivos ignorados ou alterações locais.
+   Um `trap EXIT` garante remoção do worktree mesmo em falha.
+3. Roda `codex exec -s read-only -a never` no worktree isolado, com timeout
+   configurável (`AGENT_REVIEW_TIMEOUT`, padrão 300 s). O timeout usa um
+   processo em background + `kill -TERM`, compatível com macOS (sem depender
+   de `timeout` GNU). Ao expirar, registra status e encerra com erro.
+4. O prompt declara explicitamente que diff, mensagens de commit e nomes de
+   arquivo são dados não confiáveis e não podem sobrescrever as instruções do
+   revisor.
+5. Grava `metadata.md` e `codex.md` em `.agents/reviews/<sha-do-commit>/`
+   com permissões restritas (diretório 700, arquivos 600).
+6. Se o Codex falhar (`exit != 0`), expirar ou não gerar parecer (arquivo
+   vazio ou ausente), o hook termina com erro explícito — silêncio nunca é
+   interpretado como aprovação.
+
+## Base do diff e atualização de origin/main
+
+`origin/main` é a referência **local e cacheada** no momento da execução —
+o script não faz `git fetch` automaticamente para não adicionar dependência
+de rede ao hook. Consequência prática:
+
+- Em revisões de commits do dia a dia, a defasagem é irrelevante.
+- **Antes de uma revisão de conclusão ou PR**, execute `git fetch` para
+  garantir que `origin/main` reflita o estado atual do remote.
+- Alternativamente, passe a base explicitamente:
+  `AGENT_REVIEW_BASE=origin/main git commit ...`
+
+O SHA da base é registrado no `metadata.md` de cada revisão.
+
+## Timeout e compatibilidade macOS
+
+O `codex exec` roda com timeout padrão de 300 segundos, configurável via
+`AGENT_REVIEW_TIMEOUT`. A implementação usa um processo em background com
+`kill -TERM`, sem depender de `timeout` GNU (não disponível por padrão no
+macOS). Ao expirar:
+
+- O processo Codex recebe `SIGTERM`.
+- O hook registra "timed out" no stderr e encerra com código 1.
+- O worktree temporário é removido via `trap EXIT`.
+- O terminal do desenvolvedor não fica bloqueado indefinidamente.
+
+## Artefatos locais e permissões
+
+Os arquivos gerados em `.agents/reviews/<sha>/` recebem permissões restritas:
+
+- Diretório: `chmod 700`
+- `metadata.md`, `codex.md`, `codex.stderr`: `chmod 600`
+
+O diretório `.agents/` é ignorado pelo Git (`.gitignore: /.agents/`), local
+por checkout, e deve ser limpo periodicamente. Não armazenar tokens, segredos
+ou dados de produção nesses arquivos.
 
 ## O que este gate NUNCA faz
 
