@@ -85,6 +85,16 @@ Evidências externas são imutáveis e versionadas; a situação corrente é pro
 - manter backend como fonte de autorização;
 - não alterar regras de negócio sem aprovação explícita.
 
+### Revisão local por Codex
+
+- O repositório usa um gate local opcional que audita commits com Codex, sem depender do GitHub.
+- Quando uma entrega estiver pronta para auditoria, o implementador cria o commit com o trailer `Agent-Review: required` (ver `docs/LOCAL_AGENT_AUTOMATION_V1.md`).
+- O hook local executa `codex exec` em modo somente leitura (`read-only`, sem aprovação automática) e grava o parecer em `.agents/reviews/<commit>/codex.md`.
+- O implementador deve ler o parecer antes de declarar a entrega concluída; retorno de processo bem-sucedido não equivale a aprovação.
+- O gate local nunca faz push, merge, amend, reset ou edição automática. Falha do Codex, ou ausência de parecer, bloqueia a declaração de conclusão até nova execução ou investigação.
+- Gemini via PAL/clink é revisão opcional, sob demanda, para arquitetura, contratos e documentos grandes — não faz parte deste gate por commit (a API tem cota gratuita restrita, inadequada para disparo automático a cada commit).
+- Arquivos em `.agents/` são locais e ignorados pelo Git; não armazenar tokens, segredos ou dados de produção neles.
+
 ## Documentação
 
 - `docs/PROJECT_CONTEXT_MASTER.md` é o índice oficial de continuidade e deve refletir somente o que o código e os testes comprovam.
