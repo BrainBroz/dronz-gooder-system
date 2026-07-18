@@ -105,7 +105,7 @@ timeout_fired_file="$(mktemp)"
 set +e
 # `exec` replaces the subshell with the Codex process so codex_pid IS the
 # Codex PID; kill -TERM then targets Codex directly, not just the subshell.
-(cd "$tmp_worktree" && exec codex -s read-only -a never exec "$codex_prompt") \
+(cd "$tmp_worktree" && exec codex -a never exec -s read-only "$codex_prompt") \
   >"$review_dir/codex.md" 2>"$review_dir/codex.stderr" &
 codex_pid=$!
 
