@@ -41,9 +41,12 @@ todo commit trivial.
    Isso não substitui o isolamento real: arquivos ignorados (`.env`, etc.)
    são invisíveis ao `git status` e só ficam de fora pelo worktree abaixo.
 2. Cria um worktree temporário e descartável baseado no commit HEAD (`git
-   worktree add --detach`). O Codex roda exclusivamente nesse checkout limpo
-   — sem `.env`, sem `.agents`, sem arquivos ignorados ou alterações locais.
-   Um `trap EXIT` garante remoção do worktree mesmo em falha.
+   worktree add --detach`). O Codex roda nesse checkout limpo: `.env`,
+   `.agents` e demais arquivos ignorados ou não rastreados **não estão
+   presentes no checkout** — o que remove o vetor prático de exposição. O
+   worktree não é uma sandbox de filesystem completa; o processo ainda pode
+   fazer acesso por caminhos absolutos se o modelo permitir ações de leitura
+   fora do diretório. Um `trap EXIT` garante remoção do worktree mesmo em falha.
 3. Roda `codex exec -s read-only -a never` no worktree isolado, com timeout
    configurável (`AGENT_REVIEW_TIMEOUT`, padrão 300 s). O timeout usa um
    processo em background + `kill -TERM`, compatível com macOS (sem depender
@@ -76,8 +79,9 @@ avance depois da revisão.
 ## Timeout e compatibilidade macOS
 
 O `codex exec` roda com timeout padrão de 300 segundos, configurável via
-`AGENT_REVIEW_TIMEOUT` (deve ser um inteiro positivo — valores inválidos
-encerram o script com erro imediato antes de iniciar qualquer processo). A
+`AGENT_REVIEW_TIMEOUT`. O valor deve ser um inteiro positivo entre 1 e 3600
+(inclusive) — valores inválidos, zeros (`0`, `00`...) e valores acima do
+limite encerram o script com erro imediato antes de iniciar qualquer processo. A
 implementação usa um processo em background com `kill -TERM`, sem depender de
 `timeout` GNU (não disponível por padrão no macOS). Ao expirar:
 

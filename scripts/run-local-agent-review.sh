@@ -11,12 +11,17 @@ timeout_seconds="${AGENT_REVIEW_TIMEOUT:-300}"
 # watcher (invalid input makes `sleep` fail immediately, leaving Codex running
 # indefinitely with the error silently swallowed by `|| true`).
 case "$timeout_seconds" in
-  '' | *[!0-9]* | 0)
-    printf 'AGENT_REVIEW_TIMEOUT must be a positive integer, got: %s\n' \
+  '' | *[!0-9]* | 0*)
+    printf 'AGENT_REVIEW_TIMEOUT must be a positive integer (1-3600), got: %s\n' \
       "$timeout_seconds" >&2
     exit 2
     ;;
 esac
+if [ "$timeout_seconds" -gt 3600 ]; then
+  printf 'AGENT_REVIEW_TIMEOUT must not exceed 3600 seconds, got: %s\n' \
+    "$timeout_seconds" >&2
+  exit 2
+fi
 
 # Require a clean working tree so the audited commit is the complete
 # intended snapshot. Does not substitute for worktree isolation below —
@@ -88,7 +93,9 @@ codex_prompt="$diff_instruction Act only as an independent technical reviewer. D
 # Run Codex in the isolated worktree with a timeout.
 # Background + kill pattern for macOS compatibility (no GNU timeout required).
 set +e
-(cd "$tmp_worktree" && codex -s read-only -a never exec "$codex_prompt") \
+# `exec` replaces the subshell with the Codex process so codex_pid IS the
+# Codex PID; kill -TERM then targets Codex directly, not just the subshell.
+(cd "$tmp_worktree" && exec codex -s read-only -a never exec "$codex_prompt") \
   >"$review_dir/codex.md" 2>"$review_dir/codex.stderr" &
 codex_pid=$!
 
