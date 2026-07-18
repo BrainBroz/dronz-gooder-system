@@ -92,6 +92,8 @@ codex_prompt="$diff_instruction Act only as an independent technical reviewer. D
 
 # Run Codex in the isolated worktree with a timeout.
 # Background + kill pattern for macOS compatibility (no GNU timeout required).
+timeout_fired_file="$(mktemp)"
+
 set +e
 # `exec` replaces the subshell with the Codex process so codex_pid IS the
 # Codex PID; kill -TERM then targets Codex directly, not just the subshell.
@@ -99,7 +101,16 @@ set +e
   >"$review_dir/codex.md" 2>"$review_dir/codex.stderr" &
 codex_pid=$!
 
-(sleep "$timeout_seconds" && kill -TERM "$codex_pid" 2>/dev/null) &
+# Watcher: marks timeout via file, then SIGTERM + SIGKILL grace period.
+# Using a marker file rather than relying solely on exit code 143/137,
+# because Codex could handle/ignore SIGTERM and exit with code 0.
+(
+  sleep "$timeout_seconds"
+  printf '1' > "$timeout_fired_file"
+  kill -TERM "$codex_pid" 2>/dev/null || true
+  sleep 5
+  kill -KILL "$codex_pid" 2>/dev/null || true
+) &
 watcher_pid=$!
 
 wait "$codex_pid"
@@ -109,11 +120,15 @@ kill "$watcher_pid" 2>/dev/null
 wait "$watcher_pid" 2>/dev/null || true
 set -e
 
+timeout_fired=false
+[ -s "$timeout_fired_file" ] && timeout_fired=true
+rm -f "$timeout_fired_file"
+
 # Apply permissions before result checks so files are secured regardless of outcome.
 # Files are always created by the redirects above; chmod should not fail.
 chmod 600 "$review_dir/codex.md" "$review_dir/codex.stderr"
 
-if [ "$codex_status" -eq 143 ] || [ "$codex_status" -eq 137 ]; then
+if $timeout_fired; then
   printf 'Codex review timed out after %ss. See %s/codex.stderr\n' \
     "$timeout_seconds" "$review_dir" >&2
   exit 1

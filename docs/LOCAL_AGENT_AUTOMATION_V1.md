@@ -85,7 +85,11 @@ limite encerram o script com erro imediato antes de iniciar qualquer processo. A
 implementação usa um processo em background com `kill -TERM`, sem depender de
 `timeout` GNU (não disponível por padrão no macOS). Ao expirar:
 
-- O processo Codex recebe `SIGTERM`.
+- O processo Codex recebe `SIGTERM`. Um arquivo marcador é gravado antes
+  do sinal, garantindo detecção de timeout mesmo se Codex ignorar o sinal
+  e encerrar com código 0.
+- Após 5 s de graça, `SIGKILL` é enviado caso o processo ainda exista —
+  garantindo terminação mesmo se `SIGTERM` for ignorado.
 - O hook registra "timed out" no stderr e encerra com código 1.
 - O worktree temporário é removido via `trap EXIT`.
 - O terminal do desenvolvedor não fica bloqueado indefinidamente.
