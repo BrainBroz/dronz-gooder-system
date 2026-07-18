@@ -69,14 +69,17 @@ de rede ao hook. Consequência prática:
 - Alternativamente, passe a base explicitamente:
   `AGENT_REVIEW_BASE=origin/main git commit ...`
 
-O SHA da base é registrado no `metadata.md` de cada revisão.
+O SHA resolvido da base é registrado no `metadata.md` de cada revisão, não
+apenas o nome simbólico — isso garante reprodutibilidade mesmo que o remote
+avance depois da revisão.
 
 ## Timeout e compatibilidade macOS
 
 O `codex exec` roda com timeout padrão de 300 segundos, configurável via
-`AGENT_REVIEW_TIMEOUT`. A implementação usa um processo em background com
-`kill -TERM`, sem depender de `timeout` GNU (não disponível por padrão no
-macOS). Ao expirar:
+`AGENT_REVIEW_TIMEOUT` (deve ser um inteiro positivo — valores inválidos
+encerram o script com erro imediato antes de iniciar qualquer processo). A
+implementação usa um processo em background com `kill -TERM`, sem depender de
+`timeout` GNU (não disponível por padrão no macOS). Ao expirar:
 
 - O processo Codex recebe `SIGTERM`.
 - O hook registra "timed out" no stderr e encerra com código 1.
