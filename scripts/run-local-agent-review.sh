@@ -17,7 +17,10 @@ case "$timeout_seconds" in
     exit 2
     ;;
 esac
-if [ "$timeout_seconds" -gt 3600 ]; then
+# Check length before arithmetic: bash [ -gt ] errors on values that overflow
+# a C long (e.g. 42-digit integers), which would let an invalid value slip through.
+# A valid value 1-3600 has at most 4 digits, so reject anything longer first.
+if [ "${#timeout_seconds}" -gt 4 ] || [ "$timeout_seconds" -gt 3600 ]; then
   printf 'AGENT_REVIEW_TIMEOUT must not exceed 3600 seconds, got: %s\n' \
     "$timeout_seconds" >&2
   exit 2
@@ -58,9 +61,14 @@ tmp_worktree="$(mktemp -d)"
 rmdir "$tmp_worktree"
 git worktree add --detach --quiet "$tmp_worktree" HEAD
 
+# Initialize before trap so cleanup can safely reference it even if the
+# script exits before timeout_fired_file is assigned its mktemp path.
+timeout_fired_file=""
+
 cleanup() {
   git worktree remove --force "$tmp_worktree" 2>/dev/null || true
   rm -rf "$tmp_worktree" 2>/dev/null || true
+  [ -n "$timeout_fired_file" ] && rm -f "$timeout_fired_file" 2>/dev/null || true
 }
 trap cleanup EXIT
 
