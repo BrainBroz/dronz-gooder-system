@@ -976,4 +976,3 @@ describe("PurchaseQueuePage — C1-bis: perda de permissão não desmonta mutaç
     expect(post).not.toHaveBeenCalled();
   });
 });
-
