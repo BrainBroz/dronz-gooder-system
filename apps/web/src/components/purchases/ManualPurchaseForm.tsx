@@ -96,6 +96,17 @@ export function ManualPurchaseForm({
     quantidade > 0 &&
     precoUnitario >= 0;
 
+  const resetPurchaseFields = () => {
+    setMerchantExternoId("");
+    setProdutoId("");
+    setReferencia("");
+    setTitulo("");
+    setQuantidade(1);
+    setPrecoUnitario(0);
+    setDataPedido(new Date().toISOString().slice(0, 10));
+    // lojaId preservado: é contexto de trabalho, não conteúdo da compra.
+  };
+
   const handleSubmit = async () => {
     // Trava síncrona: mesmo que o re-render que desabilita o botão ainda não
     // tenha acontecido, um segundo clique real (fireEvent duplo, síncrono)
@@ -125,6 +136,7 @@ export function ManualPurchaseForm({
           ]
         }
       });
+      resetPurchaseFields();
       setSuccess(true);
     } catch (err) {
       const { message } = readMutationError(err);

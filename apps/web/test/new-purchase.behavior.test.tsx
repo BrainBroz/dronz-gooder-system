@@ -160,9 +160,15 @@ describe("NewPurchaseDrawer — Compra manual", () => {
     expect(config.headers["idempotency-key"]).toEqual(expect.any(String));
     expect(config.headers["x-store-id"]).toBe("store-dronz");
 
-    // drawer permanece aberto — mostra sucesso, não fecha sozinho
+    // drawer permanece aberto com alerta de sucesso e campos limpos
     expect(await screen.findByText("Compra manual criada.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Criar compra manual" })).toBeTruthy();
+    // campos obrigatórios limpos → botão desabilitado; reenvio não cria segunda compra
+    expect((screen.getByRole("button", { name: "Criar compra manual" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Referência") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Item") as HTMLInputElement).value).toBe("");
+    // tentativa de clique no botão desabilitado não produz segunda chamada
+    fireEvent.click(screen.getByRole("button", { name: "Criar compra manual" }));
+    expect(post).toHaveBeenCalledTimes(1);
   });
 
   it("erro: mantém o formulário aberto com os dados preenchidos", async () => {
