@@ -24,11 +24,13 @@ export const externalPlatforms: Exclude<PurchaseProvider, "MANUAL">[] = [
  */
 export function ContextualMerchantCreator({
   defaultPlataforma,
+  plataformaLocked,
   onCreated,
   onCancel,
   onPendingChange
 }: {
   defaultPlataforma?: Exclude<PurchaseProvider, "MANUAL">;
+  plataformaLocked?: Exclude<PurchaseProvider, "MANUAL">;
   onCreated: (merchantId: string) => void;
   onCancel: () => void;
   onPendingChange?: (pending: boolean) => void;
@@ -39,6 +41,7 @@ export function ContextualMerchantCreator({
   const [plataforma, setPlataforma] = React.useState<Exclude<PurchaseProvider, "MANUAL">>(
     defaultPlataforma ?? "AMAZON"
   );
+  const plataformaEfetiva = plataformaLocked ?? plataforma;
   const [nome, setNome] = React.useState("");
   const [externalMerchantId, setExternalMerchantId] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
@@ -60,7 +63,7 @@ export function ContextualMerchantCreator({
     try {
       const response = await createMerchant.mutateAsync({
         payload: {
-          plataforma,
+          plataforma: plataformaEfetiva,
           nome,
           externalMerchantId: externalMerchantId || undefined
         },
@@ -90,10 +93,11 @@ export function ContextualMerchantCreator({
       <TextField
         select
         label="Plataforma"
-        value={plataforma}
+        value={plataformaEfetiva}
         onChange={(event) =>
           setPlataforma(event.target.value as Exclude<PurchaseProvider, "MANUAL">)
         }
+        disabled={Boolean(plataformaLocked)}
       >
         {externalPlatforms.map((p) => (
           <MenuItem key={p} value={p}>

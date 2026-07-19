@@ -633,6 +633,40 @@ describe("NewPurchaseDrawer — Merchant contextual", () => {
   });
 });
 
+describe("NewPurchaseDrawer — merchant contextual: plataforma travada pelo form pai", () => {
+  it("criador usa plataforma do form externo e impede troca manual", async () => {
+    installProductsApi();
+    const post = vi.spyOn(api, "post").mockResolvedValue({ data: { id: "merchant-ebay-1" } });
+    renderWithProviders(
+      <NewPurchaseDrawer open={true} onClose={vi.fn()} listItems={listItems} />,
+      { permissions: permissionsWithMerchant }
+    );
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Externa" }));
+    // seleciona EBAY no form externo
+    await selectMuiOption("Plataforma", "EBAY");
+
+    await user.click(screen.getByRole("button", { name: "Criar novo merchant" }));
+
+    // o select de plataforma dentro do criador deve estar desabilitado
+    const allSelects = screen.getAllByRole("combobox", { name: /Plataforma/i });
+    const creatorSelect = allSelects[allSelects.length - 1];
+    expect(creatorSelect.getAttribute("aria-disabled")).toBe("true");
+
+    await user.type(screen.getByLabelText("Nome do merchant", { exact: false }), "Merchant eBay");
+    await user.click(screen.getByRole("button", { name: "Criar merchant" }));
+
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith(
+        "/imported-purchases/merchants",
+        expect.objectContaining({ plataforma: "EBAY", nome: "Merchant eBay" }),
+        expect.anything()
+      )
+    );
+  });
+});
+
 describe("NewPurchaseDrawer — duplo clique real (trava síncrona, não apenas disabled)", () => {
   it("Manual: apenas uma chamada de rede mesmo com dois cliques síncronos", async () => {
     installProductsApi();

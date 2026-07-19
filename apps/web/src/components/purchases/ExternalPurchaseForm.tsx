@@ -161,6 +161,7 @@ export function ExternalPurchaseForm({
       {creatingMerchant ? (
         <ContextualMerchantCreator
           defaultPlataforma={plataforma}
+          plataformaLocked={plataforma}
           onCreated={(id) => {
             setMerchantExternoId(id);
             setCreatingMerchant(false);
