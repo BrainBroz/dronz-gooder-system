@@ -22,8 +22,8 @@ export function ContextualAccountCreator({
   const permissions = useAuthStore((state) => state.permissions);
   const canCreateAccount = permissions.includes("CONTA_EXTERNA_GERENCIAR");
   const { createAccount } = useUnifiedPurchaseMutations();
-  const [nome, setNome] = React.useState("");
-  const [externalAccountId, setExternalAccountId] = React.useState("");
+  const [nomeExibicao, setNomeExibicao] = React.useState("");
+  const [identificadorExterno, setIdentificadorExterno] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
   const submittingRef = React.useRef(false);
 
@@ -42,8 +42,8 @@ export function ContextualAccountCreator({
         payload: {
           plataforma: plataformaLocked,
           origemIntegracao: "API",
-          nome,
-          externalAccountId: externalAccountId || undefined
+          nomeExibicao,
+          identificadorExterno
         },
         idempotencyKey: newIdempotencyKey()
       });
@@ -75,21 +75,22 @@ export function ContextualAccountCreator({
         size="small"
       />
       <TextField
-        label="Nome da conta"
-        value={nome}
-        onChange={(event) => setNome(event.target.value)}
+        label="ID externo da conta"
+        value={identificadorExterno}
+        onChange={(event) => setIdentificadorExterno(event.target.value)}
         required
       />
       <TextField
-        label="ID externo (opcional)"
-        value={externalAccountId}
-        onChange={(event) => setExternalAccountId(event.target.value)}
+        label="Nome de exibição"
+        value={nomeExibicao}
+        onChange={(event) => setNomeExibicao(event.target.value)}
+        required
       />
       <Stack direction="row" gap={1}>
         <Button
           variant="contained"
           size="small"
-          disabled={!nome || createAccount.isPending}
+          disabled={!nomeExibicao || !identificadorExterno || createAccount.isPending}
           onClick={handleCreate}
         >
           {createAccount.isPending ? (

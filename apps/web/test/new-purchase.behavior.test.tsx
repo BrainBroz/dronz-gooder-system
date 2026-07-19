@@ -688,13 +688,18 @@ describe("NewPurchaseDrawer — conta externa contextual", () => {
     await user.click(screen.getByRole("button", { name: "Externa" }));
     await user.click(screen.getByRole("button", { name: "Criar nova conta externa" }));
 
-    await user.type(screen.getByLabelText("Nome da conta", { exact: false }), "Conta EBAY Nova");
+    await user.type(screen.getByLabelText("ID externo da conta", { exact: false }), "ebay-seller-99");
+    await user.type(screen.getByLabelText("Nome de exibição", { exact: false }), "Conta EBAY Nova");
     await user.click(screen.getByRole("button", { name: "Criar conta" }));
 
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith(
         "/imported-purchases/accounts",
-        expect.objectContaining({ nome: "Conta EBAY Nova", origemIntegracao: "API" }),
+        expect.objectContaining({
+          identificadorExterno: "ebay-seller-99",
+          nomeExibicao: "Conta EBAY Nova",
+          origemIntegracao: "API"
+        }),
         expect.anything()
       )
     );
@@ -732,7 +737,8 @@ describe("NewPurchaseDrawer — conta externa contextual", () => {
 
     await user.click(screen.getByRole("button", { name: "Externa" }));
     await user.click(screen.getByRole("button", { name: "Criar nova conta externa" }));
-    await user.type(screen.getByLabelText("Nome da conta", { exact: false }), "Conta Pend");
+    await user.type(screen.getByLabelText("ID externo da conta", { exact: false }), "pend-ext-id");
+    await user.type(screen.getByLabelText("Nome de exibição", { exact: false }), "Conta Pend");
     await user.click(screen.getByRole("button", { name: "Criar conta" }));
 
     await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
