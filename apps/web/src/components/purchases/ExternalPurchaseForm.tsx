@@ -19,6 +19,7 @@ import { ContextualMerchantCreator, externalPlatforms } from "./ContextualMercha
 import { ContextualAccountCreator } from "./ContextualAccountCreator";
 import { accountSuggestions, merchantSuggestions } from "./entitySuggestions";
 import { readMutationError } from "./types";
+import { localDateString } from "./dateUtils";
 
 export function ExternalPurchaseForm({
   listItems,
@@ -52,9 +53,7 @@ export function ExternalPurchaseForm({
   const [merchantExternoId, setMerchantExternoId] = React.useState("");
   const [externalOrderId, setExternalOrderId] = React.useState("");
   const [referencia, setReferencia] = React.useState("");
-  const [dataPedido, setDataPedido] = React.useState(
-    new Date().toISOString().slice(0, 10)
-  );
+  const [dataPedido, setDataPedido] = React.useState(localDateString);
   const [moeda, setMoeda] = React.useState("USD");
   const [titulo, setTitulo] = React.useState("");
   const [externalLineId, setExternalLineId] = React.useState("");

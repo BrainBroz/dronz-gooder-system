@@ -23,6 +23,7 @@ import { EntityPicker } from "./EntityPicker";
 import { ContextualMerchantCreator } from "./ContextualMerchantCreator";
 import { merchantSuggestions } from "./entitySuggestions";
 import { readMutationError } from "./types";
+import { localDateString } from "./dateUtils";
 
 export function ManualPurchaseForm({
   listItems,
@@ -51,9 +52,7 @@ export function ManualPurchaseForm({
   const [merchantExternoId, setMerchantExternoId] = React.useState("");
   const [produtoId, setProdutoId] = React.useState("");
   const [referencia, setReferencia] = React.useState("");
-  const [dataPedido, setDataPedido] = React.useState(
-    new Date().toISOString().slice(0, 10)
-  );
+  const [dataPedido, setDataPedido] = React.useState(localDateString);
   const [titulo, setTitulo] = React.useState("");
   const [quantidade, setQuantidade] = React.useState(1);
   const [precoUnitario, setPrecoUnitario] = React.useState(0);
@@ -103,7 +102,7 @@ export function ManualPurchaseForm({
     setTitulo("");
     setQuantidade(1);
     setPrecoUnitario(0);
-    setDataPedido(new Date().toISOString().slice(0, 10));
+    setDataPedido(localDateString());
     // lojaId preservado: é contexto de trabalho, não conteúdo da compra.
   };
 

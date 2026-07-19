@@ -1,7 +1,7 @@
 import React from "react";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../src/api/client";
 import { NewPurchaseDrawer } from "../src/components/purchases/NewPurchaseDrawer";
 import { PurchaseQueuePage } from "../src/pages/PurchaseQueuePage";
@@ -976,3 +976,4 @@ describe("PurchaseQueuePage — C1-bis: perda de permissão não desmonta mutaç
     expect(post).not.toHaveBeenCalled();
   });
 });
+
