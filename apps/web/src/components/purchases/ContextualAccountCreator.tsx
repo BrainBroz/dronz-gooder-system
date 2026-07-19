@@ -79,12 +79,14 @@ export function ContextualAccountCreator({
         value={identificadorExterno}
         onChange={(event) => setIdentificadorExterno(event.target.value)}
         required
+        disabled={createAccount.isPending}
       />
       <TextField
         label="Nome de exibição"
         value={nomeExibicao}
         onChange={(event) => setNomeExibicao(event.target.value)}
         required
+        disabled={createAccount.isPending}
       />
       <Stack direction="row" gap={1}>
         <Button

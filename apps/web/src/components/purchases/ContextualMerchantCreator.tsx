@@ -110,11 +110,13 @@ export function ContextualMerchantCreator({
         value={nome}
         onChange={(event) => setNome(event.target.value)}
         required
+        disabled={createMerchant.isPending}
       />
       <TextField
         label="ID externo (opcional)"
         value={externalMerchantId}
         onChange={(event) => setExternalMerchantId(event.target.value)}
+        disabled={createMerchant.isPending}
       />
       <Stack direction="row" gap={1}>
         <Button
