@@ -80,6 +80,19 @@ export function ExternalPurchaseForm({
     quantidade > 0 &&
     precoUnitario >= 0;
 
+  const resetPurchaseFields = () => {
+    setContaExternaId("");
+    setMerchantExternoId("");
+    setExternalOrderId("");
+    setReferencia("");
+    setTitulo("");
+    setExternalLineId("");
+    setQuantidade(1);
+    setPrecoUnitario(0);
+    setDataPedido(localDateString());
+    // plataforma e moeda preservados: são contexto de trabalho, não conteúdo da compra.
+  };
+
   const handlePlataformaChange = (value: Exclude<PurchaseProvider, "MANUAL">) => {
     setPlataforma(value);
     // Conta/merchant já selecionados podem não existir na nova plataforma —
@@ -118,6 +131,7 @@ export function ExternalPurchaseForm({
           ]
         }
       });
+      resetPurchaseFields();
       setSuccess(true);
     } catch (err) {
       const { message } = readMutationError(err);
