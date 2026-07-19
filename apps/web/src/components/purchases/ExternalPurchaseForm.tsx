@@ -16,6 +16,7 @@ import { useAuthStore } from "../../stores/auth";
 import type { PurchaseProvider, UnifiedPurchaseListItem } from "../../types/unified-purchases";
 import { EntityPicker } from "./EntityPicker";
 import { ContextualMerchantCreator, externalPlatforms } from "./ContextualMerchantCreator";
+import { ContextualAccountCreator } from "./ContextualAccountCreator";
 import { accountSuggestions, merchantSuggestions } from "./entitySuggestions";
 import { readMutationError } from "./types";
 
@@ -31,9 +32,13 @@ export function ExternalPurchaseForm({
   const canCreateMerchant = useAuthStore((state) =>
     state.permissions.includes("MAPPING_FORNECEDOR_GERENCIAR")
   );
+  const canCreateAccount = useAuthStore((state) =>
+    state.permissions.includes("CONTA_EXTERNA_GERENCIAR")
+  );
   const { importPurchase } = useUnifiedPurchaseMutations();
   const [contextualMerchantPending, setContextualMerchantPending] = React.useState(false);
-  const pending = importPurchase.isPending || contextualMerchantPending;
+  const [contextualAccountPending, setContextualAccountPending] = React.useState(false);
+  const pending = importPurchase.isPending || contextualMerchantPending || contextualAccountPending;
   const submittingRef = React.useRef(false);
 
   React.useEffect(() => {
@@ -56,6 +61,7 @@ export function ExternalPurchaseForm({
   const [quantidade, setQuantidade] = React.useState(1);
   const [precoUnitario, setPrecoUnitario] = React.useState(0);
   const [creatingMerchant, setCreatingMerchant] = React.useState(false);
+  const [creatingAccount, setCreatingAccount] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState(false);
 
@@ -81,6 +87,8 @@ export function ExternalPurchaseForm({
     // nunca envia uma combinação que o backend rejeitaria.
     setContaExternaId("");
     setMerchantExternoId("");
+    setCreatingAccount(false);
+    setCreatingMerchant(false);
   };
 
   const handleSubmit = async () => {
@@ -149,14 +157,34 @@ export function ExternalPurchaseForm({
         ))}
       </TextField>
 
-      <EntityPicker
-        label="Conta externa"
-        suggestions={accounts}
-        value={contaExternaId}
-        onChange={setContaExternaId}
-        required
-        disabled={pending}
-      />
+      {creatingAccount ? (
+        <ContextualAccountCreator
+          plataformaLocked={plataforma}
+          onCreated={(id) => {
+            setContaExternaId(id);
+            setCreatingAccount(false);
+            setContextualAccountPending(false);
+          }}
+          onCancel={() => setCreatingAccount(false)}
+          onPendingChange={setContextualAccountPending}
+        />
+      ) : (
+        <Box>
+          <EntityPicker
+            label="Conta externa"
+            suggestions={accounts}
+            value={contaExternaId}
+            onChange={setContaExternaId}
+            required
+            disabled={pending}
+          />
+          {canCreateAccount && (
+            <Button size="small" onClick={() => setCreatingAccount(true)} disabled={pending}>
+              Criar nova conta externa
+            </Button>
+          )}
+        </Box>
+      )}
 
       {creatingMerchant ? (
         <ContextualMerchantCreator

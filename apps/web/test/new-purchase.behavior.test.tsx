@@ -344,7 +344,7 @@ describe("NewPurchaseDrawer — Compra externa", () => {
     await selectMuiOption("Conta externa", "Informar ID manualmente…");
     await user.type(
       screen.getByLabelText("Conta externa (ID)", { exact: false }),
-      "conta-fora-da-lista-123"
+      "clyaccount000000000000001"
     );
     await user.type(screen.getByLabelText("Número externo"), "EXT-002");
     await user.type(screen.getByLabelText("Referência"), "Pedido Fallback");
@@ -354,7 +354,7 @@ describe("NewPurchaseDrawer — Compra externa", () => {
 
     await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
     const [, payload] = post.mock.calls[0] as [string, Record<string, unknown>];
-    expect(payload).toMatchObject({ contaExternaId: "conta-fora-da-lista-123" });
+    expect(payload).toMatchObject({ contaExternaId: "clyaccount000000000000001" });
   });
 
   it("erro: mantém o formulário aberto com a mensagem do backend", async () => {
@@ -664,6 +664,102 @@ describe("NewPurchaseDrawer — merchant contextual: plataforma travada pelo for
         expect.anything()
       )
     );
+  });
+});
+
+describe("NewPurchaseDrawer — conta externa contextual", () => {
+  const permissionsWithAccount = [...permissionsWithMerchant, "CONTA_EXTERNA_GERENCIAR"];
+
+  it("fila vazia: criar conta → preencher → registrar compra com o CUID retornado", async () => {
+    installProductsApi();
+    const post = vi.spyOn(api, "post").mockImplementation((url: string) => {
+      if (url === "/imported-purchases/accounts")
+        return Promise.resolve({ data: { id: "clyaccount000000000000099" } });
+      if (url === "/imported-purchases")
+        return Promise.resolve({ data: { id: "purchase-ext-99" } });
+      throw new Error(`POST inesperado: ${url}`);
+    });
+    renderWithProviders(
+      <NewPurchaseDrawer open={true} onClose={vi.fn()} listItems={[]} />,
+      { permissions: permissionsWithAccount }
+    );
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Externa" }));
+    await user.click(screen.getByRole("button", { name: "Criar nova conta externa" }));
+
+    await user.type(screen.getByLabelText("Nome da conta", { exact: false }), "Conta EBAY Nova");
+    await user.click(screen.getByRole("button", { name: "Criar conta" }));
+
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith(
+        "/imported-purchases/accounts",
+        expect.objectContaining({ nome: "Conta EBAY Nova", origemIntegracao: "API" }),
+        expect.anything()
+      )
+    );
+
+    // ID retornado autopreenchido — preenche o restante e registra
+    await user.type(screen.getByLabelText("Número externo"), "EXT-99");
+    await user.type(screen.getByLabelText("Referência"), "REF-99");
+    await user.type(screen.getByLabelText("Item"), "Item externo 99");
+
+    await user.click(screen.getByRole("button", { name: "Registrar compra externa" }));
+
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith(
+        "/imported-purchases",
+        expect.objectContaining({ contaExternaId: "clyaccount000000000000099" }),
+        expect.anything()
+      )
+    );
+  });
+
+  it("conta contextual pendente: bloqueia Fechar e Trocar origem até terminar", async () => {
+    installProductsApi();
+    let resolvePost!: (v: unknown) => void;
+    const pending = new Promise((r) => { resolvePost = r; });
+    const post = vi.spyOn(api, "post").mockImplementation((url: string) => {
+      if (url === "/imported-purchases/accounts") return pending as never;
+      throw new Error(`POST inesperado: ${url}`);
+    });
+    const onClose = vi.fn();
+    renderWithProviders(
+      <NewPurchaseDrawer open={true} onClose={onClose} listItems={[]} />,
+      { permissions: permissionsWithAccount }
+    );
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Externa" }));
+    await user.click(screen.getByRole("button", { name: "Criar nova conta externa" }));
+    await user.type(screen.getByLabelText("Nome da conta", { exact: false }), "Conta Pend");
+    await user.click(screen.getByRole("button", { name: "Criar conta" }));
+
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "Fechar" }) as HTMLButtonElement).disabled).toBe(true)
+    );
+    expect((screen.getByRole("button", { name: "← Trocar origem" }) as HTMLButtonElement).disabled).toBe(true);
+
+    await user.keyboard("{Escape}");
+    expect(onClose).not.toHaveBeenCalled();
+
+    resolvePost({ data: { id: "clyaccount000000000000100" } });
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "Fechar" }) as HTMLButtonElement).disabled).toBe(false)
+    );
+  });
+
+  it("sem CONTA_EXTERNA_GERENCIAR não exibe botão Criar nova conta", async () => {
+    installProductsApi();
+    renderWithProviders(
+      <NewPurchaseDrawer open={true} onClose={vi.fn()} listItems={[]} />,
+      { permissions: permissionsWithMerchant }
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Externa" }));
+    expect(screen.queryByRole("button", { name: "Criar nova conta externa" })).toBeNull();
   });
 });
 
