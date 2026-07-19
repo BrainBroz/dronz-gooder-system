@@ -29,6 +29,17 @@ export function EntityPicker({
     suggestions.length > 0 && (value === "" || matchesSuggestion) ? "suggestion" : "manual"
   );
 
+  // Quando as sugestões mudam (ex: troca de plataforma) e o ID selecionado
+  // não está mais na lista, limpa o valor invisível para que `canSubmit`
+  // não deixe o formulário avançar com um ID que o operador não consegue ver.
+  React.useEffect(() => {
+    if (mode === "suggestion" && value !== "" && !suggestions.some((s) => s.id === value)) {
+      onChange("");
+    }
+  // onChange é sempre um setter estável do pai; omitir da lista é seguro.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [suggestions, mode, value]);
+
   if (mode === "manual") {
     return (
       <Stack gap={0.5}>
