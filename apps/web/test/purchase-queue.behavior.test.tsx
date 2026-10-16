@@ -233,6 +233,33 @@ describe("UX-1B — Fila de Compras (estrutural, somente leitura)", () => {
     expect(screen.getByText("ORDER-OLD")).toBeTruthy();
   });
 
+  it("não esconde atribuição pendente por conflito aberto", async () => {
+    installApi({ overview: { ...overview, awaitingMaterialization: 1 } });
+    renderWithProviders(<PurchaseQueuePage />, { permissions });
+    await userEvent.click(await screen.findByRole("tab", { name: "Atribuições pendentes" }));
+    expect(screen.getByText("ORDER-CONFLICT")).toBeTruthy();
+    expect(screen.queryByText("ORDER-OLD")).toBeNull();
+  });
+
+  it("não esconde atribuição pendente quando allowedActions não autoriza materializar", async () => {
+    installApi({
+      overview: { ...overview, awaitingMaterialization: 1 },
+      list: {
+        items: [{
+          ...oldNoBlockItem,
+          progress: { total: 2, assigned: 2, materialized: 0, pending: 0 },
+          allowedActions: []
+        }],
+        page: 1,
+        limit: 20,
+        total: 1
+      }
+    });
+    renderWithProviders(<PurchaseQueuePage />, { permissions });
+    await userEvent.click(await screen.findByRole("tab", { name: "Atribuições pendentes" }));
+    expect(screen.getByText("ORDER-OLD")).toBeTruthy();
+  });
+
   it("exibe vazio, erro e retry sem fabricar dados", async () => {
     installApi({ list: { items: [], page: 1, limit: 20, total: 0 } });
     renderWithProviders(<PurchaseQueuePage />, { permissions });

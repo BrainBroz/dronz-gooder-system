@@ -33,8 +33,7 @@ export function matchesQuickFilter(
     case "conflicts":
       return item.conflictCount > 0;
     case "readyToMaterialize":
-      return item.allowedActions.includes("MATERIALIZE_STORE_ALLOCATION") ||
-        item.blockedReasons.some((reason) => reason.code === "ALREADY_MATERIALIZED");
+      return item.progress.assigned > item.progress.materialized;
     default:
       return true;
   }
