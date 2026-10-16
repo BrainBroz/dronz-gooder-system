@@ -94,7 +94,7 @@ export function EntityPicker({
       >
         {suggestions.map((suggestion) => (
           <MenuItem key={suggestion.id} value={suggestion.id}>
-            {suggestion.name} · {suggestion.plataforma}
+            {suggestion.name} · Origem da compra: {suggestion.plataforma}
           </MenuItem>
         ))}
         <MenuItem value={MANUAL_OPTION}>Informar ID manualmente…</MenuItem>

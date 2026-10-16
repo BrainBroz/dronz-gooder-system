@@ -22,7 +22,7 @@ import { EntityPicker } from "./EntityPicker";
 import { ContextualMerchantCreator } from "./ContextualMerchantCreator";
 import { merchantSuggestions } from "./entitySuggestions";
 import { readMutationError } from "./types";
-import { localDateString } from "./dateUtils";
+import { localDateString, utcNoonFromLocalDate } from "./dateUtils";
 
 export function ManualPurchaseForm({
   listItems,
@@ -83,6 +83,7 @@ export function ManualPurchaseForm({
     : "";
 
   const merchants = merchantSuggestions(listItems);
+  const dataPedidoIso = utcNoonFromLocalDate(dataPedido);
 
   const canSubmit =
     !creatingMerchant &&
@@ -90,7 +91,7 @@ export function ManualPurchaseForm({
     Boolean(merchantExternoId) &&
     Boolean(selectedProductId) &&
     Boolean(referencia) &&
-    Boolean(dataPedido) &&
+    Boolean(dataPedidoIso) &&
     Boolean(titulo) &&
     quantidade > 0 &&
     precoUnitario >= 0;
@@ -110,7 +111,7 @@ export function ManualPurchaseForm({
     // Trava síncrona: mesmo que o re-render que desabilita o botão ainda não
     // tenha acontecido, um segundo clique real (fireEvent duplo, síncrono)
     // não passa daqui. Repetições do mesmo payload mantêm a idempotency key.
-    if (submittingRef.current) return;
+    if (submittingRef.current || !dataPedidoIso) return;
     submittingRef.current = true;
     setError(null);
     setSuccess(false);
@@ -118,7 +119,7 @@ export function ManualPurchaseForm({
       referencia,
       lojaId,
       merchantExternoId,
-      dataPedido: new Date(`${dataPedido}T12:00:00.000Z`).toISOString(),
+      dataPedido: dataPedidoIso,
       moeda: "USD",
       itens: [{ titulo, quantidade, precoUnitario, moeda: "USD", produtoId }]
     };

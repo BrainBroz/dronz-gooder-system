@@ -119,6 +119,25 @@ describe("PurchaseQueuePage — botão + Nova compra", () => {
 });
 
 describe("NewPurchaseDrawer — Compra manual", () => {
+  it("corrigir data inválida libera o envio sem travar a compra", async () => {
+    installProductsApi();
+    const post = vi.spyOn(api, "post").mockResolvedValue({ data: { id: "purchase-date" } });
+    renderWithProviders(<NewPurchaseDrawer open={true} onClose={vi.fn()} listItems={listItems} />,
+      { permissions: permissionsWithMerchant });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Manual" }));
+    await selectMuiOption("Merchant", "Merchant Árvore · Origem da compra: AMAZON");
+    await selectMuiOption("Produto", "301 — Produto Dronz");
+    await user.type(screen.getByLabelText("Referência"), "MANUAL-DATE");
+    await user.type(screen.getByLabelText("Item"), "Item data");
+    fireEvent.change(screen.getByLabelText("Data"), { target: { value: "10000-10-16" } });
+    expect((screen.getByRole("button", { name: "Criar compra manual" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Data"), { target: { value: "2026-10-16" } });
+    await user.click(screen.getByRole("button", { name: "Criar compra manual" }));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    expect(post.mock.calls[0][1]).toMatchObject({ dataPedido: "2026-10-16T12:00:00.000Z" });
+  });
+
   it("mostra falha do catálogo, permite retry e preserva os campos", async () => {
     const get = vi.spyOn(api, "get")
       .mockRejectedValueOnce(new Error("network"))
@@ -128,7 +147,7 @@ describe("NewPurchaseDrawer — Compra manual", () => {
       { permissions: permissionsWithMerchant });
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Manual" }));
-    await selectMuiOption("Merchant", "Merchant Árvore · AMAZON");
+    await selectMuiOption("Merchant", "Merchant Árvore · Origem da compra: AMAZON");
     await user.type(screen.getByLabelText("Referência"), "KEEP-CATALOG");
     await user.type(screen.getByLabelText("Item"), "Item preservado");
     expect(await screen.findByText("Não foi possível carregar os produtos da loja.")).toBeTruthy();
@@ -149,7 +168,7 @@ describe("NewPurchaseDrawer — Compra manual", () => {
       { permissions: permissionsWithMerchant });
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Manual" }));
-    await selectMuiOption("Merchant", "Merchant Árvore · AMAZON");
+    await selectMuiOption("Merchant", "Merchant Árvore · Origem da compra: AMAZON");
     await selectMuiOption("Produto", "301 — Produto Dronz");
     await user.type(screen.getByLabelText("Referência"), "MANUAL-HIDDEN");
     await user.type(screen.getByLabelText("Item"), "Item manual");
@@ -170,7 +189,7 @@ describe("NewPurchaseDrawer — Compra manual", () => {
       { permissions: permissionsWithMerchant });
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Manual" }));
-    await selectMuiOption("Merchant", "Merchant Árvore · AMAZON");
+    await selectMuiOption("Merchant", "Merchant Árvore · Origem da compra: AMAZON");
     await user.click(screen.getByRole("combobox", { name: /Produto/i }));
     expect(await screen.findByRole("option", { name: "301 — Produto Dronz" })).toBeTruthy();
     expect(screen.queryByRole("option", { name: "302 — Inativo" })).toBeNull();
@@ -196,7 +215,7 @@ describe("NewPurchaseDrawer — Compra manual", () => {
       { permissions: permissionsWithMerchant });
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Manual" }));
-    await selectMuiOption("Merchant", "Merchant Árvore · AMAZON");
+    await selectMuiOption("Merchant", "Merchant Árvore · Origem da compra: AMAZON");
     await selectMuiOption("Produto", "301 — Produto Dronz");
     await user.type(screen.getByLabelText("Referência"), "MANUAL-RETRY");
     await user.type(screen.getByLabelText("Item"), "Item manual");
@@ -234,7 +253,7 @@ describe("NewPurchaseDrawer — Compra manual", () => {
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: "Manual" }));
-    await selectMuiOption("Merchant", "Merchant Árvore · AMAZON");
+    await selectMuiOption("Merchant", "Merchant Árvore · Origem da compra: AMAZON");
     await selectMuiOption("Produto", "301 — Produto Dronz");
     await user.type(screen.getByLabelText("Referência"), "MANUAL-001");
     await user.type(screen.getByLabelText("Item"), "Item manual");
@@ -289,7 +308,7 @@ describe("NewPurchaseDrawer — Compra manual", () => {
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: "Manual" }));
-    await selectMuiOption("Merchant", "Merchant Árvore · AMAZON");
+    await selectMuiOption("Merchant", "Merchant Árvore · Origem da compra: AMAZON");
     await selectMuiOption("Produto", "301 — Produto Dronz");
     await user.type(screen.getByLabelText("Referência"), "MANUAL-002");
     await user.type(screen.getByLabelText("Item"), "Item manual 2");
@@ -350,7 +369,7 @@ describe("NewPurchaseDrawer — Compra manual", () => {
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: "Manual" }));
-    await selectMuiOption("Merchant", "Merchant Árvore · AMAZON");
+    await selectMuiOption("Merchant", "Merchant Árvore · Origem da compra: AMAZON");
     await selectMuiOption("Produto", "301 — Produto Dronz");
     await user.type(screen.getByLabelText("Referência"), "MANUAL-PEND");
     await user.type(screen.getByLabelText("Item"), "Item pendente");
@@ -420,8 +439,8 @@ describe("NewPurchaseDrawer — Compra externa", () => {
         { permissions: [...permissionsWithMerchant, "CONTA_EXTERNA_GERENCIAR"] });
       const user = userEvent.setup();
       await user.click(screen.getByRole("button", { name: "Externa" }));
-      await selectMuiOption("Conta externa", "Conta Amazon Principal · AMAZON");
-      await selectMuiOption("Merchant", "Merchant Árvore · AMAZON");
+      await selectMuiOption("Conta externa", "Conta Amazon Principal · Origem da compra: AMAZON");
+      await selectMuiOption("Merchant", "Merchant Árvore · Origem da compra: AMAZON");
       await user.type(screen.getByLabelText("Número externo"), "EXT-HIDDEN");
       await user.type(screen.getByLabelText("Referência"), "REF-HIDDEN");
       await user.type(screen.getByLabelText("Item"), "Item externo");
@@ -445,7 +464,7 @@ describe("NewPurchaseDrawer — Compra externa", () => {
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: "Externa" }));
-    await selectMuiOption("Conta externa", "Conta Amazon Principal · AMAZON");
+    await selectMuiOption("Conta externa", "Conta Amazon Principal · Origem da compra: AMAZON");
     await user.type(screen.getByLabelText("Número externo"), "EXT-001");
     await user.type(screen.getByLabelText("Referência"), "Pedido Externo");
     await user.type(screen.getByLabelText("Item"), "Produto Externo");
@@ -505,7 +524,7 @@ describe("NewPurchaseDrawer — Compra externa", () => {
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: "Externa" }));
-    await selectMuiOption("Conta externa", "Conta Amazon Principal · AMAZON");
+    await selectMuiOption("Conta externa", "Conta Amazon Principal · Origem da compra: AMAZON");
     await user.type(screen.getByLabelText("Número externo"), "EXT-003");
     await user.type(screen.getByLabelText("Referência"), "Pedido Erro");
     await user.type(screen.getByLabelText("Item"), "Produto Erro");
@@ -544,7 +563,7 @@ describe("NewPurchaseDrawer — Compra externa", () => {
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: "Externa" }));
-    await selectMuiOption("Conta externa", "Conta Amazon Principal · AMAZON");
+    await selectMuiOption("Conta externa", "Conta Amazon Principal · Origem da compra: AMAZON");
     await user.type(screen.getByLabelText("Número externo"), "EXT-PEND");
     await user.type(screen.getByLabelText("Referência"), "Pedido Pendente");
     await user.type(screen.getByLabelText("Item"), "Item pendente");
@@ -686,7 +705,7 @@ describe("NewPurchaseDrawer — Merchant contextual", () => {
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: "Manual" }));
-    await selectMuiOption("Merchant", "Merchant Árvore · AMAZON");
+    await selectMuiOption("Merchant", "Merchant Árvore · Origem da compra: AMAZON");
     await user.type(screen.getByLabelText("Referência"), "MANUAL-CTX");
 
     await user.click(screen.getByRole("button", { name: "Criar novo merchant" }));
@@ -976,7 +995,7 @@ describe("NewPurchaseDrawer — duplo clique real (trava síncrona, não apenas 
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: "Manual" }));
-    await selectMuiOption("Merchant", "Merchant Árvore · AMAZON");
+    await selectMuiOption("Merchant", "Merchant Árvore · Origem da compra: AMAZON");
     await selectMuiOption("Produto", "301 — Produto Dronz");
     await user.type(screen.getByLabelText("Referência"), "MANUAL-DBL");
     await user.type(screen.getByLabelText("Item"), "Item duplo clique");
@@ -1003,7 +1022,7 @@ describe("NewPurchaseDrawer — duplo clique real (trava síncrona, não apenas 
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: "Externa" }));
-    await selectMuiOption("Conta externa", "Conta Amazon Principal · AMAZON");
+    await selectMuiOption("Conta externa", "Conta Amazon Principal · Origem da compra: AMAZON");
     await user.type(screen.getByLabelText("Número externo"), "EXT-DBL");
     await user.type(screen.getByLabelText("Referência"), "Pedido Duplo");
     await user.type(screen.getByLabelText("Item"), "Item duplo");
@@ -1062,7 +1081,7 @@ describe("NewPurchaseDrawer — compatibilidade por plataforma (compra externa)"
     );
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Externa" }));
-    await selectMuiOption("Conta externa", "Conta Amazon Principal · AMAZON");
+    await selectMuiOption("Conta externa", "Conta Amazon Principal · Origem da compra: AMAZON");
 
     const contaCombobox = screen.getByRole("combobox", { name: /Conta externa/i });
     expect(contaCombobox.textContent).toContain("Conta Amazon Principal");
@@ -1111,7 +1130,7 @@ describe("PurchaseQueuePage — C1-bis: perda de permissão não desmonta mutaç
 
     await user.click(await screen.findByRole("button", { name: "+ Nova compra" }));
     await user.click(screen.getByRole("button", { name: "Manual" }));
-    await selectMuiOption("Merchant", "Merchant Árvore · AMAZON");
+    await selectMuiOption("Merchant", "Merchant Árvore · Origem da compra: AMAZON");
     await selectMuiOption("Produto", "301 — Produto Dronz");
     await user.type(screen.getByLabelText("Referência"), "MANUAL-PERM");
     await user.type(screen.getByLabelText("Item"), "Item perm");
@@ -1145,7 +1164,7 @@ describe("PurchaseQueuePage — C1-bis: perda de permissão não desmonta mutaç
 
     await user.click(await screen.findByRole("button", { name: "+ Nova compra" }));
     await user.click(screen.getByRole("button", { name: "Manual" }));
-    await selectMuiOption("Merchant", "Merchant Árvore · AMAZON");
+    await selectMuiOption("Merchant", "Merchant Árvore · Origem da compra: AMAZON");
     await selectMuiOption("Produto", "301 — Produto Dronz");
     await user.type(screen.getByLabelText("Referência"), "MANUAL-NOIMPORT");
     await user.type(screen.getByLabelText("Item"), "Item sem permissão");

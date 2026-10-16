@@ -6,7 +6,7 @@ export type EntitySuggestion = {
   plataforma: string;
 };
 
-const MULTIPLE_PLATFORMS_LABEL = "Múltiplas plataformas";
+const MULTIPLE_PLATFORMS_LABEL = "Múltiplas origens";
 const MULTIPLE_NAMES_LABEL = "Múltiplos nomes";
 
 type Accumulator = { id: string; names: Set<string>; plataformas: Set<string> };
@@ -18,9 +18,10 @@ type Accumulator = { id: string; names: Set<string>; plataformas: Set<string> };
  * bloqueia um ID que não esteja nesta lista (o formulário sempre aceita ID
  * manual como alternativa).
  *
- * Se o mesmo ID aparecer associado a mais de uma plataforma ou mais de um
+ * O provider indica a origem da compra, não a plataforma cadastrada do merchant.
+ * Se o mesmo ID aparecer associado a mais de uma origem ou mais de um
  * nome nos itens carregados, o resultado nunca escolhe um valor
- * silenciosamente pela ordem de chegada — vira "Múltiplas plataformas" ou
+ * silenciosamente pela ordem de chegada — vira "Múltiplas origens" ou
  * "Múltiplos nomes". Os conjuntos são acumulados em `Set`, então o resultado
  * lógico independe da ordem de entrada dos itens.
  *

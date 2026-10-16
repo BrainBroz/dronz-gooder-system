@@ -42,7 +42,7 @@ describe("EntityPicker", () => {
 
   it("ID que corresponde a uma sugestão é preservado ao voltar para sugestões", async () => {
     render(<Wrapper />);
-    const user = await selectOption("Conta", "Conta A · AMAZON");
+    const user = await selectOption("Conta", "Conta A · Origem da compra: AMAZON");
     expect(screen.getByTestId("value").textContent).toBe("acc-1");
 
     await selectOption("Conta", "Informar ID manualmente…");
@@ -61,10 +61,10 @@ describe("EntityPicker", () => {
 
   it("selecionar outra sugestão substitui corretamente o valor anterior", async () => {
     render(<Wrapper />);
-    await selectOption("Conta", "Conta A · AMAZON");
+    await selectOption("Conta", "Conta A · Origem da compra: AMAZON");
     expect(screen.getByTestId("value").textContent).toBe("acc-1");
 
-    await selectOption("Conta", "Conta B · EBAY");
+    await selectOption("Conta", "Conta B · Origem da compra: EBAY");
     expect(screen.getByTestId("value").textContent).toBe("acc-2");
   });
 

@@ -40,14 +40,14 @@ describe("entitySuggestions", () => {
     expect(result[0]).toEqual({ id: "acc-1", name: "Conta A", plataforma: "AMAZON" });
   });
 
-  it("mesmo ID com providers distintos: nunca escolhe um silenciosamente, usa 'Múltiplas plataformas'", () => {
+  it("mesmo ID com providers distintos: nunca escolhe um silenciosamente, usa 'Múltiplas origens'", () => {
     const items = [
       item({ id: "p1", account: { id: "acc-1", name: "Conta A" }, provider: "AMAZON" }),
       item({ id: "p2", account: { id: "acc-1", name: "Conta A" }, provider: "EBAY" })
     ];
     const result = accountSuggestions(items);
     expect(result).toHaveLength(1);
-    expect(result[0].plataforma).toBe("Múltiplas plataformas");
+    expect(result[0].plataforma).toBe("Múltiplas origens");
     expect(result[0].id).toBe("acc-1");
   });
 
@@ -64,7 +64,7 @@ describe("entitySuggestions", () => {
 
     expect(reversedResult).toEqual(forwardResult);
     expect(forwardResult.find((s) => s.id === "acc-1")?.plataforma).toBe(
-      "Múltiplas plataformas"
+      "Múltiplas origens"
     );
     expect(forwardResult.find((s) => s.id === "acc-2")?.plataforma).toBe("WALMART");
   });
@@ -79,6 +79,16 @@ describe("entitySuggestions", () => {
     expect(result).toEqual([
       { id: "merch-1", name: "Merchant X", plataforma: "AMAZON" },
       { id: "merch-2", name: "Merchant Y", plataforma: "OUTRA" }
+    ]);
+  });
+
+  it("não confunde a origem MANUAL de uma compra com a plataforma do merchant", () => {
+    const items = [
+      item({ id: "manual", merchant: { id: "merch-1", name: "Merchant X" }, provider: "MANUAL" }),
+      item({ id: "amazon", merchant: { id: "merch-1", name: "Merchant X" }, provider: "AMAZON" })
+    ];
+    expect(merchantSuggestions(items)).toEqual([
+      { id: "merch-1", name: "Merchant X", plataforma: "Múltiplas origens" }
     ]);
   });
 

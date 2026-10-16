@@ -19,7 +19,7 @@ import { ContextualMerchantCreator, externalPlatforms } from "./ContextualMercha
 import { ContextualAccountCreator } from "./ContextualAccountCreator";
 import { accountSuggestions, merchantSuggestions } from "./entitySuggestions";
 import { readMutationError } from "./types";
-import { localDateString } from "./dateUtils";
+import { localDateString, utcNoonFromLocalDate } from "./dateUtils";
 
 export function ExternalPurchaseForm({
   listItems,
@@ -69,6 +69,7 @@ export function ExternalPurchaseForm({
   // compra (invalid_external_account/invalid_external_merchant).
   const accounts = accountSuggestions(listItems, plataforma);
   const merchants = merchantSuggestions(listItems, plataforma);
+  const dataPedidoIso = utcNoonFromLocalDate(dataPedido);
 
   const canSubmit =
     !creatingAccount &&
@@ -76,7 +77,7 @@ export function ExternalPurchaseForm({
     Boolean(contaExternaId) &&
     Boolean(externalOrderId) &&
     Boolean(referencia) &&
-    Boolean(dataPedido) &&
+    Boolean(dataPedidoIso) &&
     moeda.length === 3 &&
     Boolean(titulo) &&
     quantidade > 0 &&
@@ -106,7 +107,7 @@ export function ExternalPurchaseForm({
   };
 
   const handleSubmit = async () => {
-    if (submittingRef.current) return;
+    if (submittingRef.current || !dataPedidoIso) return;
     submittingRef.current = true;
     setError(null);
     setSuccess(false);
@@ -119,7 +120,7 @@ export function ExternalPurchaseForm({
           merchantExternoId: merchantExternoId || undefined,
           externalOrderId,
           referencia,
-          dataPedido: new Date(`${dataPedido}T12:00:00.000Z`).toISOString(),
+          dataPedido: dataPedidoIso,
           moeda,
           origem: "API",
           itens: [
