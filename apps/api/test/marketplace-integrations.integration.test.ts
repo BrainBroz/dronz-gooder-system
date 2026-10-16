@@ -443,6 +443,29 @@ describe("marketplace integration foundation", () => {
     }
   });
 
+  it("trata grafias Unicode equivalentes como replay da mesma evidência", async () => {
+    const fixture = await connectionFixture("EBAY", "SHARED", "evidence-unicode");
+    const connection = await prisma.conexaoMarketplace.findUniqueOrThrow({
+      where: { id: fixture.connectionId }
+    });
+    const original = order("batch8-unicode-Ç");
+    const decomposed = order("batch8-unicode-Ç".normalize("NFD"));
+    const input = {
+      provider: "EBAY" as const,
+      accountId: connection.contaExternaId,
+      connectionId: fixture.connectionId,
+      actorId: fixture.userId,
+      correlationId: "batch8-unicode-correlation"
+    };
+    const first = await recordMarketplaceEvidence({ ...input, order: original });
+    const replay = await recordMarketplaceEvidence({ ...input, order: decomposed });
+    expect(first.created).toBe(true);
+    expect(replay).toMatchObject({ id: first.id, version: 1, created: false });
+    expect(await prisma.buyerEvidence.count({
+      where: { conexaoMarketplaceId: fixture.connectionId }
+    })).toBe(1);
+  });
+
   it("retry concorrente da mesma evidência retorna a única versão persistida", async () => {
     const fixture = await connectionFixture("EBAY", "SHARED", "evidence-concurrent");
     const payload = {

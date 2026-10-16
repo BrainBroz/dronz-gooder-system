@@ -14,10 +14,13 @@ const byJson = <T>(left: T, right: T) => {
 };
 
 function canonicalOrder(order: NormalizedMarketplaceOrder) {
+  const unicodeNormalized = JSON.parse(JSON.stringify(order, (_key, value: unknown) =>
+    typeof value === "string" ? value.normalize("NFC") : value
+  )) as NormalizedMarketplaceOrder;
   return {
-    ...order,
-    items: [...order.items].sort(byJson),
-    shipments: order.shipments
+    ...unicodeNormalized,
+    items: [...unicodeNormalized.items].sort(byJson),
+    shipments: unicodeNormalized.shipments
       .map((shipment) => ({
         ...shipment,
         packages: shipment.packages
