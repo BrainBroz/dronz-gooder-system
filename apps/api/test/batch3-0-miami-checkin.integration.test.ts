@@ -1,6 +1,7 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { PrismaClient } from "@prisma/client";
+import { createOperationalFixture } from "./helpers/operational-fixture";
 
 process.env.DATABASE_URL =
   process.env.DATABASE_TEST_URL ??
@@ -13,27 +14,22 @@ process.env.JWT_REFRESH_EXPIRES_IN = "30d";
 
 const prisma = new PrismaClient();
 let createApp: typeof import("../src/app").createApp;
+let fixture: Awaited<ReturnType<typeof createOperationalFixture>>;
 
 beforeAll(async () => {
   ({ createApp } = await import("../src/app"));
 });
 
 beforeEach(async () => {
-  await prisma.recebimentoMiami.deleteMany({});
-  await prisma.pedidoCompraItem.updateMany({
-    data: { quantidadeRecebidaMiami: 0 }
-  });
-  await prisma.pedidoCompra.updateMany({
-    where: { numeroPedido: { startsWith: "BATCH3_0_" } },
-    data: { status: "DRAFT" }
-  });
+  const store = await prisma.loja.findUniqueOrThrow({ where: { slug: "dronz" } });
+  fixture = await createOperationalFixture(prisma, store.id);
+});
+
+afterEach(async () => {
+  await fixture.cleanup();
 });
 
 afterAll(async () => {
-  await prisma.recebimentoMiami.deleteMany({});
-  await prisma.pedidoCompra.deleteMany({
-    where: { numeroPedido: { startsWith: "BATCH3_0_" } }
-  });
   await prisma.$disconnect();
 });
 
@@ -54,41 +50,14 @@ async function session() {
 describe("Batch 3.0 — Check-in Miami", () => {
   it("busca pedidos por número", async () => {
     const { app, d, h } = await session();
-    const prod = await prisma.produto.findFirstOrThrow({
-      where: { lojaId: d.id }
-    });
-    const supp = await prisma.fornecedor.findFirstOrThrow({
-      where: { lojaId: d.id }
-    });
-
-    const order = await request(app)
-      .post("/purchase-orders")
-      .set(h(d.id))
-      .send({
-        fornecedorId: supp.id,
-        numeroPedido: "BATCH3_0_SEARCH_001",
-        dataCompra: "2026-01-01",
-        moeda: "USD",
-        itens: [
-          {
-            produtoId: prod.id,
-            quantidade: 2,
-            precoUnitario: 100,
-            descontoItem: 0
-          }
-        ]
-      });
-
-    expect(order.status).toBe(201);
-
     const search1 = await request(app)
-      .get("/purchase-orders/search/numero?numero=SEARCH_001")
+      .get(`/purchase-orders/search/numero?numero=${fixture.order.numeroPedido.slice(5, 13)}`)
       .set(h(d.id));
 
     expect(search1.status).toBe(200);
     expect(Array.isArray(search1.body)).toBe(true);
     expect(search1.body.length).toBeGreaterThan(0);
-    expect(search1.body.some((o: { numeroPedido: string }) => o.numeroPedido === "BATCH3_0_SEARCH_001")).toBe(true);
+    expect(search1.body.some((o: { id: string }) => o.id === fixture.order.id)).toBe(true);
 
     const search2 = await request(app)
       .get("/purchase-orders/search/numero?numero=INVALID")
@@ -100,9 +69,7 @@ describe("Batch 3.0 — Check-in Miami", () => {
 
   it("registra recebimento completo em Miami com tipo divergência", async () => {
     const { app, d, h } = await session();
-    const item = await prisma.pedidoCompraItem.findFirstOrThrow({
-      where: { lojaId: d.id }
-    });
+    const item = fixture.item;
 
     const confirmacao = await request(app)
       .post("/logistics/miami-confirmations")
@@ -132,9 +99,7 @@ describe("Batch 3.0 — Check-in Miami", () => {
 
   it("registra recebimento parcial em Miami", async () => {
     const { app, d, h } = await session();
-    let item = await prisma.pedidoCompraItem.findFirstOrThrow({
-      where: { lojaId: d.id }
-    });
+    let item = fixture.item;
 
     await prisma.pedidoCompraItem.update({
       where: { id: item.id },
@@ -182,9 +147,7 @@ describe("Batch 3.0 — Check-in Miami", () => {
 
   it("registra divergência (item faltante)", async () => {
     const { app, d, h } = await session();
-    let item = await prisma.pedidoCompraItem.findFirstOrThrow({
-      where: { lojaId: d.id }
-    });
+    let item = fixture.item;
 
     await prisma.pedidoCompraItem.update({
       where: { id: item.id },
@@ -211,9 +174,7 @@ describe("Batch 3.0 — Check-in Miami", () => {
 
   it("registra divergência (quantidade divergente)", async () => {
     const { app, d, h } = await session();
-    let item = await prisma.pedidoCompraItem.findFirstOrThrow({
-      where: { lojaId: d.id }
-    });
+    let item = fixture.item;
 
     await prisma.pedidoCompraItem.update({
       where: { id: item.id },
@@ -246,9 +207,7 @@ describe("Batch 3.0 — Check-in Miami", () => {
 
   it("registra item danificado", async () => {
     const { app, d, h } = await session();
-    const item = await prisma.pedidoCompraItem.findFirstOrThrow({
-      where: { lojaId: d.id }
-    });
+    const item = fixture.item;
 
     const confirmacao = await request(app)
       .post("/logistics/miami-confirmations")
@@ -266,10 +225,8 @@ describe("Batch 3.0 — Check-in Miami", () => {
   });
 
   it("bloqueia acesso cruzado entre lojas", async () => {
-    const { app, d, g, h } = await session();
-    const item = await prisma.pedidoCompraItem.findFirstOrThrow({
-      where: { lojaId: d.id }
-    });
+    const { app, g, h } = await session();
+    const item = fixture.item;
 
     const tentativa = await request(app)
       .post("/logistics/miami-confirmations")
@@ -286,16 +243,14 @@ describe("Batch 3.0 — Check-in Miami", () => {
 
   it("não cria entrada de estoque definitivo em Miami", async () => {
     const { app, d, h } = await session();
-    const item = await prisma.pedidoCompraItem.findFirstOrThrow({
-      where: { lojaId: d.id }
-    });
+    const item = fixture.item;
     const produtoId = item.produtoId;
 
     const estoqueAntes = await prisma.estoque.findFirst({
       where: { lojaId: d.id, produtoId }
     });
 
-    await request(app)
+    const confirmation = await request(app)
       .post("/logistics/miami-confirmations")
       .set(h(d.id))
       .send({
@@ -304,6 +259,7 @@ describe("Batch 3.0 — Check-in Miami", () => {
         recebidoEm: new Date().toISOString(),
         tipoDivergencia: "CORRETO"
       });
+    expect(confirmation.status).toBe(200);
 
     const estoqueDepois = await prisma.estoque.findFirst({
       where: { lojaId: d.id, produtoId }
@@ -314,9 +270,7 @@ describe("Batch 3.0 — Check-in Miami", () => {
 
   it("detecta atraso (recebimento > 24h após data)", async () => {
     const { app, d, h } = await session();
-    const item = await prisma.pedidoCompraItem.findFirstOrThrow({
-      where: { lojaId: d.id }
-    });
+    const item = fixture.item;
 
     const dataAtrasada = new Date(Date.now() - 90000000);
 

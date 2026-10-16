@@ -40,11 +40,27 @@ const headers = (token: string, id: string) => ({
   "x-store-id": id
 });
 describe("receiving and inventory", () => {
+  it("rejeita confirmação Miami fora dos estados permitidos", async () => {
+    const { app, token, dronz } = await session();
+    fixture = await createOperationalFixture(prisma, dronz.id);
+    const { order, item } = fixture;
+    for (const status of ["DRAFT", "PLACED", "RECEIVED_MIAMI", "CANCELLED"] as const) {
+      await prisma.pedidoCompra.update({ where: { id: order.id }, data: { status } });
+      const result = await request(app).post("/logistics/miami-confirmations")
+        .set(headers(token, dronz.id))
+        .send({ pedidoCompraItemId: item.id, quantidadeRecebida: 1, recebidoEm: new Date().toISOString() });
+      expect(result.status).toBe(409);
+      expect((await prisma.pedidoCompra.findUniqueOrThrow({ where: { id: order.id } })).status).toBe(status);
+    }
+    expect(await prisma.recebimentoMiami.count({ where: { pedidoCompraItemId: item.id } })).toBe(0);
+  });
+
   it("percorre pedido, Miami, Paraguai, Brasil e entrada definitiva sem estoque antecipado", async () => {
     const { app, token, dronz } = await session();
     fixture = await createOperationalFixture(prisma, dronz.id, "MIAMI_PARAGUAI_BRASIL");
     const { order, item, trip, bag, volume, allocation, product } = fixture;
     await prisma.alocacaoMala.delete({ where: { id: allocation.id } });
+    await prisma.pedidoCompra.update({ where: { id: order.id }, data: { status: "DRAFT" } });
     const storeHeaders = headers(token, dronz.id);
     for (const status of ["PLACED", "CONFIRMED"]) {
       const result = await request(app).patch(`/purchase-orders/${order.id}/status`)

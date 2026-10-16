@@ -362,6 +362,7 @@ export async function confirmMiami(
     });
     if (
       !i ||
+      (i.pedido.status !== "CONFIRMED" && i.pedido.status !== "PARTIALLY_RECEIVED_MIAMI") ||
       d.quantidadeRecebida < 1 ||
       i.quantidadeRecebidaMiami + d.quantidadeRecebida > i.quantidade
     )

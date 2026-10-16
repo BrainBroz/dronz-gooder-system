@@ -34,6 +34,7 @@ export async function createOperationalFixture(
       fornecedorId: supplier.id,
       numeroPedido: `TEST-${suffix}`,
       dataCompra: new Date(),
+      status: "CONFIRMED",
       subtotal: 100,
       total: 100,
       itens: {
