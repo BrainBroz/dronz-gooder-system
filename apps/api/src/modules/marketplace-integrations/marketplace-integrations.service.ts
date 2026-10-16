@@ -391,61 +391,85 @@ export async function listBuyerCandidates(
   if (!hasPermission(identity, "BUYER_INGESTION_VISUALIZAR"))
     throw new AppError(403, "insufficient_permission");
   const where = { status: input.status };
-  const [items, total] = await prisma.$transaction([
-    prisma.buyerPurchaseCandidate.findMany({
-      where,
-      include: { contaExterna: true, currentEvidence: true },
-      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-      skip: (input.page - 1) * input.limit,
-      take: input.limit
-    }),
-    prisma.buyerPurchaseCandidate.count({ where })
-  ]);
-  return {
-    items: items.map((candidate) => candidateReadModel(identity, candidate)),
-    page: input.page,
-    limit: input.limit,
-    total
-  };
+  return prisma.$transaction(async (tx) => {
+    const [items, total] = await Promise.all([
+      tx.buyerPurchaseCandidate.findMany({
+        where,
+        include: { contaExterna: true, currentEvidence: true },
+        orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+        skip: (input.page - 1) * input.limit,
+        take: input.limit
+      }),
+      tx.buyerPurchaseCandidate.count({ where })
+    ]);
+    await audit(tx, {
+      usuarioId: identity.user.id,
+      permissionCode: "BUYER_INGESTION_VISUALIZAR",
+      action: "BUYER_CANDIDATES_LISTED",
+      entity: "BuyerPurchaseCandidate",
+      entityId: "LIST",
+      correlationId: randomUUID(),
+      after: { status: input.status ?? null, page: input.page, limit: input.limit, total },
+      origin: ORIGIN
+    });
+    return {
+      items: items.map((candidate) => candidateReadModel(identity, candidate)),
+      page: input.page,
+      limit: input.limit,
+      total
+    };
+  });
 }
 
 export async function buyerCandidateDetail(identity: AuthIdentity, id: string) {
   if (!hasPermission(identity, "BUYER_INGESTION_VISUALIZAR"))
     throw new AppError(403, "insufficient_permission");
-  const candidate = await prisma.buyerPurchaseCandidate.findUnique({
-    where: { id },
-    include: {
-      contaExterna: true,
-      currentEvidence: true,
-      evidenceLinks: {
-        include: { evidence: true },
-        orderBy: { evidence: { createdAt: "desc" } }
-      },
-      decisions: { orderBy: { createdAt: "desc" } }
-    }
+  return prisma.$transaction(async (tx) => {
+    const candidate = await tx.buyerPurchaseCandidate.findUnique({
+      where: { id },
+      include: {
+        contaExterna: true,
+        currentEvidence: true,
+        evidenceLinks: {
+          include: { evidence: true },
+          orderBy: { evidence: { createdAt: "desc" } }
+        },
+        decisions: { orderBy: { createdAt: "desc" } }
+      }
+    });
+    if (!candidate) throw new AppError(404, "not_found");
+    await audit(tx, {
+      usuarioId: identity.user.id,
+      permissionCode: "BUYER_INGESTION_VISUALIZAR",
+      action: "BUYER_CANDIDATE_VIEWED",
+      entity: "BuyerPurchaseCandidate",
+      entityId: id,
+      correlationId: randomUUID(),
+      after: { currentEvidenceId: candidate.currentEvidenceId, version: candidate.version },
+      origin: ORIGIN
+    });
+    return {
+      ...candidateReadModel(identity, candidate),
+      evidenceVersions: candidate.evidenceLinks.map((link) => ({
+        id: link.evidence.id,
+        version: link.evidence.version,
+        source: link.evidence.source,
+        type: link.type,
+        payloadHash: link.evidence.payloadHash,
+        sourceOccurredAt: link.evidence.sourceOccurredAt.toISOString(),
+        recordedAt: link.evidence.createdAt.toISOString()
+      })),
+      decisions: candidate.decisions.map((decision) => ({
+        id: decision.id,
+        decision: decision.decision,
+        candidateVersion: decision.candidateVersion,
+        evidenceId: decision.evidenceId,
+        actorId: decision.actorId,
+        reason: decision.reason,
+        decidedAt: decision.createdAt.toISOString()
+      }))
+    };
   });
-  if (!candidate) throw new AppError(404, "not_found");
-  return {
-    ...candidateReadModel(identity, candidate),
-    evidenceVersions: candidate.evidenceLinks.map((link) => ({
-      id: link.evidence.id,
-      version: link.evidence.version,
-      source: link.evidence.source,
-      type: link.type,
-      payloadHash: link.evidence.payloadHash,
-      sourceOccurredAt: link.evidence.sourceOccurredAt.toISOString(),
-      recordedAt: link.evidence.createdAt.toISOString()
-    })),
-    decisions: candidate.decisions.map((decision) => ({
-      id: decision.id,
-      decision: decision.decision,
-      candidateVersion: decision.candidateVersion,
-      evidenceId: decision.evidenceId,
-      actorId: decision.actorId,
-      reason: decision.reason,
-      decidedAt: decision.createdAt.toISOString()
-    }))
-  };
 }
 
 export async function buyerCandidateEvidenceDetail(

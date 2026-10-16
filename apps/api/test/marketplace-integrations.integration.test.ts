@@ -966,14 +966,48 @@ describe("marketplace integration foundation", () => {
       .get(`${path}${second.currentEvidenceId}`)
       .set(bearer(fixture.token));
     expect(foreign.status).toBe(404);
+    const list = await request(fixture.app)
+      .get("/integrations/marketplaces/buyer-candidates")
+      .set(bearer(fixture.token));
+    expect(list.status).toBe(200);
+    expect(list.body.items.map((candidate: { id: string }) => candidate.id))
+      .toContain(first.id);
+    const detail = await request(fixture.app)
+      .get(`/integrations/marketplaces/buyer-candidates/${first.id}`)
+      .set(bearer(fixture.token));
+    expect(detail.status).toBe(200);
+    expect(detail.body.id).toBe(first.id);
+    const accessLogs = await prisma.auditLog.findMany({
+      where: {
+        usuarioId: fixture.userId,
+        action: { in: ["BUYER_CANDIDATES_LISTED", "BUYER_CANDIDATE_VIEWED"] }
+      }
+    });
+    expect(accessLogs.map((log) => log.action).sort())
+      .toEqual(["BUYER_CANDIDATES_LISTED", "BUYER_CANDIDATE_VIEWED"]);
+    for (const log of accessLogs) {
+      expect(log.permissionCode).toBe("BUYER_INGESTION_VISUALIZAR");
+      expect(JSON.stringify(log.afterData)).not.toContain(firstOrderId);
+    }
     setAuditFailureForTests((entry) =>
-      entry.action === "BUYER_EVIDENCE_VIEWED" && entry.entityId === first.currentEvidenceId);
+      ["BUYER_CANDIDATES_LISTED", "BUYER_CANDIDATE_VIEWED", "BUYER_EVIDENCE_VIEWED"]
+        .includes(entry.action));
     try {
       const withoutAudit = await request(fixture.app)
         .get(`${path}${first.currentEvidenceId}`)
         .set(bearer(fixture.token));
       expect(withoutAudit.status).toBe(500);
       expect(withoutAudit.body).not.toHaveProperty("order");
+      const listWithoutAudit = await request(fixture.app)
+        .get("/integrations/marketplaces/buyer-candidates")
+        .set(bearer(fixture.token));
+      expect(listWithoutAudit.status).toBe(500);
+      expect(listWithoutAudit.body).not.toHaveProperty("items");
+      const detailWithoutAudit = await request(fixture.app)
+        .get(`/integrations/marketplaces/buyer-candidates/${first.id}`)
+        .set(bearer(fixture.token));
+      expect(detailWithoutAudit.status).toBe(500);
+      expect(detailWithoutAudit.body).not.toHaveProperty("order");
     } finally {
       setAuditFailureForTests();
     }
