@@ -159,16 +159,17 @@ export async function recordMarketplaceEvidence(input: {
           materialSnapshot(canonicalOrder(previous.data)) !== materialSnapshot(normalized));
         const promote = incomingTime > currentTime ||
           (sameTime && (input.order.cancelled || prior?.status !== "CANCELADA"));
+        const conflict = materialChange || prior?.status === "COM_DIVERGENCIA";
         const candidate = prior
-          ? promote ? await tx.buyerPurchaseCandidate.update({
+          ? promote || materialChange ? await tx.buyerPurchaseCandidate.update({
               where: { id: prior.id },
               data: {
-                currentEvidenceId: evidence.id,
-                status: prior.compraImportadaId
+                ...(promote ? { currentEvidenceId: evidence.id } : {}),
+                status: prior.status === "REJEITADA" ? "REJEITADA"
+                  : prior.compraImportadaId
                   ? "COM_DIVERGENCIA"
-                  : input.order.cancelled ? "CANCELADA"
-                  : materialChange || prior.status === "COM_DIVERGENCIA" ||
-                    prior.status === "CANCELADA"
+                  : promote && input.order.cancelled ? "CANCELADA"
+                  : conflict || prior.status === "CANCELADA"
                     ? "COM_DIVERGENCIA" : "AGUARDANDO_APROVACAO",
                 version: { increment: 1 }
               }
@@ -184,7 +185,7 @@ export async function recordMarketplaceEvidence(input: {
           data: {
             candidateId: candidate.id,
             evidenceId: evidence.id,
-            type: promote && candidate.status === "COM_DIVERGENCIA"
+            type: materialChange || candidate.status === "COM_DIVERGENCIA"
               ? "CONFLICTING" : "MATCHED"
           }
         });
