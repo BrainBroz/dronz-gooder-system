@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button, Card, CardContent, MenuItem, Stack, TextField, Typography } from "@mui/material";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ContentCard } from "../components/ui/ContentCard";
 import { PageContainer } from "../components/ui/PageContainer";
@@ -9,13 +9,35 @@ import { MutationStatus } from "../components/ui/MutationStatus";
 import { SuitcaseWeightPanel } from "../components/SuitcaseWeightPanel";
 import { api } from "../api/client";
 import { authHeader, useAuthStore } from "../stores/auth";
-import { logisticsQueryKeys } from "../queryKeys";
+import { logisticsQueryKeys, purchasingQueryKeys } from "../queryKeys";
+
+type LogisticsBag = {
+  id: string;
+  codigo: string;
+  status: string;
+  limitePesoKg: string;
+  volumes: { id: string; codigo: string }[];
+  alocacoes: { id: string }[];
+};
+
+type SearchOrder = {
+  id: string;
+  numeroPedido: string;
+  itens: {
+    id: string;
+    quantidadeRecebidaMiami: number;
+    produto: { nome: string };
+  }[];
+};
 
 function LogisticsContent() {
   const store = useAuthStore((s) => s.activeStoreId),
     headers = { ...authHeader(), "x-store-id": store };
   const client = useQueryClient();
   const [selectedMalaId, setSelectedMalaId] = useState<string | null>(null);
+  const [draftOrderNumber, setDraftOrderNumber] = useState("");
+  const [orderNumber, setOrderNumber] = useState("");
+  const [allocationResetKey, setAllocationResetKey] = useState(0);
   const travelerForm = useForm<{ nome: string; email: string }>({
     defaultValues: { nome: "", email: "" }
   });
@@ -37,6 +59,23 @@ function LogisticsContent() {
   const bagForm = useForm<{ viagemId: string; codigo: string }>({
     defaultValues: { viagemId: "", codigo: "" }
   });
+  const volumeForm = useForm<{ malaId: string; codigo: string; taraKg: number }>({
+    defaultValues: { malaId: "", codigo: "", taraKg: 0.5 }
+  });
+  const allocationForm = useForm<{
+    pedidoCompraItemId: string;
+    malaId: string;
+    volumeLogisticoId: string;
+    quantidade: number;
+  }>({
+    defaultValues: {
+      pedidoCompraItemId: "",
+      malaId: "",
+      volumeLogisticoId: "",
+      quantidade: 1
+    }
+  });
+  const allocationBagId = useWatch({ control: allocationForm.control, name: "malaId" });
   const travelers = useQuery({
     queryKey: logisticsQueryKeys.travelers(store),
     enabled: !!store,
@@ -48,11 +87,20 @@ function LogisticsContent() {
     enabled: !!store,
     queryFn: async () => (await api.get("/logistics/trips", { headers })).data
   });
-  const bags = useQuery({
+  const bags = useQuery<LogisticsBag[]>({
     queryKey: logisticsQueryKeys.suitcases(store),
     enabled: !!store,
     queryFn: async () =>
       (await api.get("/logistics/suitcases", { headers })).data
+  });
+  const orders = useQuery<SearchOrder[]>({
+    queryKey: [...purchasingQueryKeys.orders(store), "number-search", orderNumber],
+    enabled: !!store && !!orderNumber,
+    queryFn: async () =>
+      (await api.get("/purchase-orders/search/numero", {
+        headers,
+        params: { numero: orderNumber }
+      })).data
   });
   const createTraveler = useMutation({
     mutationFn: (data: { nome: string; email: string }) =>
@@ -93,6 +141,37 @@ function LogisticsContent() {
       });
     }
   });
+  const createVolume = useMutation({
+    mutationFn: (data: { malaId: string; codigo: string; taraKg: number }) =>
+      api.post(`/logistics/suitcases/${data.malaId}/volumes`, {
+        codigo: data.codigo,
+        taraKg: Number(data.taraKg)
+      }, { headers }),
+    onSuccess: async (_, data) => {
+      volumeForm.reset({ malaId: data.malaId, codigo: "", taraKg: 0.5 });
+      await client.invalidateQueries({ queryKey: logisticsQueryKeys.suitcases(store) });
+      await client.invalidateQueries({ queryKey: logisticsQueryKeys.suitcaseWeight(store, data.malaId) });
+    }
+  });
+  const allocate = useMutation({
+    mutationFn: (data: {
+      pedidoCompraItemId: string;
+      malaId: string;
+      volumeLogisticoId: string;
+      quantidade: number;
+    }) => api.post("/logistics/allocations", {
+      ...data,
+      quantidade: Number(data.quantidade)
+    }, { headers }),
+    onSuccess: async (_, data) => {
+      allocationForm.reset();
+      setAllocationResetKey((key) => key + 1);
+      await client.invalidateQueries({ queryKey: logisticsQueryKeys.suitcases(store) });
+      await client.invalidateQueries({ queryKey: logisticsQueryKeys.suitcaseWeight(store, data.malaId) });
+    }
+  });
+  const allocationBag = bags.data?.find((bag) => bag.id === allocationBagId);
+  const searchedOrders = draftOrderNumber.trim() === orderNumber ? orders.data : undefined;
 
   return (
     <Stack gap={{ xs: 2.5, md: 3.5 }}>
@@ -232,15 +311,9 @@ function LogisticsContent() {
           </Button>
         </Stack>
         <MutationStatus mutation={createBag} successMessage="Mala criada." />
+        {bags.isError && <Typography>Falha ao carregar malas.</Typography>}
         {bags.data?.map(
-          (b: {
-            id: string;
-            codigo: string;
-            status: string;
-            limitePesoKg: string;
-            volumes: unknown[];
-            alocacoes: unknown[];
-          }) => (
+          (b) => (
             <Card key={b.id}>
               <CardContent>
                 <Typography>
@@ -257,6 +330,82 @@ function LogisticsContent() {
             </Card>
           )
         )}
+      </ContentCard>
+      <ContentCard title="Adicionar volume à mala">
+        <Stack component="form" direction={{ xs: "column", md: "row" }} gap={1}
+          onSubmit={volumeForm.handleSubmit((data) => createVolume.mutate(data))}>
+          <TextField select label="Mala para volume" defaultValue=""
+            {...volumeForm.register("malaId", { required: true })}>
+            <MenuItem value="" disabled>Selecione</MenuItem>
+            {bags.data?.map((bag) => (
+              <MenuItem key={bag.id} value={bag.id}>{bag.codigo} — {bag.status}</MenuItem>
+            ))}
+          </TextField>
+          <TextField label="Código do volume"
+            {...volumeForm.register("codigo", { required: true })} />
+          <TextField label="Tara (kg)" type="number" inputProps={{ min: 0, step: 0.001 }}
+            {...volumeForm.register("taraKg", { valueAsNumber: true, min: 0 })} />
+          <Button type="submit" disabled={createVolume.isPending}>Adicionar volume</Button>
+        </Stack>
+        <MutationStatus mutation={createVolume} successMessage="Volume adicionado." />
+      </ContentCard>
+      <ContentCard title="Alocar item recebido em Miami">
+        <Stack component="form" direction={{ xs: "column", md: "row" }} gap={1}
+          onSubmit={(event) => {
+            event.preventDefault();
+            const nextNumber = draftOrderNumber.trim();
+            if (!nextNumber) return;
+            allocationForm.setValue("pedidoCompraItemId", "");
+            setAllocationResetKey((key) => key + 1);
+            if (nextNumber === orderNumber) void orders.refetch();
+            else setOrderNumber(nextNumber);
+          }}>
+          <TextField label="Número do pedido para alocação" value={draftOrderNumber}
+            onChange={(event) => {
+              if (draftOrderNumber.trim() === orderNumber) {
+                allocationForm.setValue("pedidoCompraItemId", "");
+                setAllocationResetKey((key) => key + 1);
+              }
+              setDraftOrderNumber(event.target.value);
+            }} />
+          <Button type="submit">Buscar pedido</Button>
+        </Stack>
+        {orders.isFetching && <Typography>Buscando pedidos...</Typography>}
+        {orders.isError && <Typography>Falha ao buscar pedidos.</Typography>}
+        {searchedOrders?.length === 0 && <Typography>Nenhum pedido encontrado.</Typography>}
+        <Stack component="form" direction={{ xs: "column", md: "row" }} gap={1}
+          onSubmit={allocationForm.handleSubmit((data) => allocate.mutate(data))}>
+          <TextField key={`item-${allocationResetKey}`} select label="Item recebido" defaultValue=""
+            {...allocationForm.register("pedidoCompraItemId", { required: true })}>
+            <MenuItem value="" disabled>Selecione</MenuItem>
+            {searchedOrders?.flatMap((order) => order.itens.map((item) => (
+              <MenuItem key={item.id} value={item.id}>
+                {order.numeroPedido} · {item.produto.nome} · Miami: {item.quantidadeRecebidaMiami}
+              </MenuItem>
+            )))}
+          </TextField>
+          <TextField key={`bag-${allocationResetKey}`} select label="Mala para alocação" defaultValue=""
+            {...allocationForm.register("malaId", {
+              required: true,
+              onChange: () => allocationForm.setValue("volumeLogisticoId", "")
+            })}>
+            <MenuItem value="" disabled>Selecione</MenuItem>
+            {bags.data?.map((bag) => (
+              <MenuItem key={bag.id} value={bag.id}>{bag.codigo} — {bag.status}</MenuItem>
+            ))}
+          </TextField>
+          <TextField key={`volume-${allocationBagId}:${allocationResetKey}`} select label="Volume" defaultValue=""
+            {...allocationForm.register("volumeLogisticoId", { required: true })}>
+            <MenuItem value="" disabled>Selecione</MenuItem>
+            {allocationBag?.volumes.map((volume) => (
+              <MenuItem key={volume.id} value={volume.id}>{volume.codigo}</MenuItem>
+            ))}
+          </TextField>
+          <TextField label="Quantidade para alocar" type="number" inputProps={{ min: 1, step: 1 }}
+            {...allocationForm.register("quantidade", { valueAsNumber: true, min: 1 })} />
+          <Button type="submit" disabled={allocate.isPending}>Alocar na mala</Button>
+        </Stack>
+        <MutationStatus mutation={allocate} successMessage="Item alocado na mala." />
       </ContentCard>
       <SuitcaseWeightPanel malaId={selectedMalaId} />
     </Stack>
