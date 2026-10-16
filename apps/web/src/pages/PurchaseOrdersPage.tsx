@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Button, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, Stack, TextField, Typography } from "@mui/material";
+import { Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, Stack, TextField, Typography } from "@mui/material";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -106,6 +106,9 @@ function PurchaseOrdersContent() {
         client.invalidateQueries({ queryKey: purchasingQueryKeys.orders(store) }),
         client.invalidateQueries({ queryKey: operationsKeys.all(store) })
       ]);
+    },
+    onError: async () => {
+      await client.invalidateQueries({ queryKey: purchasingQueryKeys.orders(store) });
     }
   });
   const actionAvailable = Boolean(selectedAction && orders.data?.some((order) =>
@@ -215,7 +218,7 @@ function PurchaseOrdersContent() {
             {(["PLACED", "CONFIRMED"] as const).filter((status) =>
               o.allowedStatusTransitions?.includes(status)
             ).map((status) => (
-              <Button key={status} disabled={changeStatus.isPending} onClick={() => setSelectedAction({ id: o.id, number: o.numeroPedido, status })}>
+              <Button key={status} disabled={changeStatus.isPending} onClick={() => { changeStatus.reset(); setSelectedAction({ id: o.id, number: o.numeroPedido, status }); }}>
                 {status === "PLACED" ? "Enviar pedido" : "Confirmar pedido"}
               </Button>
             ))}
@@ -225,13 +228,14 @@ function PurchaseOrdersContent() {
           <DialogTitle>Confirmar mudança de status</DialogTitle>
           <DialogContent>
             <Typography>{selectedAction?.number}: {selectedAction?.status === "PLACED" ? "enviar pedido" : "confirmar compra"}?</Typography>
+            {changeStatus.isError && <Alert severity="error">Não foi possível alterar o status. Confira o pedido atualizado e tente novamente.</Alert>}
           </DialogContent>
           <DialogActions>
             <Button disabled={changeStatus.isPending} onClick={() => setSelectedAction(null)}>Cancelar</Button>
             <Button disabled={changeStatus.isPending || !actionAvailable} onClick={() => selectedAction && changeStatus.mutate(selectedAction)}>Confirmar</Button>
           </DialogActions>
         </Dialog>
-        {changeStatus.isError && <Typography color="error">Não foi possível alterar o status. Atualize os pedidos e tente novamente.</Typography>}
+        {changeStatus.isError && !actionAvailable && <Alert severity="error">O pedido mudou ou a operação falhou. Confira os dados atualizados.</Alert>}
         {!orders.isLoading && !orders.data?.length && (
           <Typography>Nenhum pedido.</Typography>
         )}

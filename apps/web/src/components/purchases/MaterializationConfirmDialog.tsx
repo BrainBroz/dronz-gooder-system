@@ -39,6 +39,7 @@ export function MaterializationConfirmDialog({
   onRefresh?: () => void;
 }) {
   const [error, setError] = React.useState<MutationError | null>(null);
+  const [completedSummary, setCompletedSummary] = React.useState<MaterializationSummary | null>(null);
   const { materialize } = useUnifiedPurchaseMutations();
   const submitting = React.useRef(false);
 
@@ -46,6 +47,7 @@ export function MaterializationConfirmDialog({
     if (!canMaterialize || submitting.current || materialize.isSuccess) return;
     submitting.current = true;
     setError(null);
+    const submittedSummary = summary;
 
     try {
       await materialize.mutateAsync({
@@ -55,6 +57,7 @@ export function MaterializationConfirmDialog({
         idempotencyKey: newIdempotencyKey()
       });
 
+      setCompletedSummary(submittedSummary);
       onSuccess?.();
     } catch (err) {
       const { status, message, code } = readMutationError(err);
@@ -93,10 +96,11 @@ export function MaterializationConfirmDialog({
       submitting.current = false;
     }
   };
+  const displayedSummary = materialize.isSuccess ? completedSummary ?? summary : summary;
 
   return (
     <Dialog open={open} onClose={materialize.isPending ? undefined : onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Materializar para {summary.storeName}</DialogTitle>
+      <DialogTitle>Materializar para {displayedSummary.storeName}</DialogTitle>
       <DialogContent>
         <Stack gap={2}>
           {materialize.isSuccess && <Alert severity="success">Materialização concluída. Pedido operacional criado.</Alert>}
@@ -108,22 +112,22 @@ export function MaterializationConfirmDialog({
 
           <Alert severity="info" variant="outlined">
             Esta operação materializa <strong>todos os itens elegíveis</strong> desta
-            compra para <strong>{summary.storeName}</strong> em um único Pedido de
+            compra para <strong>{displayedSummary.storeName}</strong> em um único Pedido de
             Compra — não é possível materializar um item isolado.
           </Alert>
 
           <Stack gap={0.5}>
             <Typography variant="body2">
-              Loja: <strong>{summary.storeName}</strong>
+              Loja: <strong>{displayedSummary.storeName}</strong>
             </Typography>
             <Typography variant="body2">
               Itens elegíveis:{" "}
               <strong>
-                {summary.itemCount} {summary.itemCount === 1 ? "item" : "itens"}
+                {displayedSummary.itemCount} {displayedSummary.itemCount === 1 ? "item" : "itens"}
               </strong>
             </Typography>
             <Typography variant="body2">
-              Total de unidades: <strong>{summary.totalUnits}</strong>
+              Total de unidades: <strong>{displayedSummary.totalUnits}</strong>
             </Typography>
           </Stack>
 

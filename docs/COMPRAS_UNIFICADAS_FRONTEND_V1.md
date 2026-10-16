@@ -72,6 +72,8 @@ O drawer novo havia omitido o mapping merchant–fornecedor existente no detalhe
 
 O diálogo de materialização lê o código `error` efetivamente enviado pela API. `supplier_mapping_required` orienta a configurar o vínculo; somente `concurrent_modification` dispara atualização do detalhe. O resumo confirmado continua disponível após o refetch retirar os itens pendentes, sem acessar um resumo inexistente. Sucesso mantém a confirmação aberta e desabilita novo envio; uma requisição pendente não aceita fechamento por ESC ou submissão duplicada.
 
+Se a atribuição mudar com o diálogo aberto, o resumo acompanha o detalhe atualizado antes do envio. Após sucesso, ele preserva os números enviados, não a cópia antiga da abertura.
+
 `fullyAssigned` é exibido como “Itens totalmente atribuídos”, não como prova de que a compra está pronta para materializar. A elegibilidade continua revalidada pelo backend; não se inferem mappings de fornecedor ausentes do read model.
 
 Oito regressões comportamentais foram acrescentadas em `purchase-mutations.behavior.test.tsx`: request de mapping e invalidações; troca de loja; ausência de ação sem autorização do read model; erro/retry do catálogo; erro de fornecedor; conflito de versão com refetch; sucesso com resumo removido do detalhe; bloqueio de ESC e duplo envio durante mutação. Os testes existentes foram preservados.

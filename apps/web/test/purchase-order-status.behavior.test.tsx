@@ -54,4 +54,41 @@ describe("Pedidos Operacionais", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(patch).not.toHaveBeenCalled();
   });
+
+  it("mostra erro dentro do diálogo e permite repetir após falha transitória", async () => {
+    const user = userEvent.setup();
+    let status = "DRAFT";
+    vi.mocked(api.get).mockImplementation(async (url) => ({
+      data: url === "/purchase-orders" ? { items: [order(status, status === "DRAFT" ? ["PLACED"] : ["CONFIRMED"])] } : { items: [] }
+    }));
+    const patch = vi.spyOn(api, "patch")
+      .mockRejectedValueOnce(new Error("rede indisponível"))
+      .mockImplementation(async () => { status = "PLACED"; return { data: { status } }; });
+    renderWithProviders(<PurchaseOrdersPage />);
+    await user.click(await screen.findByRole("button", { name: "Enviar pedido" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Confirmar" }));
+    expect(await within(screen.getByRole("dialog")).findByText(/Não foi possível alterar o status/)).toBeTruthy();
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Confirmar" }));
+    expect(await screen.findByRole("button", { name: "Confirmar pedido" })).toBeTruthy();
+    expect(patch).toHaveBeenCalledTimes(2);
+  });
+
+  it("fecha a ação antiga quando o backend muda o pedido durante um conflito", async () => {
+    const user = userEvent.setup();
+    let status = "DRAFT";
+    vi.mocked(api.get).mockImplementation(async (url) => ({
+      data: url === "/purchase-orders" ? { items: [order(status, status === "DRAFT" ? ["PLACED"] : [])] } : { items: [] }
+    }));
+    const patch = vi.spyOn(api, "patch").mockImplementation(async () => {
+      status = "CANCELLED";
+      throw { response: { status: 409, data: { error: "conflict" } } };
+    });
+    renderWithProviders(<PurchaseOrdersPage />);
+    await user.click(await screen.findByRole("button", { name: "Enviar pedido" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Confirmar" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.queryByRole("button", { name: "Enviar pedido" })).toBeNull();
+    expect(screen.getByText(/O pedido mudou ou a operação falhou/)).toBeTruthy();
+    expect(patch).toHaveBeenCalledTimes(1);
+  });
 });

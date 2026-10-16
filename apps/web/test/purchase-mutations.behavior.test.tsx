@@ -584,6 +584,29 @@ describe("UX-1C — Materialização (compra + loja, não por item)", () => {
     expect(screen.queryByRole("button", { name: /Materializar Dronz/ })).toBeNull();
   });
 
+  it("sucesso conserva a quantidade enviada após atribuição mudar com o diálogo aberto", async () => {
+    const updatedItem: UnifiedPurchaseItemDetail = {
+      ...itemProntoMaterializar,
+      atribuicoes: [{ ...itemProntoMaterializar.atribuicoes[0], quantidade: 3 }]
+    };
+    const updatedDetail: UnifiedPurchaseDetail = { ...baseDetail, version: 3, itens: [updatedItem] };
+    vi.spyOn(api, "post").mockResolvedValue({ data: { id: "materialization-3" } });
+    const { queryClient } = renderDrawer({ ...baseDetail, itens: [itemProntoMaterializar] });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: /Materializar Dronz/ }));
+    vi.mocked(api.get).mockResolvedValue({ data: updatedDetail });
+    await queryClient.invalidateQueries({ queryKey: unifiedPurchasesQueryKeys.detail("purchase-1") });
+    expect(await screen.findByText((_, el) => el?.textContent === "Total de unidades: 3")).toBeTruthy();
+    vi.mocked(api.get).mockResolvedValue({ data: {
+      ...updatedDetail,
+      itens: [{ ...updatedItem, itensMaterializados: [{ id: "mat-3", lojaId: "store-dronz", quantidade: 3 }] }]
+    } });
+    await user.click(screen.getByRole("button", { name: "Materializar", exact: true }));
+    expect(await screen.findByText(/Materialização concluída/)).toBeTruthy();
+    expect(screen.getByText((_, el) => el?.textContent === "Total de unidades: 3")).toBeTruthy();
+    expect(screen.queryByText((_, el) => el?.textContent === "Total de unidades: 5")).toBeNull();
+  });
+
   it("mutação pendente não fecha com ESC nem aceita duplo envio", async () => {
     let finish!: (value: { data: object }) => void;
     const post = vi.spyOn(api, "post").mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
