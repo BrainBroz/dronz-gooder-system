@@ -47,17 +47,21 @@ export function MaterializationConfirmDialog({
     if (!canMaterialize || submitting.current || materialize.isSuccess) return;
     submitting.current = true;
     setError(null);
-    const submittedSummary = summary;
-
     try {
-      await materialize.mutateAsync({
+      const result = await materialize.mutateAsync({
         purchaseId,
         storeId,
         expectedPurchaseVersion: purchaseVersion,
         idempotencyKey: newIdempotencyKey()
       });
-
-      setCompletedSummary(submittedSummary);
+      const items = result.data?.pedidoCompra?.itens;
+      setCompletedSummary(Array.isArray(items) && items.length > 0 && items.every((item) => Number.isInteger(item?.quantidade) && item.quantidade > 0)
+        ? {
+            ...summary,
+            itemCount: items.length,
+            totalUnits: items.reduce((total, item) => total + item.quantidade, 0)
+          }
+        : null);
       onSuccess?.();
     } catch (err) {
       const { status, message, code } = readMutationError(err);
@@ -96,14 +100,14 @@ export function MaterializationConfirmDialog({
       submitting.current = false;
     }
   };
-  const displayedSummary = materialize.isSuccess ? completedSummary ?? summary : summary;
+  const displayedSummary = materialize.isSuccess ? completedSummary : summary;
 
   return (
     <Dialog open={open} onClose={materialize.isPending ? undefined : onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Materializar para {displayedSummary.storeName}</DialogTitle>
+      <DialogTitle>Materializar para {summary.storeName}</DialogTitle>
       <DialogContent>
         <Stack gap={2}>
-          {materialize.isSuccess && <Alert severity="success">Materialização concluída. Pedido operacional criado.</Alert>}
+          {materialize.isSuccess && <Alert severity="success">Materialização concluída. Pedido operacional disponível.</Alert>}
           {error && (
             <Alert severity="error" onClose={() => setError(null)}>
               {error.message}
@@ -112,11 +116,11 @@ export function MaterializationConfirmDialog({
 
           <Alert severity="info" variant="outlined">
             Esta operação materializa <strong>todos os itens elegíveis</strong> desta
-            compra para <strong>{displayedSummary.storeName}</strong> em um único Pedido de
+            compra para <strong>{summary.storeName}</strong> em um único Pedido de
             Compra — não é possível materializar um item isolado.
           </Alert>
 
-          <Stack gap={0.5}>
+          {displayedSummary ? <Stack gap={0.5}>
             <Typography variant="body2">
               Loja: <strong>{displayedSummary.storeName}</strong>
             </Typography>
@@ -129,7 +133,7 @@ export function MaterializationConfirmDialog({
             <Typography variant="body2">
               Total de unidades: <strong>{displayedSummary.totalUnits}</strong>
             </Typography>
-          </Stack>
+          </Stack> : <Alert severity="warning">Pedido operacional disponível, mas o resumo da resposta está indisponível. Consulte o pedido operacional.</Alert>}
 
           <Typography variant="caption" color="text.secondary" sx={{ fontStyle: "italic" }}>
             Ação é idempotente — repetir não duplica.

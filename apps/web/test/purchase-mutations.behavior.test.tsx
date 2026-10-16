@@ -198,6 +198,10 @@ const detailDuasLojasEligible: UnifiedPurchaseDetail = {
   itens: [...baseDetail.itens, itemProntoMaterializar2]
 };
 
+const materialized = (...quantities: number[]) => ({
+  data: { pedidoCompra: { itens: quantities.map((quantidade) => ({ quantidade })) } }
+});
+
 function installApi(detail: UnifiedPurchaseDetail = baseDetail) {
   vi.spyOn(api, "get").mockImplementation(async (url, config) => {
     if (url === "/imported-purchases/purchase-1") return { data: detail };
@@ -487,7 +491,7 @@ describe("UX-1C — Materialização (compra + loja, não por item)", () => {
   });
 
   it("sucesso: POST usa storeId + expectedPurchaseVersion e o dialog permanece aberto", async () => {
-    const post = vi.spyOn(api, "post").mockResolvedValue({ data: { id: "materialization-1" } });
+    const post = vi.spyOn(api, "post").mockResolvedValue(materialized(5));
     const { queryClient } = renderDrawer();
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
     const user = userEvent.setup();
@@ -511,7 +515,7 @@ describe("UX-1C — Materialização (compra + loja, não por item)", () => {
   });
 
   it("agrega múltiplos itens elegíveis da mesma loja em UMA única chamada", async () => {
-    const post = vi.spyOn(api, "post").mockResolvedValue({ data: {} });
+    const post = vi.spyOn(api, "post").mockResolvedValue(materialized(5, 2));
     renderDrawer(detailDuasLojasEligible);
     const user = userEvent.setup();
 
@@ -552,7 +556,7 @@ describe("UX-1C — Materialização (compra + loja, não por item)", () => {
   it("conflito de versão refaz o detalhe e o retry envia a versão atual", async () => {
     const post = vi.spyOn(api, "post").mockRejectedValueOnce({ response: {
       status: 409, data: { error: "concurrent_modification" }
-    } }).mockResolvedValue({ data: {} });
+    } }).mockResolvedValue(materialized(5));
     renderDrawer();
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: /Materializar Dronz/ }));
@@ -565,7 +569,7 @@ describe("UX-1C — Materialização (compra + loja, não por item)", () => {
   });
 
   it("refetch após materializar mantém confirmação sem crash e impede novo envio", async () => {
-    const post = vi.spyOn(api, "post").mockResolvedValue({ data: {} });
+    const post = vi.spyOn(api, "post").mockResolvedValue(materialized(5));
     renderDrawer({ ...baseDetail, itens: [itemProntoMaterializar] });
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: /Materializar Dronz/ }));
@@ -584,13 +588,13 @@ describe("UX-1C — Materialização (compra + loja, não por item)", () => {
     expect(screen.queryByRole("button", { name: /Materializar Dronz/ })).toBeNull();
   });
 
-  it("sucesso conserva a quantidade enviada após atribuição mudar com o diálogo aberto", async () => {
+  it("sucesso mostra a quantidade persistida após atribuição mudar com o diálogo aberto", async () => {
     const updatedItem: UnifiedPurchaseItemDetail = {
       ...itemProntoMaterializar,
       atribuicoes: [{ ...itemProntoMaterializar.atribuicoes[0], quantidade: 3 }]
     };
     const updatedDetail: UnifiedPurchaseDetail = { ...baseDetail, version: 3, itens: [updatedItem] };
-    vi.spyOn(api, "post").mockResolvedValue({ data: { id: "materialization-3" } });
+    vi.spyOn(api, "post").mockResolvedValue(materialized(3));
     const { queryClient } = renderDrawer({ ...baseDetail, itens: [itemProntoMaterializar] });
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: /Materializar Dronz/ }));
@@ -607,8 +611,35 @@ describe("UX-1C — Materialização (compra + loja, não por item)", () => {
     expect(screen.queryByText((_, el) => el?.textContent === "Total de unidades: 5")).toBeNull();
   });
 
+  it("retry após outra materialização mostra a quantidade retornada, não a do diálogo", async () => {
+    const post = vi.spyOn(api, "post").mockResolvedValue(materialized(3));
+    renderDrawer({ ...baseDetail, itens: [itemProntoMaterializar] });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: /Materializar Dronz/ }));
+    expect(screen.getByText((_, el) => el?.textContent === "Total de unidades: 5")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Materializar", exact: true }));
+    expect(await screen.findByText(/Materialização concluída/)).toBeTruthy();
+    expect(screen.getByText((_, el) => el?.textContent === "Total de unidades: 3")).toBeTruthy();
+    expect(screen.queryByText((_, el) => el?.textContent === "Total de unidades: 5")).toBeNull();
+    expect(post).toHaveBeenCalledWith(
+      "/imported-purchases/purchase-1/materializations/store-dronz",
+      { expectedPurchaseVersion: 2 },
+      expect.objectContaining({ headers: expect.objectContaining({ "x-store-id": "store-dronz" }) })
+    );
+  });
+
+  it("resposta sem itens não confirma a quantidade anterior como materializada", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({ data: {} });
+    renderDrawer({ ...baseDetail, itens: [itemProntoMaterializar] });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: /Materializar Dronz/ }));
+    await user.click(screen.getByRole("button", { name: "Materializar", exact: true }));
+    expect(await screen.findByText(/resumo da resposta está indisponível/)).toBeTruthy();
+    expect(screen.queryByText((_, el) => el?.textContent === "Total de unidades: 5")).toBeNull();
+  });
+
   it("mutação pendente não fecha com ESC nem aceita duplo envio", async () => {
-    let finish!: (value: { data: object }) => void;
+    let finish!: (value: ReturnType<typeof materialized>) => void;
     const post = vi.spyOn(api, "post").mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
     renderDrawer();
     const user = userEvent.setup();
@@ -620,7 +651,7 @@ describe("UX-1C — Materialização (compra + loja, não por item)", () => {
     expect(screen.getByRole("dialog", { name: "Materializar para Dronz" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Cancelar" }).hasAttribute("disabled")).toBe(true);
     expect(post).toHaveBeenCalledTimes(1);
-    finish({ data: {} });
+    finish(materialized(5));
     expect(await screen.findByText(/Materialização concluída/)).toBeTruthy();
   });
 });

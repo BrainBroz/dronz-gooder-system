@@ -116,6 +116,10 @@ export type PurchaseMaterialization = {
   pedidoCompra: { id: string; numeroPedido: string; status: string };
 };
 
+export type PurchaseMaterializationResult = {
+  pedidoCompra: { itens: Array<{ quantidade: number }> };
+};
+
 export type PurchaseHistoryEntry = {
   id: string;
   action: string;

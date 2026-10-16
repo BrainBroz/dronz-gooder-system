@@ -70,9 +70,9 @@ Ingestão automática por e-mail/documentos/CSV, APIs externas, listagem de cont
 
 O drawer novo havia omitido o mapping merchant–fornecedor existente no detalhe anterior. `SupplierMappingForm` agora é compartilhado pelas duas apresentações, visível somente com `SET_SUPPLIER_MAPPING` no read model. Reutiliza `GET /suppliers` com query key/header da loja e a mutação existente de mapping, que invalida overview, listas e detalhe. Trocar a loja limpa a seleção anterior; falha no catálogo impede envio e permite retry.
 
-O diálogo de materialização lê o código `error` efetivamente enviado pela API. `supplier_mapping_required` orienta a configurar o vínculo; somente `concurrent_modification` dispara atualização do detalhe. O resumo confirmado continua disponível após o refetch retirar os itens pendentes, sem acessar um resumo inexistente. Sucesso mantém a confirmação aberta e desabilita novo envio; uma requisição pendente não aceita fechamento por ESC ou submissão duplicada.
+O diálogo de materialização lê o código `error` efetivamente enviado pela API. `supplier_mapping_required` orienta a configurar o vínculo; somente `concurrent_modification` dispara atualização do detalhe. O resumo confirmado usa as quantidades do pedido operacional retornado pela API, inclusive em retry que encontra materialização existente; não reutiliza a estimativa anterior ao envio. Se a resposta não trouxer itens verificáveis, informa que o resumo está indisponível. Sucesso mantém a confirmação aberta e desabilita novo envio; uma requisição pendente não aceita fechamento por ESC ou submissão duplicada.
 
-Se a atribuição mudar com o diálogo aberto, o resumo acompanha o detalhe atualizado antes do envio. Após sucesso, ele preserva os números enviados, não a cópia antiga da abertura.
+Se a atribuição mudar com o diálogo aberto, o resumo acompanha o detalhe atualizado antes do envio. Após sucesso, os números são os do pedido operacional retornado, não a cópia antiga da abertura ou do formulário.
 
 `fullyAssigned` é exibido como “Itens totalmente atribuídos”, não como prova de que a compra está pronta para materializar. A elegibilidade continua revalidada pelo backend; não se inferem mappings de fornecedor ausentes do read model.
 

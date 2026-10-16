@@ -6,7 +6,8 @@ import type {
   UnifiedPurchaseDetail,
   UnifiedPurchaseFilters,
   UnifiedPurchaseOverview,
-  UnifiedPurchasePage
+  UnifiedPurchasePage,
+  PurchaseMaterializationResult
 } from "../types/unified-purchases";
 
 const globalHeaders = () => ({ ...authHeader() });
@@ -184,7 +185,7 @@ export function useUnifiedPurchaseMutations() {
         expectedPurchaseVersion: number;
         idempotencyKey: string;
       }) =>
-        api.post(
+        api.post<PurchaseMaterializationResult>(
           `/imported-purchases/${input.purchaseId}/materializations/${input.storeId}`,
           { expectedPurchaseVersion: input.expectedPurchaseVersion },
           { headers: storeHeaders(input.storeId, input.idempotencyKey) }

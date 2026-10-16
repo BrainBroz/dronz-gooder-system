@@ -403,6 +403,11 @@ describe("unified purchases backend", () => {
       .set(bearer(f.token))
       .set("idempotency-key", "batch5-mat-d")
       .send({ expectedPurchaseVersion: current.version });
+    const existingWithNewKey = await request(f.app)
+      .post(`/imported-purchases/${f.purchase.id}/materializations/${f.dronz.id}`)
+      .set(bearer(f.token))
+      .set("idempotency-key", "batch5-mat-d-new-key")
+      .send({ expectedPurchaseVersion: current.version });
     const replay = await request(f.app)
       .post(
         `/imported-purchases/${f.purchase.id}/materializations/${f.dronz.id}`
@@ -421,6 +426,9 @@ describe("unified purchases backend", () => {
       .send({ expectedPurchaseVersion: afterD.version });
     expect(d.status).toBe(201);
     expect(replay.body.id).toBe(d.body.id);
+    expect(existingWithNewKey.status).toBe(201);
+    expect(existingWithNewKey.body.id).toBe(d.body.id);
+    expect(existingWithNewKey.body.pedidoCompra.itens[0].quantidade).toBe(2);
     expect(g.status).toBe(201);
     expect(d.body.pedidoCompra.itens[0].quantidade).toBe(2);
     expect(g.body.pedidoCompra.itens[0].quantidade).toBe(2);
