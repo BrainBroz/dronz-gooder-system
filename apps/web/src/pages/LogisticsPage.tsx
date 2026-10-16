@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Card, CardContent, MenuItem, Stack, TextField, Typography } from "@mui/material";
+import { Button, Card, CardContent, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, Stack, TextField, Typography } from "@mui/material";
 import { useForm, useWatch } from "react-hook-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ContentCard } from "../components/ui/ContentCard";
@@ -9,7 +9,16 @@ import { MutationStatus } from "../components/ui/MutationStatus";
 import { SuitcaseWeightPanel } from "../components/SuitcaseWeightPanel";
 import { api } from "../api/client";
 import { authHeader, useAuthStore } from "../stores/auth";
+import { operationsKeys } from "../hooks/useOperations";
 import { logisticsQueryKeys, purchasingQueryKeys } from "../queryKeys";
+
+type LogisticsTrip = {
+  id: string;
+  origem: string;
+  destino: string;
+  status: string;
+  allowedStatusTransitions: string[];
+};
 
 type LogisticsBag = {
   id: string;
@@ -18,6 +27,17 @@ type LogisticsBag = {
   limitePesoKg: string;
   volumes: { id: string; codigo: string }[];
   alocacoes: { id: string }[];
+  allowedStatusTransitions: string[];
+};
+
+const statusLabels: Record<string, string> = {
+  OPEN_FOR_ALLOCATION: "Abrir para alocação",
+  CLOSED_FOR_ALLOCATION: "Encerrar alocação da viagem",
+  IN_TRANSIT: "Registrar viagem em trânsito",
+  ARRIVED_BRAZIL: "Registrar chegada ao Brasil",
+  CLOSED: "Fechar mala",
+  CHECKED_IN: "Registrar embarque da mala",
+  RECEIVED: "Registrar mala recebida"
 };
 
 type SearchOrder = {
@@ -38,6 +58,13 @@ function LogisticsContent() {
   const [draftOrderNumber, setDraftOrderNumber] = useState("");
   const [orderNumber, setOrderNumber] = useState("");
   const [allocationResetKey, setAllocationResetKey] = useState(0);
+  const [statusRequest, setStatusRequest] = useState<{
+    kind: "trips" | "suitcases";
+    id: string;
+    status: string;
+    name: string;
+    version: number;
+  } | null>(null);
   const travelerForm = useForm<{ nome: string; email: string }>({
     defaultValues: { nome: "", email: "" }
   });
@@ -82,7 +109,7 @@ function LogisticsContent() {
     queryFn: async () =>
       (await api.get("/logistics/travelers", { headers })).data
   });
-  const trips = useQuery({
+  const trips = useQuery<LogisticsTrip[]>({
     queryKey: logisticsQueryKeys.trips(store),
     enabled: !!store,
     queryFn: async () => (await api.get("/logistics/trips", { headers })).data
@@ -170,12 +197,30 @@ function LogisticsContent() {
       await client.invalidateQueries({ queryKey: logisticsQueryKeys.suitcaseWeight(store, data.malaId) });
     }
   });
+  const changeStatus = useMutation({
+    mutationFn: (request: NonNullable<typeof statusRequest>) =>
+      api.patch(`/logistics/${request.kind}/${request.id}/status`, { status: request.status }, { headers }),
+    onSuccess: () => setStatusRequest(null),
+    onSettled: async () => {
+      await Promise.all([
+        client.invalidateQueries({ queryKey: logisticsQueryKeys.trips(store) }),
+        client.invalidateQueries({ queryKey: logisticsQueryKeys.suitcases(store) }),
+        client.invalidateQueries({ queryKey: operationsKeys.all(store) })
+      ]);
+    }
+  });
   const allocationBag = bags.data?.find((bag) => bag.id === allocationBagId);
   const searchedOrders = draftOrderNumber.trim() === orderNumber ? orders.data : undefined;
+  const activeStatusRequest = statusRequest && (
+    statusRequest.kind === "trips"
+      ? statusRequest.version === trips.dataUpdatedAt && trips.data?.find((trip) => trip.id === statusRequest.id)?.allowedStatusTransitions.includes(statusRequest.status)
+      : statusRequest.version === bags.dataUpdatedAt && bags.data?.find((bag) => bag.id === statusRequest.id)?.allowedStatusTransitions.includes(statusRequest.status)
+  ) ? statusRequest : null;
 
   return (
     <Stack gap={{ xs: 2.5, md: 3.5 }}>
       <PageHeader title="Logística Internacional" />
+      <MutationStatus mutation={changeStatus} successMessage="Status atualizado." />
       {travelers.isLoading && <Typography>Carregando...</Typography>}
       {travelers.isError && <Typography>Falha ao carregar dados</Typography>}
       <ContentCard title="Viajantes">
@@ -261,18 +306,19 @@ function LogisticsContent() {
         </Stack>
         <MutationStatus mutation={createTrip} successMessage="Viagem criada." />
         {trips.data?.map(
-          (t: {
-            id: string;
-            origem: string;
-            destino: string;
-            status: string;
-          }) => (
+          (t) => (
             <Card key={t.id}>
               <CardContent>
                 <Typography>
                   {t.origem} → {t.destino}
                 </Typography>
                 <Typography>{t.status}</Typography>
+                {t.allowedStatusTransitions.filter((status) => status !== "CANCELLED").map((status) => (
+                  <Button key={status} disabled={changeStatus.isPending}
+                    onClick={() => setStatusRequest({ kind: "trips", id: t.id, status, name: `${t.origem} → ${t.destino}`, version: trips.dataUpdatedAt })}>
+                    {statusLabels[status] ?? status}
+                  </Button>
+                ))}
               </CardContent>
             </Card>
           )
@@ -326,6 +372,12 @@ function LogisticsContent() {
                 <Button onClick={() => setSelectedMalaId(b.id)}>
                   Ver peso
                 </Button>
+                {b.allowedStatusTransitions.filter((status) => status !== "CANCELLED").map((status) => (
+                  <Button key={status} disabled={changeStatus.isPending}
+                    onClick={() => setStatusRequest({ kind: "suitcases", id: b.id, status, name: b.codigo, version: bags.dataUpdatedAt })}>
+                    {statusLabels[status] ?? status}
+                  </Button>
+                ))}
               </CardContent>
             </Card>
           )
@@ -408,6 +460,22 @@ function LogisticsContent() {
         <MutationStatus mutation={allocate} successMessage="Item alocado na mala." />
       </ContentCard>
       <SuitcaseWeightPanel malaId={selectedMalaId} />
+      <Dialog open={Boolean(activeStatusRequest)} onClose={() => {
+        if (!changeStatus.isPending) setStatusRequest(null);
+      }}>
+        <DialogTitle>Confirmar etapa física</DialogTitle>
+        <DialogContent>
+          <Typography>
+            {activeStatusRequest ? `${statusLabels[activeStatusRequest.status] ?? activeStatusRequest.status}: ${activeStatusRequest.name}?` : ""}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button disabled={changeStatus.isPending} onClick={() => setStatusRequest(null)}>Voltar</Button>
+          <Button disabled={changeStatus.isPending || !activeStatusRequest} onClick={() => {
+            if (activeStatusRequest) changeStatus.mutate(activeStatusRequest);
+          }}>Confirmar</Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   );
 }

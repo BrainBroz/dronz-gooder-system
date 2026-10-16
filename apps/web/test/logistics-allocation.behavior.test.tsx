@@ -5,10 +5,12 @@ import { api } from "../src/api/client";
 import { LogisticsPage } from "../src/pages/LogisticsPage";
 import { useAuthStore } from "../src/stores/auth";
 import { renderWithProviders, testStores } from "./render";
+import { logisticsQueryKeys } from "../src/queryKeys";
 
 const bag = {
   id: "bag-a", codigo: "MALA-A", status: "PLANNING", limitePesoKg: "23",
-  volumes: [{ id: "volume-a", codigo: "VOLUME-A" }], alocacoes: []
+  volumes: [{ id: "volume-a", codigo: "VOLUME-A" }], alocacoes: [],
+  allowedStatusTransitions: ["CLOSED"]
 };
 const order = {
   id: "order-a", numeroPedido: "ORD-A",
@@ -127,5 +129,106 @@ describe("Logística — alocação após Miami", () => {
     await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "Alocar na mala" }));
     expect(post).not.toHaveBeenCalled();
+  });
+});
+
+describe("Logística — transições informadas pelo backend", () => {
+  it("envia a transição da viagem somente após confirmação explícita", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(api, "get").mockImplementation(async (url) => {
+      if (url === "/logistics/travelers") return { data: [] };
+      if (url === "/logistics/trips") return { data: [{
+        id: "trip-a", origem: "Miami", destino: "Brasil", status: "OPEN_FOR_ALLOCATION",
+        allowedStatusTransitions: ["CLOSED_FOR_ALLOCATION"]
+      }] };
+      if (url === "/logistics/suitcases") return { data: [] };
+      throw new Error(`GET inesperado: ${url}`);
+    });
+    const patch = vi.spyOn(api, "patch").mockResolvedValue({ data: {} });
+    renderWithProviders(<LogisticsPage />);
+    await user.click(await screen.findByRole("button", { name: "Encerrar alocação da viagem" }));
+    expect(patch).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Confirmar" }));
+    expect(patch).toHaveBeenCalledWith("/logistics/trips/trip-a/status", {
+      status: "CLOSED_FOR_ALLOCATION"
+    }, { headers: { Authorization: "Bearer access-test", "x-store-id": testStores[0].id } });
+  });
+
+  it("confirma fechamento da mala usando a loja atual e remove a ação após refetch", async () => {
+    const user = userEvent.setup();
+    let currentBag = { ...bag };
+    const get = vi.spyOn(api, "get").mockImplementation(async (url) => {
+      if (url === "/logistics/travelers" || url === "/logistics/trips") return { data: [] };
+      if (url === "/logistics/suitcases") return { data: [currentBag] };
+      throw new Error(`GET inesperado: ${url}`);
+    });
+    const patch = vi.spyOn(api, "patch").mockImplementation(async () => {
+      currentBag = { ...currentBag, status: "CLOSED", allowedStatusTransitions: [] };
+      return { data: currentBag };
+    });
+    renderWithProviders(<LogisticsPage />);
+    await user.click(await screen.findByRole("button", { name: "Fechar mala" }));
+    expect(screen.getByText("Fechar mala: MALA-A?")).toBeTruthy();
+    expect(patch).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Confirmar" }));
+    expect(patch).toHaveBeenCalledWith("/logistics/suitcases/bag-a/status", { status: "CLOSED" }, {
+      headers: { Authorization: "Bearer access-test", "x-store-id": testStores[0].id }
+    });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Fechar mala" })).toBeNull());
+    expect(await screen.findByText("MALA-A — CLOSED")).toBeTruthy();
+    expect(get.mock.calls.filter(([url]) => url === "/logistics/suitcases")).toHaveLength(2);
+  });
+
+  it("não cria ação por permissão local quando a API não a oferece", async () => {
+    vi.spyOn(api, "get").mockImplementation(async (url) => {
+      if (url === "/logistics/travelers" || url === "/logistics/trips") return { data: [] };
+      if (url === "/logistics/suitcases") return {
+        data: [{ ...bag, allowedStatusTransitions: [] }]
+      };
+      throw new Error(`GET inesperado: ${url}`);
+    });
+    const patch = vi.spyOn(api, "patch").mockResolvedValue({ data: {} });
+    renderWithProviders(<LogisticsPage />, { permissions: ["CHECKPOINT_CORRIGIR"] });
+    await screen.findByText("MALA-A — PLANNING");
+    expect(screen.queryByRole("button", { name: "Fechar mala" })).toBeNull();
+    expect(screen.queryByText("Confirmar etapa física")).toBeNull();
+    expect(patch).not.toHaveBeenCalled();
+  });
+
+  it("troca de loja descarta a transição da viagem anterior", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(api, "get").mockImplementation(async (url, config) => {
+      if (url === "/logistics/travelers") return { data: [] };
+      if (url === "/logistics/trips") return { data: config?.headers?.["x-store-id"] === testStores[0].id
+        ? [{ id: "trip-a", origem: "Miami", destino: "Brasil", status: "OPEN_FOR_ALLOCATION", allowedStatusTransitions: ["CLOSED_FOR_ALLOCATION"] }]
+        : [] };
+      if (url === "/logistics/suitcases") return { data: [] };
+      throw new Error(`GET inesperado: ${url}`);
+    });
+    const patch = vi.spyOn(api, "patch").mockResolvedValue({ data: {} });
+    renderWithProviders(<LogisticsPage />);
+    await user.click(await screen.findByRole("button", { name: "Encerrar alocação da viagem" }));
+    useAuthStore.getState().setActiveStoreId(testStores[1].id);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Confirmar" })).toBeNull());
+    expect(screen.queryByRole("button", { name: "Encerrar alocação da viagem" })).toBeNull();
+    expect(patch).not.toHaveBeenCalled();
+  });
+
+  it("fecha confirmação aberta quando refetch remove a ação", async () => {
+    const user = userEvent.setup();
+    let transitions = ["CLOSED"];
+    vi.spyOn(api, "get").mockImplementation(async (url) => {
+      if (url === "/logistics/travelers" || url === "/logistics/trips") return { data: [] };
+      if (url === "/logistics/suitcases") return { data: [{ ...bag, allowedStatusTransitions: transitions }] };
+      throw new Error(`GET inesperado: ${url}`);
+    });
+    const patch = vi.spyOn(api, "patch").mockResolvedValue({ data: {} });
+    const { queryClient } = renderWithProviders(<LogisticsPage />);
+    await user.click(await screen.findByRole("button", { name: "Fechar mala" }));
+    expect(screen.getByRole("button", { name: "Confirmar" })).toBeTruthy();
+    transitions = [];
+    await queryClient.invalidateQueries({ queryKey: logisticsQueryKeys.suitcases(testStores[0].id) });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Confirmar" })).toBeNull());
+    expect(patch).not.toHaveBeenCalled();
   });
 });

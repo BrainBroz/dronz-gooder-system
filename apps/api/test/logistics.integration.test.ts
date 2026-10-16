@@ -38,6 +38,54 @@ const h = (t: string, id: string) => ({
   "x-store-id": id
 });
 describe("international logistics", () => {
+  it("oferece transições da viagem e rejeita avanço concorrente do mesmo estado", async () => {
+    const { app, t, d } = await s();
+    fixture = await createOperationalFixture(prisma, d.id);
+    const tripId = fixture.trip.id;
+    const list = await request(app).get("/logistics/trips").set(h(t, d.id));
+    expect(list.body.find((trip: { id: string }) => trip.id === tripId).allowedStatusTransitions)
+      .toEqual(["CLOSED_FOR_ALLOCATION", "CANCELLED"]);
+    const results = await Promise.all([
+      request(app).patch(`/logistics/trips/${tripId}/status`).set(h(t, d.id))
+        .send({ status: "CLOSED_FOR_ALLOCATION" }),
+      request(app).patch(`/logistics/trips/${tripId}/status`).set(h(t, d.id))
+        .send({ status: "CLOSED_FOR_ALLOCATION" })
+    ]);
+    expect(results.map((result) => result.status).sort()).toEqual([200, 409]);
+    expect((await prisma.viagem.findUniqueOrThrow({ where: { id: tripId } })).status)
+      .toBe("CLOSED_FOR_ALLOCATION");
+  });
+
+  it("não deixa mala saltar etapas nem declarar chegada antes da viagem", async () => {
+    const { app, t, d } = await s();
+    fixture = await createOperationalFixture(prisma, d.id);
+    const bagId = fixture.bag.id;
+    const tripId = fixture.trip.id;
+    const changeBag = (status: string) => request(app)
+      .patch(`/logistics/suitcases/${bagId}/status`).set(h(t, d.id)).send({ status });
+    const changeTrip = (status: string) => request(app)
+      .patch(`/logistics/trips/${tripId}/status`).set(h(t, d.id)).send({ status });
+    const listed = await request(app).get("/logistics/suitcases").set(h(t, d.id));
+    expect(listed.body.find((bag: { id: string }) => bag.id === bagId).allowedStatusTransitions)
+      .toEqual(["CLOSED"]);
+    expect((await changeBag("ARRIVED_BRAZIL")).status).toBe(409);
+    expect((await changeBag("RECEIVED")).status).toBe(409);
+    expect((await changeBag("CANCELLED")).status).toBe(409);
+    expect((await changeBag("CLOSED")).status).toBe(200);
+    expect((await changeBag("CLOSED")).status).toBe(409);
+    expect((await changeBag("CHECKED_IN")).status).toBe(200);
+    expect((await changeBag("ARRIVED_BRAZIL")).status).toBe(409);
+    for (const status of ["CLOSED_FOR_ALLOCATION", "IN_TRANSIT", "ARRIVED_BRAZIL"])
+      expect((await changeTrip(status)).status).toBe(200);
+    const ready = await request(app).get("/logistics/suitcases").set(h(t, d.id));
+    expect(ready.body.find((bag: { id: string }) => bag.id === bagId).allowedStatusTransitions)
+      .toEqual(["ARRIVED_BRAZIL"]);
+    expect((await changeBag("ARRIVED_BRAZIL")).status).toBe(200);
+    expect((await changeBag("RECEIVED")).status).toBe(409);
+    expect((await prisma.mala.findUniqueOrThrow({ where: { id: bagId } })).status)
+      .toBe("ARRIVED_BRAZIL");
+  });
+
   it("serializa alocações concorrentes e não excede o recebido em Miami", async () => {
     const { app, t, d } = await s();
     fixture = await createOperationalFixture(prisma, d.id);
