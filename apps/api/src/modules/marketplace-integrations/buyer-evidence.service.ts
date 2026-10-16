@@ -131,19 +131,28 @@ export async function recordMarketplaceEvidence(input: {
           select: { id: true, version: true }
         });
         const prior = await tx.buyerPurchaseCandidate.findUnique({
-          where: { provider_contaExternaId_externalOrderIdNormalized: candidateIdentity }
+          where: { provider_contaExternaId_externalOrderIdNormalized: candidateIdentity },
+          include: { currentEvidence: { select: { sourceOccurredAt: true } } }
         });
+        if (prior?.compraImportadaId)
+          await tx.$queryRaw`SELECT id FROM "CompraImportada" WHERE id = ${prior.compraImportadaId} FOR UPDATE`;
+        const incomingTime = new Date(input.order.updatedAt).getTime();
+        const currentTime = prior?.currentEvidence.sourceOccurredAt.getTime() ?? -Infinity;
+        const sameTime = currentTime === incomingTime;
+        const promote = incomingTime > currentTime ||
+          (sameTime && (input.order.cancelled || prior?.status !== "CANCELADA"));
         const candidate = prior
-          ? await tx.buyerPurchaseCandidate.update({
+          ? promote ? await tx.buyerPurchaseCandidate.update({
               where: { id: prior.id },
               data: {
                 currentEvidenceId: evidence.id,
                 status: prior.compraImportadaId
                   ? "COM_DIVERGENCIA"
-                  : input.order.cancelled ? "CANCELADA" : "AGUARDANDO_APROVACAO",
+                  : input.order.cancelled ? "CANCELADA"
+                  : sameTime ? "COM_DIVERGENCIA" : "AGUARDANDO_APROVACAO",
                 version: { increment: 1 }
               }
-            })
+            }) : prior
           : await tx.buyerPurchaseCandidate.create({
               data: {
                 ...candidateIdentity,
@@ -174,13 +183,19 @@ export async function recordMarketplaceEvidence(input: {
         await audit(tx, {
           usuarioId: input.actorId,
           permissionCode: "INTEGRACAO_MARKETPLACE_SINCRONIZAR",
-          action: prior ? "BUYER_CANDIDATE_UPDATED" : "BUYER_CANDIDATE_DETECTED",
+          action: !prior ? "BUYER_CANDIDATE_DETECTED"
+            : promote ? "BUYER_CANDIDATE_UPDATED" : "BUYER_EVIDENCE_LINKED",
           entity: "BuyerPurchaseCandidate",
           entityId: candidate.id,
           correlationId: input.correlationId,
           idempotencyKey: input.idempotencyKey,
           before: prior ? { status: prior.status, version: prior.version } : undefined,
-          after: { status: candidate.status, version: candidate.version, evidenceId: evidence.id },
+          after: {
+            status: candidate.status,
+            version: candidate.version,
+            currentEvidenceId: candidate.currentEvidenceId,
+            linkedEvidenceId: evidence.id
+          },
           origin: "API_MARKETPLACE_INTEGRATIONS"
         });
         return { ...evidence, candidateId: candidate.id, created: true };

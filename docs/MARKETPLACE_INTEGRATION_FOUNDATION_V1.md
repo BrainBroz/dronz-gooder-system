@@ -222,7 +222,8 @@ A fundação do Batch 8 sincronizava diretamente com `importPurchase`. A correç
 - não apaga mappings ou atribuições;
 - não materializa pedido operacional;
 - não cria estoque, checkpoint, venda ou pagamento;
-- mantém nova versão de evidência posterior à aprovação em `COM_DIVERGENCIA`, sem reescrever a compra já aprovada.
+- mantém nova versão de evidência posterior à aprovação em `COM_DIVERGENCIA`, sem reescrever a compra já aprovada e bloqueando materialização até revisão;
+- vincula evidência recebida fora de ordem sem substituir a projeção de evento mais recente.
 
 Cancelamentos/reembolsos já chegam no contrato inicial. A aprovação de candidato cancelado é bloqueada. Conciliação multicanal, classificação humana do legado e resolução operacional de divergências ainda não estão concluídas; nenhum adapter real deve ser habilitado nesta etapa.
 

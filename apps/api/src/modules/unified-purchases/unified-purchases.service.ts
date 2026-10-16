@@ -818,6 +818,7 @@ export async function materialize(
         where: { id: purchaseId },
         include: {
           merchantExterno: true,
+          buyerCandidate: { select: { status: true } },
           conflitos: { where: { status: "ABERTO" } },
           itens: {
             include: {
@@ -833,6 +834,9 @@ export async function materialize(
       if (!purchase) throw new AppError(404, "not_found");
       if (purchase.version !== input.expectedPurchaseVersion)
         throw new AppError(409, "concurrent_modification");
+      if (purchase.buyerCandidate?.status !== undefined &&
+          purchase.buyerCandidate.status !== "APROVADA")
+        throw new AppError(409, "buyer_evidence_review_required");
       if (purchase.moeda !== "USD")
         throw new AppError(409, "currency_conversion_required");
       if (purchase.conflitos.length)
@@ -1057,6 +1061,7 @@ export async function listPurchases(
       include: {
         contaExterna: true,
         merchantExterno: true,
+        buyerCandidate: { select: { status: true } },
         conflitos: { where: { status: "ABERTO" } },
         itens: { include: { atribuicoes: true } },
         materializacoes: { select: { lojaId: true } }
@@ -1100,6 +1105,13 @@ export async function listPurchases(
           code: "ALREADY_MATERIALIZED",
           message: "Atribuição excede a quantidade já materializada. Corrija o saldo com motivo."
         });
+      const buyerReviewPending = !!purchase.buyerCandidate &&
+        purchase.buyerCandidate.status !== "APROVADA";
+      if (buyerReviewPending)
+        blockedReasons.push({
+          code: "BUYER_EVIDENCE_REVIEW_REQUIRED",
+          message: "A evidência da compra exige revisão antes de materializar."
+        });
       return {
         id: purchase.id,
         provider: purchase.plataforma,
@@ -1126,7 +1138,8 @@ export async function listPurchases(
         },
         conflictCount: purchase.conflitos.length,
         allowedActions:
-          purchase.conflitos.length || !hasPendingMaterialization(purchase)
+          purchase.conflitos.length || buyerReviewPending ||
+          !hasPendingMaterialization(purchase)
             ? actionsFor(identity).filter(
                 (action) => action !== "MATERIALIZE_STORE_ALLOCATION"
               )
@@ -1216,6 +1229,7 @@ export async function purchaseDetail(identity: AuthIdentity, id: string) {
     include: {
       contaExterna: true,
       merchantExterno: true,
+      buyerCandidate: { select: { status: true } },
       itens: {
         include: {
           merchantExterno: true,
@@ -1243,6 +1257,13 @@ export async function purchaseDetail(identity: AuthIdentity, id: string) {
       code: "EXTERNAL_ORDER_CONFLICT",
       message: "Compra possui conflito aberto."
     });
+  const buyerReviewPending = !!purchase.buyerCandidate &&
+    purchase.buyerCandidate.status !== "APROVADA";
+  if (buyerReviewPending)
+    blockedReasons.push({
+      code: "BUYER_EVIDENCE_REVIEW_REQUIRED",
+      message: "A evidência da compra exige revisão antes de materializar."
+    });
   if (hasCompletedStoreExcess(purchase))
     blockedReasons.push({
       code: "ALREADY_MATERIALIZED",
@@ -1253,7 +1274,7 @@ export async function purchaseDetail(identity: AuthIdentity, id: string) {
     allowedActions: actionsFor(identity).filter((action) => {
       if (action === "MATERIALIZE_STORE_ALLOCATION")
         return (
-          !purchase.conflitos.some(
+          !buyerReviewPending && !purchase.conflitos.some(
             (conflict) => conflict.status === "ABERTO"
           ) && hasPendingMaterialization(purchase)
         );

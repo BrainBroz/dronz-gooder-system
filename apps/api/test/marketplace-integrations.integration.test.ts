@@ -156,6 +156,12 @@ async function cleanup() {
   await prisma.atribuicaoCompraItem.deleteMany({
     where: { itemExterno: { compraImportadaId: { in: purchaseIds } } }
   });
+  await prisma.mapeamentoItemProduto.deleteMany({
+    where: { itemExterno: { compraImportadaId: { in: purchaseIds } } }
+  });
+  await prisma.mapeamentoMerchantFornecedor.deleteMany({
+    where: { merchantExterno: { externalMerchantId: { startsWith: "merchant-batch8" } } }
+  });
   await prisma.compraImportadaItem.deleteMany({
     where: { compraImportadaId: { in: purchaseIds } }
   });
@@ -485,6 +491,46 @@ describe("marketplace integration foundation", () => {
     expect(approval.status).toBe(409);
   });
 
+  it("preserva cancelamento mais recente quando chega um snapshot ativo atrasado", async () => {
+    const fixture = await connectionFixture("EBAY", "SHARED", "buyer-late-event");
+    const identity = await getAuthenticatedUser(fixture.userId);
+    const externalOrderId = "batch8-late-event";
+    for (const [payload, key] of [
+      [order(externalOrderId, {
+        updatedAt: "2026-07-14T12:00:00.000Z", cancelled: true
+      }), "batch8-late-cancel"],
+      [order(externalOrderId, {
+        updatedAt: "2026-07-14T11:00:00.000Z"
+      }), "batch8-late-active"]
+    ] as const) {
+      const result = await syncConnection(identity, fixture.connectionId,
+        { replay: true }, key,
+        disabledRegistry(new FakeAdapter("EBAY", [{ orders: [payload] }])));
+      expect(result.status).toBe("SUCCEEDED");
+    }
+    const candidate = await prisma.buyerPurchaseCandidate.findFirstOrThrow({
+      where: { externalOrderIdNormalized: externalOrderId },
+      include: { currentEvidence: true, evidenceLinks: true }
+    });
+    expect(candidate).toMatchObject({ status: "CANCELADA", version: 1 });
+    expect(candidate.currentEvidence.sourceOccurredAt.toISOString())
+      .toBe("2026-07-14T12:00:00.000Z");
+    expect(candidate.evidenceLinks).toHaveLength(2);
+    const detail = await request(fixture.app)
+      .get(`/integrations/marketplaces/buyer-candidates/${candidate.id}`)
+      .set(bearer(fixture.token));
+    expect(detail.body.allowedActions).not.toContain("APPROVE");
+    const approval = await request(fixture.app)
+      .post(`/integrations/marketplaces/buyer-candidates/${candidate.id}/decision`)
+      .set(bearer(fixture.token))
+      .set("idempotency-key", "batch8-late-approve")
+      .send({ decision: "APROVAR", expectedVersion: 1 });
+    expect(approval.status).toBe(409);
+    expect(await prisma.compraImportada.count({
+      where: { externalOrderIdNormalizado: externalOrderId }
+    })).toBe(0);
+  });
+
   it("não aprova retroativamente compra legada já criada pela fundação antiga", async () => {
     const fixture = await connectionFixture("EBAY", "SHARED", "buyer-legacy");
     const connection = await prisma.conexaoMarketplace.findUniqueOrThrow({
@@ -577,6 +623,66 @@ describe("marketplace integration foundation", () => {
     expect(await prisma.auditLog.count({
       where: { action: "BUYER_CANDIDATE_APPROVED", entityId: candidate.id }
     })).toBe(1);
+  });
+
+  it("bloqueia materialização após cancelamento externo de compra aprovada", async () => {
+    const fixture = await connectionFixture("EBAY", "SHARED", "buyer-cancel-after-approval");
+    const identity = await getAuthenticatedUser(fixture.userId);
+    const externalOrderId = "batch8-cancel-after-approval";
+    const sync = (payload: Order, key: string) => syncConnection(
+      identity, fixture.connectionId, { replay: true }, key,
+      disabledRegistry(new FakeAdapter("EBAY", [{ orders: [payload] }]))
+    );
+    expect((await sync(order(externalOrderId), "batch8-cancel-initial")).status)
+      .toBe("SUCCEEDED");
+    const approved = await approveCandidate(fixture, externalOrderId);
+    const purchase = await prisma.compraImportada.findUniqueOrThrow({
+      where: { id: approved.purchaseId }, include: { itens: true }
+    });
+    const product = await prisma.produto.findFirstOrThrow({
+      where: { lojaId: fixture.dronz.id, ativo: true }
+    });
+    const supplier = await prisma.fornecedor.findFirstOrThrow({
+      where: { lojaId: fixture.dronz.id, ativo: true }
+    });
+    await prisma.atribuicaoCompraItem.create({ data: {
+      itemExternoId: purchase.itens[0].id, lojaId: fixture.dronz.id,
+      quantidade: 2, atribuidoPorId: fixture.userId
+    } });
+    await prisma.mapeamentoItemProduto.create({ data: {
+      itemExternoId: purchase.itens[0].id, lojaId: fixture.dronz.id,
+      produtoId: product.id, revisadoPorId: fixture.userId
+    } });
+    await prisma.mapeamentoMerchantFornecedor.create({ data: {
+      merchantExternoId: purchase.merchantExternoId!, lojaId: fixture.dronz.id,
+      fornecedorId: supplier.id, revisadoPorId: fixture.userId
+    } });
+    const before = await request(fixture.app)
+      .get(`/imported-purchases/${purchase.id}`).set(bearer(fixture.token));
+    expect(before.body.allowedActions).toContain("MATERIALIZE_STORE_ALLOCATION");
+
+    expect((await sync(order(externalOrderId, {
+      updatedAt: "2026-07-14T12:00:00.000Z", cancelled: true
+    }), "batch8-cancel-later")).status).toBe("SUCCEEDED");
+    const after = await request(fixture.app)
+      .get(`/imported-purchases/${purchase.id}`).set(bearer(fixture.token));
+    expect(after.body.allowedActions).not.toContain("MATERIALIZE_STORE_ALLOCATION");
+    expect(after.body.blockedReasons).toContainEqual(expect.objectContaining({
+      code: "BUYER_EVIDENCE_REVIEW_REQUIRED"
+    }));
+    const blocked = await request(fixture.app)
+      .post(`/imported-purchases/${purchase.id}/materializations/${fixture.dronz.id}`)
+      .set(bearer(fixture.token))
+      .set("idempotency-key", "batch8-cancel-materialize")
+      .send({ expectedPurchaseVersion: purchase.version });
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.error).toBe("buyer_evidence_review_required");
+    expect(await prisma.pedidoCompra.count({
+      where: { compraImportadaId: purchase.id }
+    })).toBe(0);
+    expect((await prisma.compraImportada.findUniqueOrThrow({
+      where: { id: purchase.id }
+    })).payloadSnapshot).toMatchObject({ cancelled: false });
   });
 
   it("rejeita candidato com motivo, preserva evidência e não cria compra", async () => {
