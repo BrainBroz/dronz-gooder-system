@@ -18,8 +18,25 @@ beforeAll(async () => {
 let fixture: Awaited<ReturnType<typeof createOperationalFixture>> | undefined;
 afterEach(async () => {
   if (fixture) {
+    const bags = await prisma.mala.findMany({
+      where: { viagemId: fixture.trip.id }, select: { id: true }
+    });
+    const checkpoints = await prisma.checkpointParaguai.findMany({
+      where: { viagemId: fixture.trip.id }, select: { id: true }
+    });
+    const checkpointIds = checkpoints.map((checkpoint) => checkpoint.id);
+    await prisma.eventoCorretivo.deleteMany({
+      where: { originalEventId: { in: checkpointIds } }
+    });
+    await prisma.projecaoOperacional.deleteMany({
+      where: { entityId: { in: checkpointIds } }
+    });
     await prisma.auditLog.deleteMany({
-      where: { entityId: { in: [fixture.trip.id, fixture.bag.id] } }
+      where: { entityId: { in: [fixture.trip.id, ...bags.map((bag) => bag.id), ...checkpointIds] } }
+    });
+    await prisma.checkpointParaguai.deleteMany({ where: { viagemId: fixture.trip.id } });
+    await prisma.mala.deleteMany({
+      where: { viagemId: fixture.trip.id, id: { not: fixture.bag.id } }
     });
     await fixture.cleanup();
   }
@@ -42,6 +59,16 @@ const h = (t: string, id: string) => ({
   Authorization: `Bearer ${t}`,
   "x-store-id": id
 });
+async function paraguayTripInTransit(lojaId: string) {
+  fixture = await createOperationalFixture(prisma, lojaId, "MIAMI_PARAGUAI_BRASIL");
+  await prisma.viagem.update({
+    where: { id: fixture.trip.id }, data: { status: "IN_TRANSIT" }
+  });
+  await prisma.mala.update({
+    where: { id: fixture.bag.id }, data: { status: "CHECKED_IN" }
+  });
+  return fixture;
+}
 describe("international logistics", () => {
   it("audita transições com ator e loja na mesma transação", async () => {
     const { app, t, d } = await s();
@@ -215,6 +242,74 @@ describe("international logistics", () => {
     expect(ready.body.find((entry: { id: string }) => entry.id === trip.id).allowedStatusTransitions)
       .toEqual(["ARRIVED_BRAZIL"]);
     expect((await changeTrip("ARRIVED_BRAZIL")).status).toBe(200);
+  });
+
+  it("aceita checkpoint Paraguai corrigido na projeção efetiva", async () => {
+    const { app, t, d } = await s();
+    const { trip, bag, admin } = await paraguayTripInTransit(d.id);
+    const checkpoint = await prisma.checkpointParaguai.create({ data: {
+      lojaId: d.id, viagemId: trip.id, malaId: bag.id,
+      confirmadoPorId: admin.id, confirmadoEm: new Date(), tipoDivergencia: "AVARIA"
+    } });
+    const changeTrip = () => request(app).patch(`/logistics/trips/${trip.id}/status`)
+      .set(h(t, d.id)).send({ status: "ARRIVED_BRAZIL" });
+    expect((await changeTrip()).status).toBe(409);
+    const corrected = await request(app).post("/operations/corrections")
+      .set(h(t, d.id)).send({
+        entity: "CheckpointParaguai", originalEventId: checkpoint.id,
+        correctionType: "DIVERGENCIA", reason: "Conferência posterior",
+        after: { tipoDivergencia: "CORRETO" }
+      });
+    expect(corrected.status).toBe(200);
+    const listed = await request(app).get("/logistics/trips").set(h(t, d.id));
+    expect(listed.body.find((entry: { id: string }) => entry.id === trip.id).allowedStatusTransitions)
+      .toEqual(["ARRIVED_BRAZIL"]);
+    expect((await changeTrip()).status).toBe(200);
+  });
+
+  it("ignora checkpoint Paraguai substituído e considera somente o ativo", async () => {
+    const { app, t, d } = await s();
+    const { trip, bag, admin } = await paraguayTripInTransit(d.id);
+    await prisma.checkpointParaguai.create({ data: {
+      lojaId: d.id, viagemId: trip.id, malaId: bag.id,
+      confirmadoPorId: admin.id, confirmadoEm: new Date(),
+      tipoDivergencia: "AVARIA", supersededAt: new Date()
+    } });
+    await prisma.checkpointParaguai.create({ data: {
+      lojaId: d.id, viagemId: trip.id, malaId: bag.id,
+      confirmadoPorId: admin.id, confirmadoEm: new Date(), tipoDivergencia: "CORRETO"
+    } });
+    const listed = await request(app).get("/logistics/trips").set(h(t, d.id));
+    expect(listed.body.find((entry: { id: string }) => entry.id === trip.id).allowedStatusTransitions)
+      .toEqual(["ARRIVED_BRAZIL"]);
+    expect((await request(app).patch(`/logistics/trips/${trip.id}/status`)
+      .set(h(t, d.id)).send({ status: "ARRIVED_BRAZIL" })).status).toBe(200);
+  });
+
+  it("exige liberação do Paraguai para todas as malas ativas da viagem", async () => {
+    const { app, t, d } = await s();
+    const { trip, bag, admin } = await paraguayTripInTransit(d.id);
+    const second = await prisma.mala.create({ data: {
+      lojaId: d.id, viagemId: trip.id, codigo: `SECOND-${trip.id}`, status: "CHECKED_IN"
+    } });
+    await prisma.checkpointParaguai.create({ data: {
+      lojaId: d.id, viagemId: trip.id, malaId: bag.id,
+      confirmadoPorId: admin.id, confirmadoEm: new Date()
+    } });
+    const changeTrip = () => request(app).patch(`/logistics/trips/${trip.id}/status`)
+      .set(h(t, d.id)).send({ status: "ARRIVED_BRAZIL" });
+    const blocked = await request(app).get("/logistics/trips").set(h(t, d.id));
+    expect(blocked.body.find((entry: { id: string }) => entry.id === trip.id).allowedStatusTransitions)
+      .toEqual([]);
+    expect((await changeTrip()).status).toBe(409);
+    await prisma.checkpointParaguai.create({ data: {
+      lojaId: d.id, viagemId: trip.id, malaId: second.id,
+      confirmadoPorId: admin.id, confirmadoEm: new Date()
+    } });
+    const ready = await request(app).get("/logistics/trips").set(h(t, d.id));
+    expect(ready.body.find((entry: { id: string }) => entry.id === trip.id).allowedStatusTransitions)
+      .toEqual(["ARRIVED_BRAZIL"]);
+    expect((await changeTrip()).status).toBe(200);
   });
 
   it("serializa alocações concorrentes e não excede o recebido em Miami", async () => {
