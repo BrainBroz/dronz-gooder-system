@@ -347,12 +347,15 @@ function candidateReadModel(
       ? "NEW_EVIDENCE_REQUIRES_RECONCILIATION"
       : "LEGACY_PURCHASE_REQUIRES_REVIEW");
   else if (candidate.status === "CANCELADA") blockedReasons.push("CANCELLED");
+  else if (candidate.status === "COM_DIVERGENCIA")
+    blockedReasons.push("MATERIAL_DIVERGENCE");
   else if (candidate.status !== "AGUARDANDO_APROVACAO")
     blockedReasons.push("ALREADY_DECIDED");
   const allowedActions: BuyerCandidateReadModel["allowedActions"] = ["VIEW"];
-  if (candidate.status === "AGUARDANDO_APROVACAO" &&
-      !candidate.compraImportadaId) {
-    if (hasPermission(identity, "BUYER_INGESTION_APROVAR"))
+  if (!candidate.compraImportadaId &&
+      ["AGUARDANDO_APROVACAO", "COM_DIVERGENCIA"].includes(candidate.status)) {
+    if (candidate.status === "AGUARDANDO_APROVACAO" &&
+        hasPermission(identity, "BUYER_INGESTION_APROVAR"))
       allowedActions.push("APPROVE");
     if (hasPermission(identity, "BUYER_INGESTION_REJEITAR"))
       allowedActions.push("REJECT");
@@ -529,7 +532,8 @@ export async function decideBuyerCandidate(
         throw new AppError(409, "concurrent_modification");
       if (candidate.compraImportadaId)
         throw new AppError(409, "legacy_purchase_requires_review");
-      if (candidate.status !== "AGUARDANDO_APROVACAO")
+      if (candidate.status !== "AGUARDANDO_APROVACAO" &&
+          !(input.decision === "REJEITAR" && candidate.status === "COM_DIVERGENCIA"))
         throw new AppError(409, "buyer_candidate_not_reviewable");
 
       let purchaseId: string | null = null;

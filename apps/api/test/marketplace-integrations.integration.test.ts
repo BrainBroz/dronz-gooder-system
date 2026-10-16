@@ -491,6 +491,58 @@ describe("marketplace integration foundation", () => {
     expect(approval.status).toBe(409);
   });
 
+  it("marca quantidade e moeda divergentes antes da aprovação sem perder evidências", async () => {
+    for (const kind of ["quantity", "currency"] as const) {
+      const fixture = await connectionFixture("EBAY", "SHARED", `buyer-divergence-${kind}`);
+      const identity = await getAuthenticatedUser(fixture.userId);
+      const externalOrderId = `batch8-divergence-${kind}`;
+      const original = order(externalOrderId);
+      const changed = order(externalOrderId, kind === "quantity"
+        ? { items: [{ ...original.items[0], quantity: 4 }] }
+        : { currency: "BRL", updatedAt: "2026-07-14T11:00:00.000Z" });
+      for (const [payload, key] of [
+        [original, `batch8-${kind}-first`],
+        [changed, `batch8-${kind}-second`]
+      ] as const) {
+        const run = await syncConnection(identity, fixture.connectionId,
+          { replay: true }, key,
+          disabledRegistry(new FakeAdapter("EBAY", [{ orders: [payload] }])));
+        expect(run.status).toBe("SUCCEEDED");
+      }
+      const candidate = await prisma.buyerPurchaseCandidate.findFirstOrThrow({
+        where: { externalOrderIdNormalized: externalOrderId },
+        include: { evidenceLinks: { orderBy: { createdAt: "asc" } } }
+      });
+      expect(candidate.status).toBe("COM_DIVERGENCIA");
+      expect(candidate.evidenceLinks.map((link) => link.type))
+        .toEqual(["MATCHED", "CONFLICTING"]);
+      const detail = await request(fixture.app)
+        .get(`/integrations/marketplaces/buyer-candidates/${candidate.id}`)
+        .set(bearer(fixture.token));
+      expect(detail.body).toMatchObject({
+        allowedActions: ["VIEW", "REJECT"],
+        blockedReasons: ["MATERIAL_DIVERGENCE"]
+      });
+      const approval = await request(fixture.app)
+        .post(`/integrations/marketplaces/buyer-candidates/${candidate.id}/decision`)
+        .set(bearer(fixture.token))
+        .set("idempotency-key", `batch8-${kind}-approve`)
+        .send({ decision: "APROVAR", expectedVersion: candidate.version });
+      expect(approval.status).toBe(409);
+      const rejection = await request(fixture.app)
+        .post(`/integrations/marketplaces/buyer-candidates/${candidate.id}/decision`)
+        .set(bearer(fixture.token))
+        .set("idempotency-key", `batch8-${kind}-reject`)
+        .send({ decision: "REJEITAR", expectedVersion: candidate.version,
+          reason: "Divergência material confirmada" });
+      expect(rejection.status).toBe(200);
+      expect(rejection.body.status).toBe("REJEITADA");
+      expect(await prisma.compraImportada.count({
+        where: { externalOrderIdNormalizado: externalOrderId }
+      })).toBe(0);
+    }
+  });
+
   it("preserva cancelamento mais recente quando chega um snapshot ativo atrasado", async () => {
     const fixture = await connectionFixture("EBAY", "SHARED", "buyer-late-event");
     const identity = await getAuthenticatedUser(fixture.userId);

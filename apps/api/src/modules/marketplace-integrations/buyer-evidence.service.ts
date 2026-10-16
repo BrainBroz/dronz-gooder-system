@@ -3,6 +3,7 @@ import { Prisma, type MarketplaceProvider } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { AppError } from "../../lib/app-error";
 import { audit } from "../operations/operations.persistence";
+import { normalizedMarketplaceOrderSchema } from "./marketplace-integrations.schemas";
 import type { NormalizedMarketplaceOrder } from "./marketplace-integrations.types";
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -32,6 +33,16 @@ function canonicalOrder(order: NormalizedMarketplaceOrder) {
       }))
       .sort(byJson)
   };
+}
+
+function materialSnapshot(order: NormalizedMarketplaceOrder) {
+  return JSON.stringify({
+    orderedAt: order.orderedAt,
+    currency: order.currency,
+    total: order.total ?? null,
+    merchant: order.merchant ?? null,
+    items: order.items
+  });
 }
 
 export async function recordMarketplaceEvidence(input: {
@@ -132,13 +143,20 @@ export async function recordMarketplaceEvidence(input: {
         });
         const prior = await tx.buyerPurchaseCandidate.findUnique({
           where: { provider_contaExternaId_externalOrderIdNormalized: candidateIdentity },
-          include: { currentEvidence: { select: { sourceOccurredAt: true } } }
+          include: { currentEvidence: {
+            select: { sourceOccurredAt: true, normalizedPayload: true }
+          } }
         });
         if (prior?.compraImportadaId)
           await tx.$queryRaw`SELECT id FROM "CompraImportada" WHERE id = ${prior.compraImportadaId} FOR UPDATE`;
         const incomingTime = new Date(input.order.updatedAt).getTime();
         const currentTime = prior?.currentEvidence.sourceOccurredAt.getTime() ?? -Infinity;
         const sameTime = currentTime === incomingTime;
+        const previous = prior && normalizedMarketplaceOrderSchema.safeParse(
+          prior.currentEvidence.normalizedPayload
+        );
+        const materialChange = !!prior && (!previous || !previous.success ||
+          materialSnapshot(canonicalOrder(previous.data)) !== materialSnapshot(normalized));
         const promote = incomingTime > currentTime ||
           (sameTime && (input.order.cancelled || prior?.status !== "CANCELADA"));
         const candidate = prior
@@ -149,7 +167,9 @@ export async function recordMarketplaceEvidence(input: {
                 status: prior.compraImportadaId
                   ? "COM_DIVERGENCIA"
                   : input.order.cancelled ? "CANCELADA"
-                  : sameTime ? "COM_DIVERGENCIA" : "AGUARDANDO_APROVACAO",
+                  : materialChange || prior.status === "COM_DIVERGENCIA" ||
+                    prior.status === "CANCELADA"
+                    ? "COM_DIVERGENCIA" : "AGUARDANDO_APROVACAO",
                 version: { increment: 1 }
               }
             }) : prior
@@ -161,7 +181,12 @@ export async function recordMarketplaceEvidence(input: {
               }
             });
         await tx.buyerEvidenceLink.create({
-          data: { candidateId: candidate.id, evidenceId: evidence.id }
+          data: {
+            candidateId: candidate.id,
+            evidenceId: evidence.id,
+            type: promote && candidate.status === "COM_DIVERGENCIA"
+              ? "CONFLICTING" : "MATCHED"
+          }
         });
         await audit(tx, {
           usuarioId: input.actorId,

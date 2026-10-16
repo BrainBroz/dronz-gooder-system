@@ -107,7 +107,8 @@ export type BuyerCandidateReadModel = {
   allowedActions: Array<"VIEW" | "APPROVE" | "REJECT">;
   blockedReasons: Array<
     "LEGACY_PURCHASE_REQUIRES_REVIEW" | "CANCELLED" |
-    "ALREADY_DECIDED" | "NEW_EVIDENCE_REQUIRES_RECONCILIATION"
+    "ALREADY_DECIDED" | "NEW_EVIDENCE_REQUIRES_RECONCILIATION" |
+    "MATERIAL_DIVERGENCE"
   >;
 };
 
