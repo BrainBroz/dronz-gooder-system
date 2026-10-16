@@ -171,6 +171,31 @@ describe("suppliers and purchase orders", () => {
           .send({ status: "PLACED" })
       ).status
     ).toBe(200);
+    const placedList = await request(app)
+      .get("/purchase-orders")
+      .set(h(token, d.id));
+    const placedOrder = placedList.body.items.find((item: { id: string }) => item.id === o.body.id);
+    expect(placedOrder.allowedStatusTransitions).toContain("CONFIRMED");
+    expect(
+      (await request(app).get("/purchase-orders").set(h(token, g.id))).body.items
+        .some((item: { id: string }) => item.id === o.body.id)
+    ).toBe(false);
+    expect(
+      (await request(app)
+        .patch(`/purchase-orders/${o.body.id}/status`)
+        .set(h(token, d.id))
+        .send({ status: "CONFIRMED" })).status
+    ).toBe(200);
+    const confirmed = await request(app)
+      .get(`/purchase-orders/${o.body.id}`)
+      .set(h(token, d.id));
+    expect(confirmed.body.status).toBe("CONFIRMED");
+    expect(confirmed.body.allowedStatusTransitions).not.toContain("PLACED");
+    const miami = await request(app)
+      .get("/operations/miami/candidates")
+      .set(h(token, d.id));
+    expect(miami.status).toBe(200);
+    expect(miami.body.some((item: { pedido: { id: string } }) => item.pedido.id === o.body.id)).toBe(true);
     expect(
       (
         await request(app)

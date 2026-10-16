@@ -4,7 +4,7 @@ Implementação técnica concluída e aprovada no Batch 6, commit `968b2bf`, sub
 
 ## Escopo
 
-A rota `/compras` apresenta a staging global de compras externas. A rota `/pedidos` continua separada e passa a ser identificada como **Pedidos Operacionais**. A interface não altera estoque, logística, checkpoints, financeiro ou pedidos já materializados.
+A rota `/compras` apresenta a staging global de compras externas. A rota `/pedidos` continua separada e passa a ser identificada como **Pedidos Operacionais**. A fila de compras não altera estoque, logística, checkpoints, financeiro ou pedidos já materializados. A página separada de Pedidos Operacionais permite envio e confirmação usando exclusivamente as transições devolvidas pelo backend.
 
 ## Fonte de verdade
 
@@ -76,4 +76,4 @@ O diálogo de materialização lê o código `error` efetivamente enviado pela A
 
 Oito regressões comportamentais foram acrescentadas em `purchase-mutations.behavior.test.tsx`: request de mapping e invalidações; troca de loja; ausência de ação sem autorização do read model; erro/retry do catálogo; erro de fornecedor; conflito de versão com refetch; sucesso com resumo removido do detalhe; bloqueio de ESC e duplo envio durante mutação. Os testes existentes foram preservados.
 
-A prova manual materializou duas unidades fictícias pela UI. Não prova a jornada até estoque: o pedido resultante fica `DRAFT` e a página de Pedidos Operacionais ainda não oferece envio/confirmação. Essa lacuna e a incompatibilidade do ID legado do fornecedor de seed estão registradas em [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md).
+A prova manual materializou duas unidades fictícias pela UI. A página de Pedidos Operacionais passou a usar `allowedStatusTransitions` nas leituras e o endpoint de status já existente; o pedido avançou por `DRAFT → PLACED → CONFIRMED` e apareceu em Miami com duas unidades pendentes. Não houve confirmação de recebimento físico nem entrada em estoque. A incompatibilidade do ID legado do fornecedor de seed e os limites da homologação estão em [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md).
