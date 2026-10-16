@@ -118,6 +118,43 @@ describe("PurchaseQueuePage — botão + Nova compra", () => {
 });
 
 describe("NewPurchaseDrawer — Compra manual", () => {
+  it("reutiliza a chave de idempotência quando a resposta da mesma compra se perde", async () => {
+    installProductsApi();
+    const post = vi.spyOn(api, "post")
+      .mockRejectedValueOnce(new Error("network"))
+      .mockResolvedValueOnce({ data: { id: "purchase-new-1" } });
+    renderWithProviders(<NewPurchaseDrawer open={true} onClose={vi.fn()} listItems={listItems} />,
+      { permissions: permissionsWithMerchant });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Manual" }));
+    await selectMuiOption("Merchant", "Merchant Árvore · AMAZON");
+    await selectMuiOption("Produto", "301 — Produto Dronz");
+    await user.type(screen.getByLabelText("Referência"), "MANUAL-RETRY");
+    await user.type(screen.getByLabelText("Item"), "Item manual");
+    await user.click(screen.getByRole("button", { name: "Criar compra manual" }));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole("button", { name: "Criar compra manual" }));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+    expect(post.mock.calls[0][2]?.headers?.["idempotency-key"])
+      .toBe(post.mock.calls[1][2]?.headers?.["idempotency-key"]);
+  });
+
+  it("oferece produto além da primeira página do catálogo", async () => {
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      ...products[0], id: `page1-product-${index}`, codigo: 1000 + index, nome: `Produto ${index}`
+    }));
+    const get = vi.spyOn(api, "get").mockImplementation(async (url, config) => {
+      if (url === "/products") return { data: { items: config?.params?.page === 1 ? firstPage : products } };
+      throw new Error(`GET inesperado: ${url}`);
+    });
+    renderWithProviders(<NewPurchaseDrawer open={true} onClose={vi.fn()} listItems={listItems} />,
+      { permissions: permissionsWithMerchant });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Manual" }));
+    await selectMuiOption("Produto", "301 — Produto Dronz");
+    expect(get.mock.calls.some(([url, config]) => url === "/products" && config?.params?.page === 2)).toBe(true);
+  });
+
   it("sucesso: envia payload exato com idempotency key e mantém o drawer aberto", async () => {
     installProductsApi();
     const post = vi.spyOn(api, "post").mockResolvedValue({ data: { id: "purchase-new-1" } });

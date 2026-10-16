@@ -10,15 +10,14 @@ import {
   TextField,
   Typography
 } from "@mui/material";
-import { api } from "../../api/client";
-import { authHeader, useAuthStore } from "../../stores/auth";
+import { useAuthStore } from "../../stores/auth";
 import { catalogQueryKeys } from "../../queryKeys";
 import {
   useUnifiedPurchaseMutations,
   newIdempotencyKey
 } from "../../hooks/useUnifiedPurchases";
 import type { UnifiedPurchaseListItem } from "../../types/unified-purchases";
-import type { Product } from "../../types/catalog";
+import { fetchProducts } from "../../hooks/useCatalog";
 import { EntityPicker } from "./EntityPicker";
 import { ContextualMerchantCreator } from "./ContextualMerchantCreator";
 import { merchantSuggestions } from "./entitySuggestions";
@@ -43,6 +42,7 @@ export function ManualPurchaseForm({
   const [contextualMerchantPending, setContextualMerchantPending] = React.useState(false);
   const pending = createManualPurchase.isPending || contextualMerchantPending;
   const submittingRef = React.useRef(false);
+  const attemptRef = React.useRef<{ payload: string; key: string } | null>(null);
 
   React.useEffect(() => {
     onPendingChange?.(pending);
@@ -72,15 +72,10 @@ export function ManualPurchaseForm({
     }
   }, [activeStoreId]);
 
-  const products = useQuery<Product[]>({
+  const products = useQuery({
     queryKey: catalogQueryKeys.products(lojaId || null),
     enabled: Boolean(lojaId),
-    queryFn: async () =>
-      (
-        await api.get("/products", {
-          headers: { ...authHeader(), "x-store-id": lojaId }
-        })
-      ).data.items
+    queryFn: () => fetchProducts(lojaId)
   });
 
   const merchants = merchantSuggestions(listItems);
@@ -109,32 +104,29 @@ export function ManualPurchaseForm({
   const handleSubmit = async () => {
     // Trava síncrona: mesmo que o re-render que desabilita o botão ainda não
     // tenha acontecido, um segundo clique real (fireEvent duplo, síncrono)
-    // não passa daqui. Cada tentativa lógica gera uma idempotency key nova.
+    // não passa daqui. Repetições do mesmo payload mantêm a idempotency key.
     if (submittingRef.current) return;
     submittingRef.current = true;
     setError(null);
     setSuccess(false);
+    const payload = {
+      referencia,
+      lojaId,
+      merchantExternoId,
+      dataPedido: new Date(`${dataPedido}T12:00:00.000Z`).toISOString(),
+      moeda: "USD",
+      itens: [{ titulo, quantidade, precoUnitario, moeda: "USD", produtoId }]
+    };
+    const serialized = JSON.stringify(payload);
+    if (attemptRef.current?.payload !== serialized)
+      attemptRef.current = { payload: serialized, key: newIdempotencyKey() };
     try {
       await createManualPurchase.mutateAsync({
         storeId: lojaId,
-        idempotencyKey: newIdempotencyKey(),
-        payload: {
-          referencia,
-          lojaId,
-          merchantExternoId,
-          dataPedido: new Date(`${dataPedido}T12:00:00.000Z`).toISOString(),
-          moeda: "USD",
-          itens: [
-            {
-              titulo,
-              quantidade,
-              precoUnitario,
-              moeda: "USD",
-              produtoId
-            }
-          ]
-        }
+        idempotencyKey: attemptRef.current.key,
+        payload
       });
+      attemptRef.current = null;
       resetPurchaseFields();
       setSuccess(true);
     } catch (err) {
