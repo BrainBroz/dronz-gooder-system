@@ -119,6 +119,49 @@ describe("PurchaseQueuePage — botão + Nova compra", () => {
 });
 
 describe("NewPurchaseDrawer — Compra manual", () => {
+  it("mostra falha do catálogo, permite retry e preserva os campos", async () => {
+    const get = vi.spyOn(api, "get")
+      .mockRejectedValueOnce(new Error("network"))
+      .mockResolvedValue({ data: { items: products } });
+    const post = vi.spyOn(api, "post").mockResolvedValue({ data: { id: "purchase-retry-catalog" } });
+    renderWithProviders(<NewPurchaseDrawer open={true} onClose={vi.fn()} listItems={listItems} />,
+      { permissions: permissionsWithMerchant });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Manual" }));
+    await selectMuiOption("Merchant", "Merchant Árvore · AMAZON");
+    await user.type(screen.getByLabelText("Referência"), "KEEP-CATALOG");
+    await user.type(screen.getByLabelText("Item"), "Item preservado");
+    expect(await screen.findByText("Não foi possível carregar os produtos da loja.")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Criar compra manual" }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Tentar novamente" }));
+    await selectMuiOption("Produto", "301 — Produto Dronz");
+    expect((screen.getByLabelText("Referência") as HTMLInputElement).value).toBe("KEEP-CATALOG");
+    await user.click(screen.getByRole("button", { name: "Criar compra manual" }));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    expect(post.mock.calls[0][1]).toMatchObject({ referencia: "KEEP-CATALOG" });
+    expect(get).toHaveBeenCalledTimes(2);
+  });
+
+  it("não envia compra enquanto o cadastro contextual de merchant oculta a seleção anterior", async () => {
+    installProductsApi();
+    const post = vi.spyOn(api, "post");
+    renderWithProviders(<NewPurchaseDrawer open={true} onClose={vi.fn()} listItems={listItems} />,
+      { permissions: permissionsWithMerchant });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Manual" }));
+    await selectMuiOption("Merchant", "Merchant Árvore · AMAZON");
+    await selectMuiOption("Produto", "301 — Produto Dronz");
+    await user.type(screen.getByLabelText("Referência"), "MANUAL-HIDDEN");
+    await user.type(screen.getByLabelText("Item"), "Item manual");
+    await user.click(screen.getByRole("button", { name: "Criar novo merchant" }));
+    const submit = screen.getByRole("button", { name: "Criar compra manual" }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    fireEvent.click(submit);
+    expect(post).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Cancelar" }));
+    expect(submit.disabled).toBe(false);
+  });
+
   it("não oferece produto inativo nem permite enviá-lo após desativação", async () => {
     const get = vi.spyOn(api, "get").mockResolvedValue({
       data: { items: [products[0], { ...products[0], id: "inactive-1", codigo: 302, nome: "Inativo", ativo: false }] }
@@ -368,6 +411,30 @@ describe("NewPurchaseDrawer — Compra manual", () => {
 });
 
 describe("NewPurchaseDrawer — Compra externa", () => {
+  it.each(["Criar nova conta externa", "Criar novo merchant"])(
+    "não envia compra com seleção anterior oculta por %s",
+    async (createAction) => {
+      installProductsApi();
+      const post = vi.spyOn(api, "post");
+      renderWithProviders(<NewPurchaseDrawer open={true} onClose={vi.fn()} listItems={listItems} />,
+        { permissions: [...permissionsWithMerchant, "CONTA_EXTERNA_GERENCIAR"] });
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: "Externa" }));
+      await selectMuiOption("Conta externa", "Conta Amazon Principal · AMAZON");
+      await selectMuiOption("Merchant", "Merchant Árvore · AMAZON");
+      await user.type(screen.getByLabelText("Número externo"), "EXT-HIDDEN");
+      await user.type(screen.getByLabelText("Referência"), "REF-HIDDEN");
+      await user.type(screen.getByLabelText("Item"), "Item externo");
+      await user.click(screen.getByRole("button", { name: createAction }));
+      const submit = screen.getByRole("button", { name: "Registrar compra externa" }) as HTMLButtonElement;
+      expect(submit.disabled).toBe(true);
+      fireEvent.click(submit);
+      expect(post).not.toHaveBeenCalled();
+      await user.click(screen.getByRole("button", { name: "Cancelar" }));
+      expect(submit.disabled).toBe(false);
+    }
+  );
+
   it("sucesso via sugestão: envia payload exato usando conta/merchant sugeridos", async () => {
     installProductsApi();
     const post = vi.spyOn(api, "post").mockResolvedValue({ data: { id: "purchase-ext-1" } });

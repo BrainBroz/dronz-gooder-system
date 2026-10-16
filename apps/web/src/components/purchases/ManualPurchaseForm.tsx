@@ -85,6 +85,7 @@ export function ManualPurchaseForm({
   const merchants = merchantSuggestions(listItems);
 
   const canSubmit =
+    !creatingMerchant &&
     Boolean(lojaId) &&
     Boolean(merchantExternoId) &&
     Boolean(selectedProductId) &&
@@ -146,6 +147,11 @@ export function ManualPurchaseForm({
       {error && (
         <Alert severity="error" onClose={() => setError(null)}>
           {error}
+        </Alert>
+      )}
+      {products.isError && (
+        <Alert severity="error" action={<Button onClick={() => void products.refetch()}>Tentar novamente</Button>}>
+          Não foi possível carregar os produtos da loja.
         </Alert>
       )}
       {success && (

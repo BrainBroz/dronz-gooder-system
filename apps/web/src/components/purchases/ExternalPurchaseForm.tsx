@@ -71,6 +71,8 @@ export function ExternalPurchaseForm({
   const merchants = merchantSuggestions(listItems, plataforma);
 
   const canSubmit =
+    !creatingAccount &&
+    !creatingMerchant &&
     Boolean(contaExternaId) &&
     Boolean(externalOrderId) &&
     Boolean(referencia) &&
