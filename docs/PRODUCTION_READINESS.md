@@ -81,7 +81,7 @@ A triagem distingue alcance do advisory de exploração comprovada: a aplicaçã
 
 Prisma validate mantém o warning legado de relação `SetNull` com campo obrigatório. Não houve mudança de schema para silenciá-lo.
 
-Uma comparação explícita entre o schema Prisma e um banco temporário criado com todas as 25 migrations revelou divergências históricas anteriores ao Batch 10, incluindo `Despesa`, `CotacaoCambio`, variantes de `SimulacaoRisco` e nomes de alguns índices/FKs. `prisma migrate status` informa as migrations aplicadas, mas não detecta esse drift. A nova estrutura `BuyerEvidence` não apareceu na diferença. O drift deve ser reconciliado em correção própria antes de publicação; não foi aplicado um `db push` nem alterado banco operacional para mascará-lo.
+Uma comparação explícita entre o schema Prisma e um banco temporário criado pelas migrations revelou divergências históricas anteriores ao Batch 10. A ausência das colunas `CotacaoCambio.valorMercado` e `margem` quebrava a criação de cotação; a migration incremental `20261016233000_restore_exchange_rate_columns` restaura essas colunas e preserva cotações legadas sem aplicar margem retroativa. Foram validados banco limpo e upgrade de linha legada em banco temporário. Ainda há drift em `Despesa`, variantes de `SimulacaoRisco` e nomes de alguns índices/FKs, a reconciliar antes de publicação. `prisma migrate status` informa migrations aplicadas, mas não detecta esse drift. Não foi aplicado `db push` nem alterado banco operacional para mascará-lo.
 
 O frontend usa lazy routes e chunks estáveis de vendor. O Batch 7 reduziu o maior chunk de 789,22 kB para 297,25 kB e eliminou o aviso do Vite para chunks acima de 500 kB, sem alterar comportamento ou dependências.
 

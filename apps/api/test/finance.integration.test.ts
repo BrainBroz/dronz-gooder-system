@@ -10,11 +10,13 @@ process.env.JWT_REFRESH_SECRET = "change-me-refresh";
 process.env.JWT_ACCESS_EXPIRES_IN = "15m";
 process.env.JWT_REFRESH_EXPIRES_IN = "30d";
 const prisma = new PrismaClient();
+const createdQuoteIds: string[] = [];
 let createApp: typeof import("../src/app").createApp;
 beforeAll(async () => {
   ({ createApp } = await import("../src/app"));
 });
 afterAll(async () => {
+  await prisma.cotacaoCambio.deleteMany({ where: { id: { in: createdQuoteIds } } });
   const orders = await prisma.pedidoCompra.findMany({
     where: { numeroPedido: { startsWith: "FIN-" } },
     select: { id: true }
@@ -63,6 +65,30 @@ async function setup() {
   return { app, d, g, h, order: order.body };
 }
 describe("purchase finance", () => {
+  it("registra cotação com valor de mercado e margem sem alterar o valor efetivo", async () => {
+    const app = createApp();
+    const login = await request(app).post("/auth/login")
+      .send({ email: "admin@example.com", password: "change-me" });
+    const store = login.body.stores.find((entry: { slug: string }) => entry.slug === "dronz");
+    const result = await request(app).post("/finance/exchange-rates")
+      .set({ Authorization: `Bearer ${login.body.accessToken}`, "x-store-id": store.id })
+      .send({ moedaOrigem: "USD", moedaDestino: "BRL", valorMercado: 5.13,
+        cotadoEm: "2026-10-16T12:00:00.000Z" });
+    expect(result.status).toBe(201);
+    createdQuoteIds.push(result.body.id);
+    expect(result.body).toMatchObject({
+      lojaId: store.id,
+      valorMercado: "5.13",
+      margem: "0.2",
+      valor: "5.33"
+    });
+    const persisted = await prisma.cotacaoCambio.findUniqueOrThrow({
+      where: { id: result.body.id }
+    });
+    expect(persisted.valor.toString()).toBe("5.33");
+    expect(persisted.valorMercado.toString()).toBe("5.13");
+  });
+
   it("rateia HALF_UP, aceita parcial, bloqueia excesso e isola loja", async () => {
     const { app, d, g, h, order } = await setup();
     const cost = await request(app)
