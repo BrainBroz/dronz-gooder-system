@@ -392,6 +392,22 @@ enum OrigemTrackingExterno {
   MANUAL
 }
 
+enum FonteEvidenciaCompra {
+  AMAZON_BUSINESS_API
+  EBAY_BUYER_API
+  EMAIL_AMAZON
+  EMAIL_EBAY
+  EMAIL_OUTRO
+  INVOICE
+  DOCUMENTO
+  CSV
+  MANUAL
+}
+
+enum ClassificacaoEvidenciaCompra {
+  DADOS_COMERCIAIS_NORMALIZADOS
+}
+
 enum StatusMerchantExterno {
   ATIVO
   INATIVO
@@ -467,6 +483,7 @@ model ContaExterna {
   criadoPor Usuario              @relation(fields: [criadoPorId], references: [id], onDelete: Restrict)
   compras   CompraImportada[]
   conexoes  ConexaoMarketplace[]
+  evidenciasCompra BuyerEvidence[]
 
   @@unique([plataforma, identificadorExterno])
   @@index([status, plataforma])
@@ -500,6 +517,7 @@ model ConexaoMarketplace {
   criadoPor         Usuario                 @relation(fields: [criadoPorId], references: [id], onDelete: Restrict)
   execucoes         ExecucaoSincronizacao[]
   comprasImportadas CompraImportada[]
+  evidenciasCompra   BuyerEvidence[]
 
   @@unique([provider, identificadorExterno])
   @@unique([contaExternaId])
@@ -536,6 +554,56 @@ model ExecucaoSincronizacao {
   @@unique([conexaoId, idempotencyKey])
   @@index([conexaoId, createdAt])
   @@index([status, createdAt])
+}
+
+model BuyerEvidence {
+  id                        String                         @id @default(cuid())
+  source                    FonteEvidenciaCompra
+  sourceIdentity            String
+  externalEvidenceId        String
+  externalOrderIdNormalized String?
+  contaExternaId            String?
+  conexaoMarketplaceId      String?
+  sourceOccurredAt          DateTime
+  payloadHash               String
+  version                   Int
+  normalizedPayload         Json
+  dataClassification        ClassificacaoEvidenciaCompra   @default(DADOS_COMERCIAIS_NORMALIZADOS)
+  correlationId             String
+  createdAt                 DateTime                       @default(now())
+
+  contaExterna       ContaExterna?       @relation(fields: [contaExternaId], references: [id], onDelete: Restrict)
+  conexaoMarketplace ConexaoMarketplace? @relation(fields: [conexaoMarketplaceId], references: [id], onDelete: Restrict)
+  items              BuyerEvidenceItem[]
+
+  @@unique([sourceIdentity, externalEvidenceId, payloadHash])
+  @@unique([sourceIdentity, externalEvidenceId, version])
+  @@index([source, externalOrderIdNormalized, createdAt])
+  @@index([contaExternaId, createdAt])
+  @@index([conexaoMarketplaceId, createdAt])
+}
+
+model BuyerEvidenceItem {
+  id                    String        @id @default(cuid())
+  evidenceId            String
+  externalLineId        String?
+  identityFingerprint   String
+  identityDiscriminator Int
+  title                 String
+  variation             String?
+  sku                   String?
+  asin                  String?
+  offerId               String?
+  quantity              Int
+  cancelledQuantity     Int
+  refundedQuantity      Int
+  unitPrice             Decimal       @db.Decimal(14, 2)
+  currency              String
+
+  evidence BuyerEvidence @relation(fields: [evidenceId], references: [id], onDelete: Restrict)
+
+  @@unique([evidenceId, identityFingerprint, identityDiscriminator], map: "BuyerEvidenceItem_evidenceId_identityFingerprint_identityDiscri")
+  @@index([externalLineId])
 }
 
 model MerchantExterno {

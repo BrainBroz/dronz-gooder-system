@@ -20,6 +20,7 @@ import {
   marketplaceAdapterRegistry,
   translateMarketplaceAdapterError
 } from "./marketplace-integrations.adapters";
+import { recordMarketplaceEvidence } from "./buyer-evidence.service";
 import {
   capabilitySchema,
   marketplaceOrderPageSchema
@@ -463,8 +464,19 @@ async function importNormalizedOrder(
   identity: AuthIdentity,
   connection: ConnectionWithRelations,
   order: NormalizedMarketplaceOrder,
-  executionId: string
+  executionId: string,
+  correlationId: string,
+  idempotencyKey: string
 ) {
+  await recordMarketplaceEvidence({
+    provider: connection.provider,
+    accountId: connection.contaExternaId,
+    connectionId: connection.id,
+    order,
+    actorId: identity.user.id,
+    correlationId,
+    idempotencyKey
+  });
   const merchant = order.merchant
     ? await upsertMerchant(
         identity,
@@ -542,6 +554,8 @@ async function executePages(
   identity: AuthIdentity,
   connection: ConnectionWithRelations,
   executionId: string,
+  correlationId: string,
+  idempotencyKey: string,
   input: SyncConnectionInput,
   registry: MarketplaceAdapterRegistry
 ) {
@@ -588,7 +602,9 @@ async function executePages(
           identity,
           connection,
           order,
-          executionId
+          executionId,
+          correlationId,
+          idempotencyKey
         );
         if (result.created) counts.created += 1;
         else counts.updated += 1;
@@ -682,6 +698,8 @@ export async function syncConnection(
       identity,
       connection,
       execution.id,
+      correlationId,
+      idempotencyKey,
       input,
       registry
     );

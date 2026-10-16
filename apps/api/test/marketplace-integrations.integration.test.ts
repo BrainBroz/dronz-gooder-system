@@ -17,6 +17,7 @@ let createApp: typeof import("../src/app").createApp;
 let getAuthenticatedUser: typeof import("../src/modules/auth/auth.service").getAuthenticatedUser;
 let createConnection: typeof import("../src/modules/marketplace-integrations/marketplace-integrations.service").createConnection;
 let syncConnection: typeof import("../src/modules/marketplace-integrations/marketplace-integrations.service").syncConnection;
+let recordMarketplaceEvidence: typeof import("../src/modules/marketplace-integrations/buyer-evidence.service").recordMarketplaceEvidence;
 let connectionAllowsStore: typeof import("../src/modules/marketplace-integrations/marketplace-integrations.service").connectionAllowsStore;
 let AmazonMarketplaceAdapter: typeof import("../src/modules/marketplace-integrations/marketplace-integrations.adapters").AmazonMarketplaceAdapter;
 let EbayMarketplaceAdapter: typeof import("../src/modules/marketplace-integrations/marketplace-integrations.adapters").EbayMarketplaceAdapter;
@@ -93,6 +94,8 @@ beforeAll(async () => {
   ({ getAuthenticatedUser } = await import("../src/modules/auth/auth.service"));
   ({ createConnection, syncConnection, connectionAllowsStore } =
     await import("../src/modules/marketplace-integrations/marketplace-integrations.service"));
+  ({ recordMarketplaceEvidence } =
+    await import("../src/modules/marketplace-integrations/buyer-evidence.service"));
   ({ setAuditFailureForTests } =
     await import("../src/modules/operations/operations.persistence"));
   ({
@@ -107,6 +110,12 @@ beforeAll(async () => {
 });
 
 async function cleanup() {
+  await prisma.buyerEvidenceItem.deleteMany({
+    where: { evidence: { conexaoMarketplace: { identificadorExterno: { startsWith: "batch8-" } } } }
+  });
+  await prisma.buyerEvidence.deleteMany({
+    where: { conexaoMarketplace: { identificadorExterno: { startsWith: "batch8-" } } }
+  });
   const purchases = await prisma.compraImportada.findMany({
     where: { conexaoMarketplaceId: { not: null } },
     select: { id: true }
@@ -340,6 +349,123 @@ function order(externalOrderId: string, overrides: Partial<Order> = {}): Order {
 }
 
 describe("marketplace integration foundation", () => {
+  it("preserva evidência normalizada sem duplicar replay ou depender da ordem dos itens", async () => {
+    const fixture = await connectionFixture("EBAY", "SHARED", "evidence-replay");
+    const identity = await getAuthenticatedUser(fixture.userId);
+    const original = order("batch8-evidence-1", {
+      items: [
+        order("batch8-evidence-1").items[0],
+        { ...order("batch8-evidence-2").items[0], externalLineId: "line-second" }
+      ]
+    });
+    const sync = (payload: Order, key: string) => syncConnection(
+      identity,
+      fixture.connectionId,
+      { replay: true },
+      key,
+      disabledRegistry(new FakeAdapter("EBAY", [{ orders: [payload] }]))
+    );
+    expect((await sync(original, "batch8-evidence-first")).status).toBe("SUCCEEDED");
+    const replay = await sync({ ...original, items: [...original.items].reverse() },
+      "batch8-evidence-replay");
+    expect(replay).toMatchObject({ status: "PARTIALLY_SUCCEEDED", conflitos: 1 });
+    const evidence = await prisma.buyerEvidence.findMany({
+      where: { conexaoMarketplaceId: fixture.connectionId },
+      include: { items: true }
+    });
+    expect(evidence).toHaveLength(1);
+    expect(evidence[0]).toMatchObject({
+      source: "EBAY_BUYER_API",
+      version: 1,
+      externalOrderIdNormalized: "batch8-evidence-1",
+      dataClassification: "DADOS_COMERCIAIS_NORMALIZADOS"
+    });
+    expect(evidence[0].items.map((item) => item.externalLineId).sort())
+      .toEqual(["line-batch8-evidence-1", "line-second"]);
+    expect((evidence[0].normalizedPayload as { items: unknown[] }).items).toHaveLength(2);
+    expect(JSON.stringify(evidence[0].normalizedPayload)).not.toContain("secretReference");
+    expect(await prisma.auditLog.count({
+      where: { entity: "BuyerEvidence", entityId: evidence[0].id,
+        action: "BUYER_EVIDENCE_RECORDED" }
+    })).toBe(1);
+  });
+
+  it("versiona mudança externa sem sobrescrever a evidência original", async () => {
+    const fixture = await connectionFixture("AMAZON", "SHARED", "evidence-version");
+    const identity = await getAuthenticatedUser(fixture.userId);
+    const first = order("batch8-version-1");
+    const second = order("batch8-version-1", {
+      updatedAt: "2026-07-14T11:00:00.000Z",
+      cancelled: true,
+      externalStatus: "CANCELLED"
+    });
+    const results = [];
+    for (const [payload, key] of [
+      [first, "batch8-version-first"],
+      [second, "batch8-version-second"]
+    ] as const) {
+      results.push(await syncConnection(identity, fixture.connectionId,
+        { replay: true }, key,
+        disabledRegistry(new FakeAdapter("AMAZON", [{ orders: [payload] }]))
+      ));
+    }
+    expect(results.map((result) => result.status))
+      .toEqual(["SUCCEEDED", "PARTIALLY_SUCCEEDED"]);
+    const evidence = await prisma.buyerEvidence.findMany({
+      where: { conexaoMarketplaceId: fixture.connectionId },
+      orderBy: { version: "asc" }
+    });
+    expect(evidence.map((row) => row.version)).toEqual([1, 2]);
+    expect((evidence[0].normalizedPayload as { cancelled: boolean }).cancelled).toBe(false);
+    expect((evidence[1].normalizedPayload as { cancelled: boolean }).cancelled).toBe(true);
+    expect(evidence[0].payloadHash).not.toBe(evidence[1].payloadHash);
+  });
+
+  it("reverte evidência e itens se a auditoria crítica falhar", async () => {
+    const fixture = await connectionFixture("EBAY", "SHARED", "evidence-audit");
+    const identity = await getAuthenticatedUser(fixture.userId);
+    setAuditFailureForTests((entry) => entry.action === "BUYER_EVIDENCE_RECORDED");
+    try {
+      const result = await syncConnection(identity, fixture.connectionId,
+        { replay: false }, "batch8-evidence-audit",
+        disabledRegistry(new FakeAdapter("EBAY", [{ orders: [order("batch8-audit-evidence")] }]))
+      );
+      expect(result.status).toBe("PARTIALLY_SUCCEEDED");
+      expect(result.falhas).toBe(1);
+      expect(await prisma.buyerEvidence.count({
+        where: { conexaoMarketplaceId: fixture.connectionId }
+      })).toBe(0);
+      expect(await prisma.compraImportada.count({
+        where: { conexaoMarketplaceId: fixture.connectionId }
+      })).toBe(0);
+    } finally {
+      setAuditFailureForTests();
+    }
+  });
+
+  it("retry concorrente da mesma evidência retorna a única versão persistida", async () => {
+    const fixture = await connectionFixture("EBAY", "SHARED", "evidence-concurrent");
+    const payload = {
+      provider: "EBAY" as const,
+      accountId: (await prisma.conexaoMarketplace.findUniqueOrThrow({
+        where: { id: fixture.connectionId }
+      })).contaExternaId,
+      connectionId: fixture.connectionId,
+      order: order("batch8-concurrent-evidence"),
+      actorId: fixture.userId,
+      correlationId: "batch8-evidence-concurrent"
+    };
+    const results = await Promise.all([
+      recordMarketplaceEvidence(payload),
+      recordMarketplaceEvidence(payload)
+    ]);
+    expect(results.map((result) => result.id)).toEqual([results[0].id, results[0].id]);
+    expect(results.map((result) => result.created).sort()).toEqual([false, true]);
+    expect(await prisma.buyerEvidence.count({
+      where: { conexaoMarketplaceId: fixture.connectionId }
+    })).toBe(1);
+  });
+
   it("mantém adapters reais desabilitados e segredos fora do contrato", async () => {
     const amazon = new AmazonMarketplaceAdapter();
     const ebay = new EbayMarketplaceAdapter();
@@ -613,6 +739,12 @@ describe("marketplace integration foundation", () => {
     expect(new Set(purchases.map((purchase) => purchase.plataforma))).toEqual(
       new Set(["AMAZON", "EBAY"])
     );
+    const evidence = await prisma.buyerEvidence.findMany({
+      where: { externalEvidenceId: "SAME-ORDER-ID" }
+    });
+    expect(evidence).toHaveLength(2);
+    expect(new Set(evidence.map((row) => row.source)))
+      .toEqual(new Set(["AMAZON_BUSINESS_API", "EBAY_BUYER_API"]));
   });
 
   it("isola a mesma referência em duas contas do mesmo provider e preserva case", async () => {
