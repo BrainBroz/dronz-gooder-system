@@ -51,6 +51,10 @@ export function ContextualMerchantCreator({
     onPendingChange?.(createMerchant.isPending);
   }, [createMerchant.isPending, onPendingChange]);
 
+  React.useEffect(() => {
+    if (!canCreateMerchant && !createMerchant.isPending) onCancel();
+  }, [canCreateMerchant, createMerchant.isPending, onCancel]);
+
   // Perder MAPPING_FORNECEDOR_GERENCIAR não pode desmontar este formulário
   // enquanto a criação do merchant ainda está em voo — mesmo risco do C1-bis,
   // aplicado aqui. Só desmonta de fato depois que a mutação termina.
@@ -97,7 +101,7 @@ export function ContextualMerchantCreator({
         onChange={(event) =>
           setPlataforma(event.target.value as Exclude<PurchaseProvider, "MANUAL">)
         }
-        disabled={Boolean(plataformaLocked)}
+        disabled={Boolean(plataformaLocked) || createMerchant.isPending}
       >
         {externalPlatforms.map((p) => (
           <MenuItem key={p} value={p}>

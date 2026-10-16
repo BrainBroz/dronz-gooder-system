@@ -77,13 +77,17 @@ export function ManualPurchaseForm({
     enabled: Boolean(lojaId),
     queryFn: () => fetchProducts(lojaId)
   });
+  const availableProducts = (products.data ?? []).filter((product) => product.ativo);
+  const selectedProductId = availableProducts.some((product) => product.id === produtoId)
+    ? produtoId
+    : "";
 
   const merchants = merchantSuggestions(listItems);
 
   const canSubmit =
     Boolean(lojaId) &&
     Boolean(merchantExternoId) &&
-    Boolean(produtoId) &&
+    Boolean(selectedProductId) &&
     Boolean(referencia) &&
     Boolean(dataPedido) &&
     Boolean(titulo) &&
@@ -202,11 +206,11 @@ export function ManualPurchaseForm({
       <TextField
         select
         label="Produto"
-        value={produtoId}
+        value={selectedProductId}
         onChange={(event) => setProdutoId(event.target.value)}
         disabled={!lojaId || pending}
       >
-        {(products.data ?? []).map((product) => (
+        {availableProducts.map((product) => (
           <MenuItem key={product.id} value={product.id}>
             {product.codigo} — {product.nome}
           </MenuItem>

@@ -31,6 +31,10 @@ export function ContextualAccountCreator({
     onPendingChange?.(createAccount.isPending);
   }, [createAccount.isPending, onPendingChange]);
 
+  React.useEffect(() => {
+    if (!canCreateAccount && !createAccount.isPending) onCancel();
+  }, [canCreateAccount, createAccount.isPending, onCancel]);
+
   if (!canCreateAccount && !createAccount.isPending) return null;
 
   const handleCreate = async () => {

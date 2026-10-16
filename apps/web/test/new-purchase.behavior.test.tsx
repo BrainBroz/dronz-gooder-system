@@ -6,6 +6,7 @@ import { api } from "../src/api/client";
 import { NewPurchaseDrawer } from "../src/components/purchases/NewPurchaseDrawer";
 import { PurchaseQueuePage } from "../src/pages/PurchaseQueuePage";
 import { useAuthStore } from "../src/stores/auth";
+import { catalogQueryKeys } from "../src/queryKeys";
 import type { UnifiedPurchaseListItem } from "../src/types/unified-purchases";
 import { renderWithProviders } from "./render";
 
@@ -118,6 +119,31 @@ describe("PurchaseQueuePage — botão + Nova compra", () => {
 });
 
 describe("NewPurchaseDrawer — Compra manual", () => {
+  it("não oferece produto inativo nem permite enviá-lo após desativação", async () => {
+    const get = vi.spyOn(api, "get").mockResolvedValue({
+      data: { items: [products[0], { ...products[0], id: "inactive-1", codigo: 302, nome: "Inativo", ativo: false }] }
+    });
+    const { queryClient } = renderWithProviders(<NewPurchaseDrawer open={true} onClose={vi.fn()} listItems={listItems} />,
+      { permissions: permissionsWithMerchant });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Manual" }));
+    await selectMuiOption("Merchant", "Merchant Árvore · AMAZON");
+    await user.click(screen.getByRole("combobox", { name: /Produto/i }));
+    expect(await screen.findByRole("option", { name: "301 — Produto Dronz" })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: "302 — Inativo" })).toBeNull();
+    await user.click(screen.getByRole("option", { name: "301 — Produto Dronz" }));
+    await user.type(screen.getByLabelText("Referência"), "MANUAL-ACTIVE");
+    await user.type(screen.getByLabelText("Item"), "Item ativo");
+    expect((screen.getByRole("button", { name: "Criar compra manual" }) as HTMLButtonElement).disabled).toBe(false);
+
+    get.mockResolvedValue({ data: { items: [{ ...products[0], ativo: false }] } });
+    await queryClient.invalidateQueries({ queryKey: catalogQueryKeys.products("store-dronz") });
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "Criar compra manual" }) as HTMLButtonElement).disabled).toBe(true)
+    );
+    expect((screen.getByRole("combobox", { name: /Produto/i }) as HTMLElement).textContent).not.toContain("Produto Dronz");
+  });
+
   it("reutiliza a chave de idempotência quando a resposta da mesma compra se perde", async () => {
     installProductsApi();
     const post = vi.spyOn(api, "post")
@@ -502,6 +528,22 @@ describe("NewPurchaseDrawer — troca de origem", () => {
 });
 
 describe("NewPurchaseDrawer — Merchant contextual", () => {
+  it("restaura o seletor quando a permissão de criar merchant é revogada", async () => {
+    installProductsApi();
+    const post = vi.spyOn(api, "post");
+    renderWithProviders(<NewPurchaseDrawer open={true} onClose={vi.fn()} listItems={listItems} />,
+      { permissions: permissionsWithMerchant });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Manual" }));
+    await user.type(screen.getByLabelText("Referência"), "KEEP-ME");
+    await user.click(screen.getByRole("button", { name: "Criar novo merchant" }));
+    useAuthStore.setState({ permissions });
+    expect(await screen.findByRole("combobox", { name: /Merchant/i })).toBeTruthy();
+    expect(screen.queryByLabelText("Nome do merchant")).toBeNull();
+    expect((screen.getByLabelText("Referência") as HTMLInputElement).value).toBe("KEEP-ME");
+    expect(post).not.toHaveBeenCalled();
+  });
+
   it("ação fica escondida sem MAPPING_FORNECEDOR_GERENCIAR", async () => {
     installProductsApi();
     renderWithProviders(
@@ -677,6 +719,30 @@ describe("NewPurchaseDrawer — Merchant contextual", () => {
 });
 
 describe("NewPurchaseDrawer — merchant contextual: plataforma travada pelo form pai", () => {
+  it("bloqueia troca de plataforma enquanto a criação manual está pendente", async () => {
+    installProductsApi();
+    let resolvePost!: (value: unknown) => void;
+    const pending = new Promise((resolve) => { resolvePost = resolve; });
+    const post = vi.spyOn(api, "post").mockReturnValue(pending as never);
+    renderWithProviders(<NewPurchaseDrawer open={true} onClose={vi.fn()} listItems={listItems} />,
+      { permissions: permissionsWithMerchant });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Manual" }));
+    await user.click(screen.getByRole("button", { name: "Criar novo merchant" }));
+    await user.type(screen.getByLabelText("Nome do merchant", { exact: false }), "Merchant Pendente");
+    await user.click(screen.getByRole("button", { name: "Criar merchant" }));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    const plataforma = screen.getByRole("combobox", { name: /Plataforma/i });
+    await waitFor(() => expect(plataforma.getAttribute("aria-disabled")).toBe("true"));
+    await user.click(plataforma);
+    expect(screen.queryByRole("option", { name: "EBAY" })).toBeNull();
+    expect(post.mock.calls[0][1]).toMatchObject({ plataforma: "AMAZON" });
+    resolvePost({ data: { id: "merchant-pending-1" } });
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "Fechar" }) as HTMLButtonElement).disabled).toBe(false)
+    );
+  });
+
   it("criador usa plataforma do form externo e impede troca manual", async () => {
     installProductsApi();
     const post = vi.spyOn(api, "post").mockResolvedValue({ data: { id: "merchant-ebay-1" } });
@@ -712,6 +778,22 @@ describe("NewPurchaseDrawer — merchant contextual: plataforma travada pelo for
 
 describe("NewPurchaseDrawer — conta externa contextual", () => {
   const permissionsWithAccount = [...permissionsWithMerchant, "CONTA_EXTERNA_GERENCIAR"];
+
+  it("restaura o seletor quando a permissão de criar conta é revogada", async () => {
+    installProductsApi();
+    const post = vi.spyOn(api, "post");
+    renderWithProviders(<NewPurchaseDrawer open={true} onClose={vi.fn()} listItems={listItems} />,
+      { permissions: permissionsWithAccount });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Externa" }));
+    await user.type(screen.getByLabelText("Referência"), "KEEP-ACCOUNT");
+    await user.click(screen.getByRole("button", { name: "Criar nova conta externa" }));
+    useAuthStore.setState({ permissions: permissionsWithMerchant });
+    expect(await screen.findByRole("combobox", { name: /Conta externa/i })).toBeTruthy();
+    expect(screen.queryByLabelText("Nome de exibição")).toBeNull();
+    expect((screen.getByLabelText("Referência") as HTMLInputElement).value).toBe("KEEP-ACCOUNT");
+    expect(post).not.toHaveBeenCalled();
+  });
 
   it("fila vazia: criar conta → preencher → registrar compra com o CUID retornado", async () => {
     installProductsApi();
