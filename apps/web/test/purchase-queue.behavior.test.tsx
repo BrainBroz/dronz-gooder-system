@@ -203,15 +203,34 @@ describe("UX-1B — Fila de Compras (estrutural, somente leitura)", () => {
     });
     renderWithProviders(<PurchaseQueuePage />, { permissions });
     await screen.findByText("ORDER-OLD");
-    expect(screen.getByText("Atribuídos não materializados").parentElement?.textContent)
+    expect(screen.getAllByText("Atribuições pendentes")[0].parentElement?.textContent)
       .toContain("0");
-    await userEvent.click(screen.getByRole("tab", { name: "Aguardando materialização" }));
+    await userEvent.click(screen.getByRole("tab", { name: "Atribuições pendentes" }));
     expect(screen.queryByText("ORDER-OLD")).toBeNull();
     await userEvent.click(screen.getByRole("tab", { name: "Todas" }));
     await userEvent.click(screen.getByRole("button", { name: "Abrir" }));
     await screen.findByText("Itens (1)");
     expect(screen.queryByText(/O merchant precisa estar vinculado/)).toBeNull();
     expect(screen.queryByRole("button", { name: /Materializar / })).toBeNull();
+  });
+
+  it("mantém atribuição legada inconsistente visível na fila de correção", async () => {
+    installApi({
+      overview: { ...overview, awaitingMaterialization: 1 },
+      list: {
+        items: [{
+          ...oldNoBlockItem,
+          progress: { total: 3, assigned: 3, materialized: 2, pending: 0 },
+          blockedReasons: [{ code: "ALREADY_MATERIALIZED", message: "Corrija o saldo com motivo." }]
+        }],
+        page: 1,
+        limit: 20,
+        total: 1
+      }
+    });
+    renderWithProviders(<PurchaseQueuePage />, { permissions });
+    await userEvent.click(await screen.findByRole("tab", { name: "Atribuições pendentes" }));
+    expect(screen.getByText("ORDER-OLD")).toBeTruthy();
   });
 
   it("exibe vazio, erro e retry sem fabricar dados", async () => {

@@ -32,7 +32,7 @@ Para uma linha:
 
 `pendente = elegível - soma(atribuições ativas)`
 
-Atribuições são positivas, quantitativas e protegidas por lock pessimista da linha, versão otimista e isolamento serializável. A soma não pode exceder o elegível. Após materializar uma loja, nenhuma atribuição nova nem alteração quantitativa da atribuição existente é aceita pela rota comum: a materialização é única por compra e loja, e quantidades posteriores ficariam sem pedido operacional correspondente. A correção posterior exige fluxo corretivo auditável próprio.
+Atribuições são positivas, quantitativas e protegidas por lock pessimista da linha, versão otimista e isolamento serializável. A soma não pode exceder o elegível. Após materializar uma loja, nenhuma atribuição nova nem aumento quantitativo é aceito: a materialização é única por compra e loja, e quantidades posteriores ficariam sem pedido operacional correspondente. Se uma versão anterior deixou atribuição maior que a quantidade materializada, a rota de atribuição aceita somente a redução exata até a quantidade já materializada, com motivo obrigatório e auditoria antes/depois; atribuição legada sem unidades materializadas pode ser removida pela rota auditada de remoção. Nenhum desses ajustes modifica o pedido operacional. Outras correções pós-materialização continuam exigindo fluxo corretivo próprio.
 
 ## Materialização
 
@@ -67,7 +67,7 @@ Todas exigem JWT e permissão específica.
 - `POST /imported-purchases/:id/materializations/:lojaId`
 
 As listas são paginadas, ordenadas deterministicamente e retornam progresso, `allowedActions` e `blockedReasons` produzidos pelo backend.
-O overview distingue `fullyAssigned` de `awaitingMaterialization`: o segundo conta itens com atribuição ainda não materializada em loja sem materialização anterior. Conflitos e mappings continuam revalidados na mutação; esse contador não promete elegibilidade completa. Uma compra já materializada não oferece novamente a ação de materializar nos read models.
+O overview distingue `fullyAssigned` de `awaitingMaterialization`: o segundo conta itens com atribuição ainda não materializada ou excesso legado após materialização. O excesso legado retorna `ALREADY_MATERIALIZED` em `blockedReasons`; não habilita novamente `MATERIALIZE_STORE_ALLOCATION`. Conflitos e mappings continuam revalidados na mutação; esse contador não promete elegibilidade completa. Uma compra já materializada e consistente não oferece novamente a ação de materializar nos read models.
 
 ## RBAC e isolamento
 

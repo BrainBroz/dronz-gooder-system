@@ -555,15 +555,24 @@ export async function setAssignment(
         },
         select: { id: true }
       });
+      const isLegacyCorrection = Boolean(
+        completedStore &&
+        current &&
+        current.quantidade > current.quantidadeMaterializada &&
+        input.quantidade === current.quantidadeMaterializada &&
+        input.motivo
+      );
       if (
         (completedStore || current?.quantidadeMaterializada) &&
-        (!current || input.quantidade !== current.quantidade)
+        (!current ||
+          (input.quantidade !== current.quantidade &&
+            !isLegacyCorrection))
       )
         throw new AppError(409, "already_materialized");
       const other = item.atribuicoes
         .filter((assignment) => assignment.lojaId !== lojaId)
         .reduce((sum, assignment) => sum + assignment.quantidade, 0);
-      if (other + input.quantidade > itemEligibility(item))
+      if (!isLegacyCorrection && other + input.quantidade > itemEligibility(item))
         throw new AppError(409, "store_assignment_overflow");
       const assignment = await tx.atribuicaoCompraItem.upsert({
         where: { itemExternoId_lojaId: { itemExternoId: itemId, lojaId } },
@@ -989,6 +998,28 @@ function hasPendingMaterialization(purchase: {
   );
 }
 
+function hasCompletedStoreExcess(purchase: {
+  materializacoes: { lojaId: string }[];
+  itens: {
+    atribuicoes: {
+      lojaId: string;
+      quantidade: number;
+      quantidadeMaterializada: number;
+    }[];
+  }[];
+}) {
+  const completedStores = new Set(
+    purchase.materializacoes.map((entry) => entry.lojaId)
+  );
+  return purchase.itens.some((item) =>
+    item.atribuicoes.some(
+      (assignment) =>
+        completedStores.has(assignment.lojaId) &&
+        assignment.quantidade > assignment.quantidadeMaterializada
+    )
+  );
+}
+
 export async function listPurchases(
   identity: AuthIdentity,
   input: ListInput
@@ -1064,6 +1095,11 @@ export async function listPurchases(
             }
           ]
         : [];
+      if (hasCompletedStoreExcess(purchase))
+        blockedReasons.push({
+          code: "ALREADY_MATERIALIZED",
+          message: "Atribuição excede a quantidade já materializada. Corrija o saldo com motivo."
+        });
       return {
         id: purchase.id,
         provider: purchase.plataforma,
@@ -1090,7 +1126,7 @@ export async function listPurchases(
         },
         conflictCount: purchase.conflitos.length,
         allowedActions:
-          blockedReasons.length || !hasPendingMaterialization(purchase)
+          purchase.conflitos.length || !hasPendingMaterialization(purchase)
             ? actionsFor(identity).filter(
                 (action) => action !== "MATERIALIZE_STORE_ALLOCATION"
               )
@@ -1158,10 +1194,13 @@ export async function overview(identity: AuthIdentity) {
       else result.fullyAssigned += 1;
       if (materialized > 0) result.materialized += 1;
       if (
-        hasPendingMaterialization({
+        (hasPendingMaterialization({
           materializacoes: purchase.materializacoes,
           itens: [item]
-        })
+        }) || hasCompletedStoreExcess({
+          materializacoes: purchase.materializacoes,
+          itens: [item]
+        }))
       )
         result.awaitingMaterialization += 1;
       result.pending += Math.max(0, eligible - assigned);
@@ -1198,6 +1237,17 @@ export async function purchaseDetail(identity: AuthIdentity, id: string) {
   });
   if (!purchase) throw new AppError(404, "not_found");
   const history = await historyForPurchase(id);
+  const blockedReasons: UnifiedPurchaseBlockedReason[] = [];
+  if (purchase.conflitos.some((conflict) => conflict.status === "ABERTO"))
+    blockedReasons.push({
+      code: "EXTERNAL_ORDER_CONFLICT",
+      message: "Compra possui conflito aberto."
+    });
+  if (hasCompletedStoreExcess(purchase))
+    blockedReasons.push({
+      code: "ALREADY_MATERIALIZED",
+      message: "Atribuição excede a quantidade já materializada. Corrija o saldo com motivo."
+    });
   return {
     ...purchase,
     allowedActions: actionsFor(identity).filter((action) => {
@@ -1218,16 +1268,7 @@ export async function purchaseDetail(identity: AuthIdentity, id: string) {
         );
       return true;
     }),
-    blockedReasons: purchase.conflitos.some(
-      (conflict) => conflict.status === "ABERTO"
-    )
-      ? [
-          {
-            code: "EXTERNAL_ORDER_CONFLICT",
-            message: "Compra possui conflito aberto."
-          }
-        ]
-      : [],
+    blockedReasons,
     history
   };
 }

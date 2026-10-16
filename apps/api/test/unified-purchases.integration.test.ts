@@ -528,6 +528,74 @@ describe("unified purchases backend", () => {
     expect(detail.body.allowedActions).not.toContain("SET_SUPPLIER_MAPPING");
   });
 
+  it("identifica excesso legado após materialização e permite apenas correção auditada", async () => {
+    const f = await createStaging();
+    const item = f.purchase.itens[0] as { id: string; version: number };
+    const assignment = await request(f.app)
+      .put(`/imported-purchases/items/${item.id}/assignments/${f.dronz.id}`)
+      .set(bearer(f.token))
+      .send({ quantidade: 2, expectedVersion: item.version });
+    expect(assignment.status).toBe(200);
+    expect((await request(f.app)
+      .put(`/imported-purchases/items/${item.id}/product-mappings/${f.dronz.id}`)
+      .set(bearer(f.token))
+      .send({ produtoId: f.productD.id })).status).toBe(200);
+    expect((await request(f.app)
+      .put(`/imported-purchases/merchants/${f.merchant.id}/supplier-mappings/${f.dronz.id}`)
+      .set(bearer(f.token))
+      .send({ fornecedorId: f.supplierD.id })).status).toBe(200);
+    const purchase = await prisma.compraImportada.findUniqueOrThrow({ where: { id: f.purchase.id } });
+    const materialization = await request(f.app)
+      .post(`/imported-purchases/${f.purchase.id}/materializations/${f.dronz.id}`)
+      .set(bearer(f.token))
+      .send({ expectedPurchaseVersion: purchase.version });
+    expect(materialization.status).toBe(201);
+
+    // Simula dado persistido por versões anteriores, que aceitavam aumentar após materializar.
+    await prisma.atribuicaoCompraItem.update({
+      where: { itemExternoId_lojaId: { itemExternoId: item.id, lojaId: f.dronz.id } },
+      data: { quantidade: 3 }
+    });
+    await prisma.compraImportadaItem.update({
+      where: { id: item.id },
+      data: { quantidadeCancelada: 4 }
+    });
+    const staleItem = await prisma.compraImportadaItem.findUniqueOrThrow({ where: { id: item.id } });
+    const [overview, list, detail] = await Promise.all([
+      request(f.app).get("/imported-purchases/overview").set(bearer(f.token)),
+      request(f.app).get("/imported-purchases").set(bearer(f.token)),
+      request(f.app).get(`/imported-purchases/${f.purchase.id}`).set(bearer(f.token))
+    ]);
+    expect(overview.body.awaitingMaterialization).toBe(1);
+    const listedPurchase = list.body.items.find((entry: { id: string }) => entry.id === f.purchase.id);
+    expect(listedPurchase.blockedReasons).toContainEqual(expect.objectContaining({ code: "ALREADY_MATERIALIZED" }));
+    expect(listedPurchase.allowedActions).not.toContain("MATERIALIZE_STORE_ALLOCATION");
+    expect(detail.body.blockedReasons).toContainEqual(expect.objectContaining({ code: "ALREADY_MATERIALIZED" }));
+
+    const noReason = await request(f.app)
+      .put(`/imported-purchases/items/${item.id}/assignments/${f.dronz.id}`)
+      .set(bearer(f.token))
+      .send({ quantidade: 2, expectedVersion: staleItem.version });
+    expect(noReason.status).toBe(409);
+    const corrected = await request(f.app)
+      .put(`/imported-purchases/items/${item.id}/assignments/${f.dronz.id}`)
+      .set(bearer(f.token))
+      .send({ quantidade: 2, expectedVersion: staleItem.version, motivo: "Corrigir saldo legado não materializado" });
+    expect(corrected.status).toBe(200);
+    expect(corrected.body.quantidade).toBe(2);
+    expect(corrected.body.quantidadeMaterializada).toBe(2);
+    const auditEntry = await prisma.auditLog.findFirstOrThrow({
+      where: { entityId: corrected.body.id, action: "STORE_ASSIGNMENT_SET", reason: "Corrigir saldo legado não materializado" },
+      orderBy: { createdAt: "desc" }
+    });
+    expect(auditEntry.beforeData).toMatchObject({ quantidade: 3 });
+    expect(auditEntry.afterData).toMatchObject({ quantidade: 2 });
+    const after = await request(f.app).get(`/imported-purchases/${f.purchase.id}`).set(bearer(f.token));
+    expect(after.body.blockedReasons).not.toContainEqual(expect.objectContaining({ code: "ALREADY_MATERIALIZED" }));
+    expect((await prisma.pedidoCompraItem.findMany({ where: { pedidoCompraId: materialization.body.pedidoCompra.id } }))
+      .map((entry) => entry.quantidade)).toEqual([2]);
+  });
+
   it("impede produto e materialização cross-store", async () => {
     const f = await createStaging();
     const item = f.purchase.itens[0] as { id: string; version: number };

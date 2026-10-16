@@ -39,7 +39,7 @@ export function PurchaseHomeHeader({
     },
     {
       key: "readyToMaterialize",
-      label: "Atribuídos não materializados",
+      label: "Atribuições pendentes",
       value: overview.awaitingMaterialization,
       actionLabel: "Revisar"
     }

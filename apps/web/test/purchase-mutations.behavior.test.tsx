@@ -811,3 +811,109 @@ describe("UX-1C — Comportamento geral das mutações", () => {
     expect(await screen.findByText("Mensagem exata vinda do backend.")).toBeTruthy();
   });
 });
+
+describe("Correção de atribuição legada", () => {
+  const legacyDetail: UnifiedPurchaseDetail = {
+    ...baseDetail,
+    itens: [{
+      ...itemProntoMaterializar,
+      id: "legacy-item",
+      version: 7,
+      atribuicoes: [{
+        ...itemProntoMaterializar.atribuicoes[0],
+        quantidade: 3,
+        quantidadeMaterializada: 2
+      }]
+    }],
+    materializacoes: [{
+      id: "materialization-1",
+      lojaId: "store-dronz",
+      status: "CONCLUIDA",
+      pedidoCompraId: "order-1",
+      createdAt: "2026-07-13T12:00:00.000Z",
+      pedidoCompra: { id: "order-1", numeroPedido: "EXT-1", status: "RASCUNHO" }
+    }],
+    allowedActions: ["ASSIGN_TO_STORE"],
+    blockedReasons: [{
+      code: "ALREADY_MATERIALIZED",
+      message: "Atribuição excede a quantidade já materializada. Corrija o saldo com motivo."
+    }]
+  };
+
+  it("corrige somente o excesso com motivo, loja, versão e chave idempotente", async () => {
+    const put = vi.spyOn(api, "put").mockResolvedValue({ data: {} });
+    renderDrawer(legacyDetail);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Corrigir saldo Dronz" }));
+    expect(screen.getByText(/3 → 2 unidades/)).toBeTruthy();
+    const confirm = screen.getByRole("button", { name: "Confirmar correção" }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    await user.type(screen.getByRole("textbox", { name: "Motivo da correção" }), "Saldo legado incorreto");
+    await user.click(confirm);
+    await waitFor(() => expect(put).toHaveBeenCalledWith(
+      "/imported-purchases/items/legacy-item/assignments/store-dronz",
+      { quantidade: 2, expectedVersion: 7, motivo: "Saldo legado incorreto" },
+      { headers: {
+        Authorization: "Bearer access-test",
+        "x-store-id": "store-dronz",
+        "idempotency-key": expect.any(String)
+      } }
+    ));
+  });
+
+  it("não oferece correção sem allowedAction mesmo com bloqueio e excesso", async () => {
+    renderDrawer({ ...legacyDetail, allowedActions: [] });
+    await screen.findByText("Item Pronto Para Materializar");
+    expect(screen.queryByRole("button", { name: "Corrigir saldo Dronz" })).toBeNull();
+  });
+
+  it("remove atribuição legada sem unidades materializadas usando a ação autorizada", async () => {
+    const deleteRequest = vi.spyOn(api, "delete").mockResolvedValue({ data: { removed: true } });
+    renderDrawer({
+      ...legacyDetail,
+      allowedActions: ["REMOVE_ASSIGNMENT"],
+      itens: [{
+        ...legacyDetail.itens[0],
+        atribuicoes: [{ ...legacyDetail.itens[0].atribuicoes[0], quantidadeMaterializada: 0 }]
+      }]
+    });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Corrigir saldo Dronz" }));
+    await user.type(screen.getByRole("textbox", { name: "Motivo da correção" }), "Atribuição posterior indevida");
+    await user.click(screen.getByRole("button", { name: "Confirmar correção" }));
+    await waitFor(() => expect(deleteRequest).toHaveBeenCalledWith(
+      "/imported-purchases/items/legacy-item/assignments/store-dronz",
+      {
+        data: { motivo: "Atribuição posterior indevida" },
+        headers: {
+          Authorization: "Bearer access-test",
+          "x-store-id": "store-dronz",
+          "idempotency-key": expect.any(String)
+        }
+      }
+    ));
+  });
+
+  it("não oferece nova materialização para loja concluída quando outra loja ainda está pendente", async () => {
+    renderDrawer({
+      ...legacyDetail,
+      allowedActions: ["ASSIGN_TO_STORE", "MATERIALIZE_STORE_ALLOCATION"],
+      itens: [{
+        ...legacyDetail.itens[0],
+        atribuicoes: [
+          ...legacyDetail.itens[0].atribuicoes,
+          {
+            ...legacyDetail.itens[0].atribuicoes[0],
+            id: "assignment-gooder",
+            lojaId: "store-gooder",
+            quantidade: 1,
+            quantidadeMaterializada: 0,
+            loja: { id: "store-gooder", nome: "Gooder", slug: "gooder" }
+          }
+        ]
+      }]
+    });
+    expect(await screen.findByRole("button", { name: /Materializar Gooder/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Materializar Dronz/ })).toBeNull();
+  });
+});
