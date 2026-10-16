@@ -38,8 +38,9 @@ O backend V1 não oferece endpoints de listagem de contas externas ou merchants.
 
 - os cadastros existem e devolvem o ID criado;
 - importação e compra manual aceitam IDs conhecidos;
-- nenhum select ou dado fictício é criado;
-- a limitação é informada na interface.
+- os campos de conta e merchant oferecem sugestões derivadas das compras já carregadas; na importação, as sugestões são filtradas pela plataforma selecionada;
+- quando o ID não está nas sugestões, a interface permite informá-lo manualmente;
+- a limitação de não haver uma listagem dedicada continua informada na interface.
 
 Também não há endpoint exclusivo de pendências nem filtros derivados para “parcialmente atribuída” ou “materializada”. A UI usa apenas os filtros aceitos e mostra os progressos devolvidos pelo backend. Quantidade elegível ou pendente por item não é recalculada localmente.
 

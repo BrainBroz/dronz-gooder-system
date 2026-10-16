@@ -18,6 +18,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: ["./test/setup.ts"],
-    fileParallelism: false
+    fileParallelism: false,
+    env: { TZ: "America/Sao_Paulo" }
   }
 });
