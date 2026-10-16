@@ -18,6 +18,7 @@ import { useProducts } from "../hooks/useCatalog";
 function PurchaseOrdersContent() {
   const store = useAuthStore((s) => s.activeStoreId);
   const client = useQueryClient();
+  const [page, setPage] = useState(1);
   const [selectedAction, setSelectedAction] = useState<{ id: string; number: string; status: "PLACED" | "CONFIRMED" } | null>(null);
   const { products } = useProducts();
   const suppliers = useQuery<Supplier[]>({
@@ -31,12 +32,13 @@ function PurchaseOrdersContent() {
       ).data.items
   });
   const orders = useQuery<PurchaseOrder[]>({
-    queryKey: purchasingQueryKeys.orders(store),
+    queryKey: [...purchasingQueryKeys.orders(store), page],
     enabled: !!store,
     queryFn: async () =>
       (
         await api.get("/purchase-orders", {
-          headers: { ...authHeader(), "x-store-id": store }
+          headers: { ...authHeader(), "x-store-id": store },
+          params: { page, limit: 20 }
         })
       ).data.items
   });
@@ -91,6 +93,7 @@ function PurchaseOrdersContent() {
         { headers: { ...authHeader(), "x-store-id": store } }
       ),
     onSuccess: async () => {
+      setPage(1);
       await client.invalidateQueries({
         queryKey: purchasingQueryKeys.orders(store)
       });
@@ -224,6 +227,11 @@ function PurchaseOrdersContent() {
             ))}
           </ContentCard>
         ))}
+        <Stack direction="row" alignItems="center" gap={2}>
+          <Button disabled={page === 1 || orders.isFetching} onClick={() => { setSelectedAction(null); setPage(page - 1); }}>Anterior</Button>
+          <Typography>Página {page}</Typography>
+          <Button disabled={orders.isFetching || (orders.data?.length ?? 0) < 20} onClick={() => { setSelectedAction(null); setPage(page + 1); }}>Próxima</Button>
+        </Stack>
         <Dialog open={actionAvailable} onClose={() => !changeStatus.isPending && setSelectedAction(null)}>
           <DialogTitle>Confirmar mudança de status</DialogTitle>
           <DialogContent>

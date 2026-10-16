@@ -258,4 +258,27 @@ describe("suppliers and purchase orders", () => {
       readSpy.mockRestore();
     }
   });
+
+  it("pagina pedidos com ordem estável quando a data de compra é igual", async () => {
+    const { app, token, d } = await session();
+    const supplier = (await request(app)
+      .post("/suppliers")
+      .set(h(token, d.id))
+      .send({ nome: "Test Paging Supplier" })).body;
+    const created = await prisma.pedidoCompra.createManyAndReturn({
+      data: Array.from({ length: 3 }, (_, index) => ({
+        lojaId: d.id,
+        fornecedorId: supplier.id,
+        numeroPedido: `TEST-PAGE-${index}`,
+        dataCompra: new Date("2026-01-01")
+      }))
+    });
+    const pages = await Promise.all([1, 2].map((page) => request(app)
+      .get("/purchase-orders")
+      .query({ fornecedorId: supplier.id, page, limit: 2 })
+      .set(h(token, d.id))));
+    expect(pages.map((response) => response.status)).toEqual([200, 200]);
+    const ids = pages.flatMap((response) => response.body.items.map((item: { id: string }) => item.id));
+    expect(ids).toEqual(created.map((item) => item.id).sort().reverse());
+  });
 });

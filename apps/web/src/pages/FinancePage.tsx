@@ -14,6 +14,8 @@ import type { PurchaseOrder } from "../types/purchasing";
 function FinanceContent() {
   const store = useAuthStore((s) => s.activeStoreId);
   const client = useQueryClient();
+  const [draftOrderNumber, setDraftOrderNumber] = React.useState("");
+  const [orderNumber, setOrderNumber] = React.useState("");
   const exchangeForm = useForm<{
     moedaOrigem: string;
     moedaDestino: string;
@@ -66,10 +68,10 @@ function FinanceContent() {
       ).data
   });
   const orders = useQuery<PurchaseOrder[]>({
-    queryKey: purchasingQueryKeys.orders(store),
+    queryKey: [...purchasingQueryKeys.orders(store), "search", orderNumber],
     enabled: !!store,
     queryFn: async () =>
-      (await api.get("/purchase-orders", { headers })).data.items
+      (await api.get("/purchase-orders", { headers, params: { numero: orderNumber, limit: 20 } })).data.items
   });
   const exchange = useMutation({
     mutationFn: (v: {
@@ -180,6 +182,18 @@ function FinanceContent() {
           successMessage="Câmbio registrado."
         />
       </ContentCard>
+      <ContentCard title="Buscar pedido operacional">
+        <Stack component="form" direction={{ xs: "column", md: "row" }} gap={1} onSubmit={(event) => {
+          event.preventDefault();
+          paymentForm.resetField("pedidoCompraId");
+          costForm.resetField("pedidoCompraId");
+          setOrderNumber(draftOrderNumber.trim());
+        }}>
+          <TextField label="Número do pedido" value={draftOrderNumber} onChange={(event) => setDraftOrderNumber(event.target.value)} />
+          <Button type="submit">Buscar</Button>
+        </Stack>
+        {orders.isError && <Typography>Falha ao buscar pedidos.</Typography>}
+      </ContentCard>
       <ContentCard title="Pagamento">
         <Stack
           component="form"
@@ -188,6 +202,7 @@ function FinanceContent() {
           onSubmit={paymentForm.handleSubmit((v) => payment.mutate(v))}
         >
           <TextField
+            key={orderNumber}
             select
             label="Pedido"
             defaultValue=""
@@ -270,6 +285,7 @@ function FinanceContent() {
           onSubmit={costForm.handleSubmit((v) => costs.mutate(v))}
         >
           <TextField
+            key={orderNumber}
             select
             label="Pedido para custos"
             defaultValue=""

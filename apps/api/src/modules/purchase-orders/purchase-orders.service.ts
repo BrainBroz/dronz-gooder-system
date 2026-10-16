@@ -72,7 +72,7 @@ export const list = async (
       ...(q.status ? { status: q.status as PedidoCompraStatus } : {})
     },
     include: { fornecedor: true, itens: true },
-    orderBy: { dataCompra: "desc" },
+    orderBy: [{ dataCompra: "desc" }, { id: "desc" }],
     skip: (q.page - 1) * q.limit,
     take: q.limit
   })).map(withTransitions);
