@@ -65,6 +65,18 @@ marketplaceIntegrationsRouter.get(
   })
 );
 
+marketplaceIntegrationsRouter.get(
+  "/buyer-candidates/:candidateId/evidence/:evidenceId",
+  requirePermission("BUYER_INGESTION_VISUALIZAR"),
+  wrap(async (request, response) => {
+    response.json(await service.buyerCandidateEvidenceDetail(
+      identity(request),
+      z.string().cuid().parse(request.params.candidateId),
+      z.string().cuid().parse(request.params.evidenceId)
+    ));
+  })
+);
+
 marketplaceIntegrationsRouter.post(
   "/buyer-candidates/:candidateId/decision",
   requirePermission("BUYER_INGESTION_VISUALIZAR"),

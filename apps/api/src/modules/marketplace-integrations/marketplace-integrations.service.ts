@@ -35,6 +35,7 @@ import type {
 } from "./marketplace-integrations.schemas";
 import type {
   BuyerCandidateReadModel,
+  BuyerEvidenceDetailReadModel,
   MarketplaceAdapterRegistry,
   MarketplaceBlockedReason,
   MarketplaceConnectionReadModel,
@@ -444,6 +445,33 @@ export async function buyerCandidateDetail(identity: AuthIdentity, id: string) {
       reason: decision.reason,
       decidedAt: decision.createdAt.toISOString()
     }))
+  };
+}
+
+export async function buyerCandidateEvidenceDetail(
+  identity: AuthIdentity,
+  candidateId: string,
+  evidenceId: string
+): Promise<BuyerEvidenceDetailReadModel> {
+  if (!hasPermission(identity, "BUYER_INGESTION_VISUALIZAR"))
+    throw new AppError(403, "insufficient_permission");
+  const link = await prisma.buyerEvidenceLink.findUnique({
+    where: { candidateId_evidenceId: { candidateId, evidenceId } },
+    include: { evidence: true }
+  });
+  if (!link) throw new AppError(404, "not_found");
+  return {
+    candidateId,
+    evidenceId,
+    version: link.evidence.version,
+    source: link.evidence.source,
+    type: link.type,
+    dataClassification: link.evidence.dataClassification,
+    payloadHash: link.evidence.payloadHash,
+    correlationId: link.evidence.correlationId,
+    sourceOccurredAt: link.evidence.sourceOccurredAt.toISOString(),
+    recordedAt: link.evidence.createdAt.toISOString(),
+    order: normalizedMarketplaceOrderSchema.parse(link.evidence.normalizedPayload)
   };
 }
 

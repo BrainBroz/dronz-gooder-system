@@ -1,3 +1,9 @@
+import type {
+  ClassificacaoEvidenciaCompra,
+  FonteEvidenciaCompra,
+  TipoVinculoEvidenciaCompra
+} from "@prisma/client";
+
 export const marketplaceCapabilities = [
   "LIST_ORDERS",
   "GET_ORDER",
@@ -110,6 +116,20 @@ export type BuyerCandidateReadModel = {
     "ALREADY_DECIDED" | "NEW_EVIDENCE_REQUIRES_RECONCILIATION" |
     "MATERIAL_DIVERGENCE"
   >;
+};
+
+export type BuyerEvidenceDetailReadModel = {
+  candidateId: string;
+  evidenceId: string;
+  version: number;
+  source: FonteEvidenciaCompra;
+  type: TipoVinculoEvidenciaCompra;
+  dataClassification: ClassificacaoEvidenciaCompra;
+  payloadHash: string;
+  correlationId: string;
+  sourceOccurredAt: string;
+  recordedAt: string;
+  order: NormalizedMarketplaceOrder;
 };
 
 export type MarketplaceConnectionContext = {

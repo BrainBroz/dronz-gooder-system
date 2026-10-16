@@ -516,6 +516,18 @@ describe("marketplace integration foundation", () => {
       expect(candidate.status).toBe("COM_DIVERGENCIA");
       expect(candidate.evidenceLinks.map((link) => link.type))
         .toEqual(["MATCHED", "CONFLICTING"]);
+      const evidenceDetails = await Promise.all(candidate.evidenceLinks.map((link) =>
+        request(fixture.app)
+          .get(`/integrations/marketplaces/buyer-candidates/${candidate.id}/evidence/${link.evidenceId}`)
+          .set(bearer(fixture.token))
+      ));
+      expect(evidenceDetails.map((response) => response.status)).toEqual([200, 200]);
+      expect(evidenceDetails.map((response) => response.body.type))
+        .toEqual(["MATCHED", "CONFLICTING"]);
+      expect(evidenceDetails.map((response) => response.body.order.items[0].quantity))
+        .toEqual([original.items[0].quantity, changed.items[0].quantity]);
+      expect(evidenceDetails.map((response) => response.body.order.currency))
+        .toEqual([original.currency, changed.currency]);
       const detail = await request(fixture.app)
         .get(`/integrations/marketplaces/buyer-candidates/${candidate.id}`)
         .set(bearer(fixture.token));
@@ -898,15 +910,49 @@ describe("marketplace integration foundation", () => {
     const detail = await request(fixture.app)
       .get(`/integrations/marketplaces/buyer-candidates/${candidate.id}`)
       .set(bearer(token));
+    const evidence = await request(fixture.app)
+      .get(`/integrations/marketplaces/buyer-candidates/${candidate.id}/evidence/${candidate.currentEvidenceId}`)
+      .set(bearer(token));
     const approve = await request(fixture.app)
       .post(`/integrations/marketplaces/buyer-candidates/${candidate.id}/decision`)
       .set(bearer(token))
       .set("idempotency-key", "batch8-buyer-rbac-approve")
       .send({ decision: "APROVAR", expectedVersion: 1 });
-    expect([list.status, detail.status, approve.status]).toEqual([403, 403, 403]);
+    expect([list.status, detail.status, evidence.status, approve.status])
+      .toEqual([403, 403, 403, 403]);
     expect(await prisma.buyerApprovalDecision.count({
       where: { candidateId: candidate.id }
     })).toBe(0);
+  });
+
+  it("só revela evidência vinculada ao candidato solicitado", async () => {
+    const fixture = await connectionFixture("EBAY", "SHARED", "buyer-evidence-scope");
+    const identity = await getAuthenticatedUser(fixture.userId);
+    const firstOrderId = "batch8-evidence-scope-first";
+    const secondOrderId = "batch8-evidence-scope-second";
+    const run = await syncConnection(identity, fixture.connectionId,
+      { replay: true }, "batch8-evidence-scope-sync",
+      disabledRegistry(new FakeAdapter("EBAY", [{
+        orders: [order(firstOrderId), order(secondOrderId)]
+      }])));
+    expect(run.status).toBe("SUCCEEDED");
+    const first = await prisma.buyerPurchaseCandidate.findFirstOrThrow({
+      where: { externalOrderIdNormalized: firstOrderId }
+    });
+    const second = await prisma.buyerPurchaseCandidate.findFirstOrThrow({
+      where: { externalOrderIdNormalized: secondOrderId }
+    });
+    const path = `/integrations/marketplaces/buyer-candidates/${first.id}/evidence/`;
+    const linked = await request(fixture.app)
+      .get(`${path}${first.currentEvidenceId}`)
+      .set(bearer(fixture.token));
+    expect(linked.status).toBe(200);
+    expect(linked.body.order.externalOrderId).toBe(firstOrderId);
+    expect(linked.body).not.toHaveProperty("secretReference");
+    const foreign = await request(fixture.app)
+      .get(`${path}${second.currentEvidenceId}`)
+      .set(bearer(fixture.token));
+    expect(foreign.status).toBe(404);
   });
 
   it("rejeita versão stale e chave reutilizada com payload diferente", async () => {
