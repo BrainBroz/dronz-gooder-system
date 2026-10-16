@@ -137,10 +137,12 @@ export async function changeStatus(
   const o = await get(lojaId, id);
   if (!transitions[o.status]?.includes(status))
     throw new AppError(409, "conflict");
-  return prisma.pedidoCompra.update({
-    where: { id: o.id },
+  const updated = await prisma.pedidoCompra.updateMany({
+    where: { id: o.id, lojaId, status: o.status },
     data: { status, canceladoEm: status === "CANCELLED" ? new Date() : null }
   });
+  if (!updated.count) throw new AppError(409, "conflict");
+  return get(lojaId, id);
 }
 export async function addItem(lojaId: string, id: string, d: Item) {
   const o = await get(lojaId, id);

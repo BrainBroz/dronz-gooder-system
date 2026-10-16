@@ -204,4 +204,35 @@ describe("suppliers and purchase orders", () => {
       ).status
     ).toBe(404);
   });
+
+  it("aceita uma única transição quando pedidos concorrentes partem do mesmo estado", async () => {
+    const { app, token, d } = await session();
+    const supplier = (await request(app)
+      .post("/suppliers")
+      .set(h(token, d.id))
+      .send({ nome: "Test Concurrent Supplier" })).body;
+    const product = await prisma.produto.findFirstOrThrow({ where: { lojaId: d.id } });
+    const order = await request(app)
+      .post("/purchase-orders")
+      .set(h(token, d.id))
+      .send({
+        fornecedorId: supplier.id,
+        numeroPedido: "TEST-CONCURRENT",
+        dataCompra: "2026-01-01",
+        itens: [{ produtoId: product.id, quantidade: 1, precoUnitario: 10 }]
+      });
+    expect(order.status).toBe(201);
+
+    const attempts = await Promise.all(Array.from({ length: 6 }, () =>
+      request(app)
+        .patch(`/purchase-orders/${order.body.id}/status`)
+        .set(h(token, d.id))
+        .send({ status: "PLACED" })
+    ));
+    expect(attempts.filter((attempt) => attempt.status === 200)).toHaveLength(1);
+    expect(attempts.filter((attempt) => attempt.status === 409)).toHaveLength(5);
+    expect((await request(app)
+      .get(`/purchase-orders/${order.body.id}`)
+      .set(h(token, d.id))).body.status).toBe("PLACED");
+  });
 });
