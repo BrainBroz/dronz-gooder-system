@@ -273,17 +273,29 @@ describe("international logistics", () => {
     await prisma.checkpointParaguai.create({ data: {
       lojaId: d.id, viagemId: trip.id, malaId: bag.id,
       confirmadoPorId: admin.id, confirmadoEm: new Date(),
-      tipoDivergencia: "AVARIA", supersededAt: new Date()
+      tipoDivergencia: "CORRETO", supersededAt: new Date()
     } });
-    await prisma.checkpointParaguai.create({ data: {
+    const active = await prisma.checkpointParaguai.create({ data: {
       lojaId: d.id, viagemId: trip.id, malaId: bag.id,
-      confirmadoPorId: admin.id, confirmadoEm: new Date(), tipoDivergencia: "CORRETO"
+      confirmadoPorId: admin.id, confirmadoEm: new Date(), tipoDivergencia: "AVARIA"
     } });
+    const changeTrip = () => request(app).patch(`/logistics/trips/${trip.id}/status`)
+      .set(h(t, d.id)).send({ status: "ARRIVED_BRAZIL" });
     const listed = await request(app).get("/logistics/trips").set(h(t, d.id));
     expect(listed.body.find((entry: { id: string }) => entry.id === trip.id).allowedStatusTransitions)
+      .toEqual([]);
+    expect((await changeTrip()).status).toBe(409);
+    const corrected = await request(app).post("/operations/corrections")
+      .set(h(t, d.id)).send({
+        entity: "CheckpointParaguai", originalEventId: active.id,
+        correctionType: "DIVERGENCIA", reason: "Conferência ativa corrigida",
+        after: { tipoDivergencia: "CORRETO" }
+      });
+    expect(corrected.status).toBe(200);
+    const ready = await request(app).get("/logistics/trips").set(h(t, d.id));
+    expect(ready.body.find((entry: { id: string }) => entry.id === trip.id).allowedStatusTransitions)
       .toEqual(["ARRIVED_BRAZIL"]);
-    expect((await request(app).patch(`/logistics/trips/${trip.id}/status`)
-      .set(h(t, d.id)).send({ status: "ARRIVED_BRAZIL" })).status).toBe(200);
+    expect((await changeTrip()).status).toBe(200);
   });
 
   it("exige liberação do Paraguai para todas as malas ativas da viagem", async () => {
