@@ -166,6 +166,7 @@ export async function recordMarketplaceEvidence(input: {
               data: {
                 ...(promote ? { currentEvidenceId: evidence.id } : {}),
                 status: prior.status === "REJEITADA" ? "REJEITADA"
+                  : !promote && prior.status === "CANCELADA" ? "CANCELADA"
                   : prior.compraImportadaId
                   ? "COM_DIVERGENCIA"
                   : promote && input.order.cancelled ? "CANCELADA"

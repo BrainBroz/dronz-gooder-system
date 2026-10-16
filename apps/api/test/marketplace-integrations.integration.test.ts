@@ -641,6 +641,54 @@ describe("marketplace integration foundation", () => {
     })).toBe(0);
   });
 
+  it("preserva cancelamento recente com quantidades divergentes em ambas as ordens", async () => {
+    for (const cancelFirst of [true, false]) {
+      const suffix = cancelFirst ? "cancel-first" : "active-first";
+      const fixture = await connectionFixture("EBAY", "SHARED", `buyer-cancel-${suffix}`);
+      const identity = await getAuthenticatedUser(fixture.userId);
+      const externalOrderId = `batch8-cancel-${suffix}`;
+      const originalItem = order(externalOrderId).items[0];
+      const cancelled = order(externalOrderId, {
+        updatedAt: "2026-07-14T12:00:00.000Z",
+        cancelled: true,
+        items: [{ ...originalItem, quantity: 4 }]
+      });
+      const active = order(externalOrderId, {
+        updatedAt: "2026-07-14T11:00:00.000Z",
+        items: [{ ...originalItem, quantity: 3 }]
+      });
+      const snapshots = cancelFirst ? [cancelled, active] : [active, cancelled];
+      for (const [index, payload] of snapshots.entries()) {
+        const run = await syncConnection(identity, fixture.connectionId,
+          { replay: true }, `batch8-cancel-${suffix}-${index}`,
+          disabledRegistry(new FakeAdapter("EBAY", [{ orders: [payload] }])));
+        expect(run.status).toBe("SUCCEEDED");
+      }
+      const candidate = await prisma.buyerPurchaseCandidate.findFirstOrThrow({
+        where: { externalOrderIdNormalized: externalOrderId },
+        include: { currentEvidence: true, evidenceLinks: true }
+      });
+      expect(candidate.status).toBe("CANCELADA");
+      expect(candidate.currentEvidence.sourceOccurredAt.toISOString())
+        .toBe("2026-07-14T12:00:00.000Z");
+      expect(candidate.evidenceLinks.map((link) => link.type).sort())
+        .toEqual(["CONFLICTING", "MATCHED"]);
+      const detail = await request(fixture.app)
+        .get(`/integrations/marketplaces/buyer-candidates/${candidate.id}`)
+        .set(bearer(fixture.token));
+      expect(detail.body).toMatchObject({
+        allowedActions: ["VIEW"],
+        blockedReasons: ["CANCELLED"]
+      });
+      const approval = await request(fixture.app)
+        .post(`/integrations/marketplaces/buyer-candidates/${candidate.id}/decision`)
+        .set(bearer(fixture.token))
+        .set("idempotency-key", `batch8-cancel-${suffix}-approve`)
+        .send({ decision: "APROVAR", expectedVersion: candidate.version });
+      expect(approval.status).toBe(409);
+    }
+  });
+
   it("não aprova retroativamente compra legada já criada pela fundação antiga", async () => {
     const fixture = await connectionFixture("EBAY", "SHARED", "buyer-legacy");
     const connection = await prisma.conexaoMarketplace.findUniqueOrThrow({
