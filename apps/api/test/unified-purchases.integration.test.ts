@@ -227,6 +227,24 @@ async function createStaging() {
 }
 
 describe("unified purchases backend", () => {
+  it("aceita fornecedor legado do seed apenas na própria loja", async () => {
+    const f = await createStaging();
+    const url = `/imported-purchases/merchants/${f.merchant.id}/supplier-mappings/${f.dronz.id}`;
+    const crossStore = await request(f.app)
+      .put(url)
+      .set(bearer(f.token))
+      .send({ fornecedorId: "seed-supplier-gooder" });
+    expect(crossStore.status).toBe(400);
+    expect(crossStore.body.error).toBe("supplier_store_mismatch");
+
+    const ownStore = await request(f.app)
+      .put(url)
+      .set(bearer(f.token))
+      .send({ fornecedorId: "seed-supplier-dronz" });
+    expect(ownStore.status).toBe(200);
+    expect(ownStore.body.fornecedorId).toBe("seed-supplier-dronz");
+  });
+
   it("cadastra conta e merchant sem aceitar credenciais e reaplica idempotência", async () => {
     const f = await fixtures();
     const accountPayload = {
