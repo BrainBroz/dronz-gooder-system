@@ -186,6 +186,37 @@ describe("international logistics", () => {
       .toBe("ARRIVED_BRAZIL");
   });
 
+  it("exige checkpoint Paraguai antes de declarar chegada na rota que o inclui", async () => {
+    const { app, t, d } = await s();
+    fixture = await createOperationalFixture(prisma, d.id, "MIAMI_PARAGUAI_BRASIL");
+    const { trip, bag } = fixture;
+    const changeTrip = (status: string) => request(app)
+      .patch(`/logistics/trips/${trip.id}/status`).set(h(t, d.id)).send({ status });
+    const changeBag = (status: string) => request(app)
+      .patch(`/logistics/suitcases/${bag.id}/status`).set(h(t, d.id)).send({ status });
+    expect((await changeBag("CLOSED")).status).toBe(200);
+    expect((await changeBag("CHECKED_IN")).status).toBe(200);
+    expect((await changeTrip("CLOSED_FOR_ALLOCATION")).status).toBe(200);
+    expect((await changeTrip("IN_TRANSIT")).status).toBe(200);
+    const before = await request(app).get("/logistics/trips").set(h(t, d.id));
+    expect(before.body.find((entry: { id: string }) => entry.id === trip.id).allowedStatusTransitions)
+      .toEqual([]);
+    const premature = await changeTrip("ARRIVED_BRAZIL");
+    expect(premature.status).toBe(409);
+    expect(premature.body.error).toBe("checkpoint_required");
+    expect((await prisma.viagem.findUniqueOrThrow({ where: { id: trip.id } })).status)
+      .toBe("IN_TRANSIT");
+    const checkpoint = await request(app).post("/logistics/checkpoint-paraguai")
+      .set(h(t, d.id)).send({
+        viagemId: trip.id, malaId: bag.id, confirmadoEm: new Date().toISOString()
+      });
+    expect(checkpoint.status).toBe(200);
+    const ready = await request(app).get("/logistics/trips").set(h(t, d.id));
+    expect(ready.body.find((entry: { id: string }) => entry.id === trip.id).allowedStatusTransitions)
+      .toEqual(["ARRIVED_BRAZIL"]);
+    expect((await changeTrip("ARRIVED_BRAZIL")).status).toBe(200);
+  });
+
   it("serializa alocações concorrentes e não excede o recebido em Miami", async () => {
     const { app, t, d } = await s();
     fixture = await createOperationalFixture(prisma, d.id);

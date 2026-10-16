@@ -20,6 +20,32 @@ const suitcaseTransitions: Record<MalaStatus, MalaStatus[]> = {
   RECEIVED: [],
   CANCELLED: []
 };
+async function clearedParaguayBags(
+  db: Prisma.TransactionClient,
+  lojaId: string,
+  bagIds: string[]
+) {
+  if (!bagIds.length) return new Set<string>();
+  const checkpoints = await db.checkpointParaguai.findMany({
+    where: { lojaId, malaId: { in: bagIds }, supersededAt: null },
+    select: { id: true, malaId: true, tipoDivergencia: true }
+  });
+  const projections = await db.projecaoOperacional.findMany({
+    where: { lojaId, entity: "CheckpointParaguai", entityId: { in: checkpoints.map((checkpoint) => checkpoint.id) } },
+    select: { entityId: true, state: true }
+  });
+  const effective = new Map(projections.map((projection) => [
+    projection.entityId, projection.state as { tipoDivergencia?: string }
+  ]));
+  return new Set(checkpoints.filter((checkpoint) =>
+    (effective.get(checkpoint.id)?.tipoDivergencia ?? checkpoint.tipoDivergencia) === "CORRETO"
+  ).map((checkpoint) => checkpoint.malaId));
+}
+const readyAfterParaguay = (
+  bags: Array<{ id: string; status: MalaStatus }>,
+  cleared: Set<string>
+) => bags.filter((bag) => bag.status !== "CANCELLED")
+  .every((bag) => bag.status === "CHECKED_IN" && cleared.has(bag.id));
 async function withPlanningSuitcase<T>(
   lojaId: string,
   id: string,
@@ -66,19 +92,28 @@ export const createTraveler = (
       updatedAt: true
     }
   });
-export const trips = async (lojaId: string) =>
-  (await prisma.viagem.findMany({
+export const trips = async (lojaId: string) => {
+  const listed = await prisma.viagem.findMany({
     where: { lojaId },
     include: {
       viajante: { select: { id: true, nome: true, ativo: true } },
       malas: { include: { _count: { select: { alocacoes: true } } } }
     }
-  })).map((trip) => ({
+  });
+  const requiringParaguay = listed.filter((trip) =>
+    trip.status === "IN_TRANSIT" && trip.checkpointsObrigatorios.includes("PARAGUAI")
+  );
+  const cleared = await clearedParaguayBags(prisma, lojaId,
+    requiringParaguay.flatMap((trip) => trip.malas.map((bag) => bag.id)));
+  return listed.map((trip) => ({
     ...trip,
     allowedStatusTransitions: tripTransitions[trip.status].filter((next) =>
-      next !== "CANCELLED" || trip.malas.every((bag) => bag._count.alocacoes === 0)
+      (next !== "CANCELLED" || trip.malas.every((bag) => bag._count.alocacoes === 0)) &&
+      (next !== "ARRIVED_BRAZIL" || !trip.checkpointsObrigatorios.includes("PARAGUAI") ||
+        readyAfterParaguay(trip.malas, cleared))
     )
   }));
+};
 export async function createTrip(
   lojaId: string,
   d: {
@@ -125,6 +160,15 @@ export async function tripStatus(
     if (status === "CANCELLED" && await tx.alocacaoMala.count({
       where: { lojaId, mala: { viagemId: id } }
     })) throw new AppError(409, "conflict");
+    if (status === "ARRIVED_BRAZIL" && t.checkpointsObrigatorios.includes("PARAGUAI")) {
+      const bags = await tx.mala.findMany({
+        where: { lojaId, viagemId: id, status: { not: "CANCELLED" } },
+        select: { id: true, status: true }
+      });
+      const cleared = await clearedParaguayBags(tx, lojaId, bags.map((bag) => bag.id));
+      if (!readyAfterParaguay(bags, cleared))
+        throw new AppError(409, "checkpoint_required");
+    }
     const updated = await tx.viagem.updateMany({
       where: { id, lojaId, status: t.status },
       data: {

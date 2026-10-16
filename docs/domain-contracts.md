@@ -41,7 +41,7 @@ Timezone Miami: `America/New_York`. Exibição Brasil: `America/Sao_Paulo`. Dead
 
 Volumes logísticos registram pesoConteudoKg, taraKg (padrão 0,5 por caixa) e pesoTotalKg. Tara não é aplicada por unidade nem uma única vez por pedido com múltiplas caixas. Peso da mala soma produtos alocados e taras. Acima de 23 kg é proibido. Peso ausente permite planejamento, mas bloqueia fechamento. Mala, viagem, viajante e itens respeitam a mesma loja.
 
-Chegada ao Brasil exige viagem ARRIVED_BRAZIL, mala ARRIVED_BRAZIL ou RECEIVED e data real. Miami, alocação, mala fechada ou viagem em trânsito não geram estoque.
+Na rota com Paraguai obrigatório, a viagem só pode passar a `ARRIVED_BRAZIL` após checkpoint Paraguai efetivo `CORRETO` para cada mala ativa da viagem. Chegada ao Brasil exige viagem ARRIVED_BRAZIL, mala ARRIVED_BRAZIL ou RECEIVED e data real. Miami, alocação, mala fechada ou viagem em trânsito não geram estoque.
 
 ## Recebimento e estoque
 
@@ -49,7 +49,7 @@ Status de recebimento: `PENDING`, `IN_PROGRESS`, `PARTIALLY_COMPLETED`, `COMPLET
 
 Movimentos: `ENTRY`, `RESERVE`, `RELEASE_RESERVATION`, `EXIT`, `ADJUSTMENT_POSITIVE`, `ADJUSTMENT_NEGATIVE`, `RETURN_ENTRY`, `RETURN_EXIT`. Motivos: `PURCHASE_RECEIPT`, `SALE`, `MANUAL_CORRECTION`, `DAMAGE`, `LOSS`, `RETURN`, `RESERVATION`, `RESERVATION_RELEASE`.
 
-`quantidadeDisponivel = quantidadeFisica - quantidadeReservada`. Saldo físico e disponível nunca ficam negativos. Reserva não muda físico; baixa reduz físico; liberação reduz reservado. Confirmações de recebimento registram conferência, mas não geram estoque. Somente a entrada definitiva, após Brasil e conferência válida, gera `ENTRY`. Ajustes exigem motivo e observação. Operações usam transação Prisma. Movimentos confirmados não são editados nem apagados; correções usam eventos e movimentos compensatórios auditáveis.
+`quantidadeDisponivel = quantidadeFisica - quantidadeReservada`. Saldo físico e disponível nunca ficam negativos. Reserva não muda físico; baixa reduz físico; liberação reduz reservado. Alocações do mesmo item em volumes diferentes da mesma mala somam uma única quantidade esperada no recebimento. Confirmações de recebimento registram conferência, mas não geram estoque. Somente a entrada definitiva, após Brasil e conferência válida, gera `ENTRY`. Ajustes exigem motivo e observação. Operações usam transação Prisma. Movimentos confirmados não são editados nem apagados; correções usam eventos e movimentos compensatórios auditáveis.
 
 ## Financeiro
 
