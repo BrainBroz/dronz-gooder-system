@@ -17,7 +17,12 @@ beforeAll(async () => {
 });
 let fixture: Awaited<ReturnType<typeof createOperationalFixture>> | undefined;
 afterEach(async () => {
-  await fixture?.cleanup();
+  if (fixture) {
+    await prisma.auditLog.deleteMany({
+      where: { entityId: { in: [fixture.trip.id, fixture.bag.id] } }
+    });
+    await fixture.cleanup();
+  }
   fixture = undefined;
 });
 afterAll(() => prisma.$disconnect());
@@ -38,10 +43,57 @@ const h = (t: string, id: string) => ({
   "x-store-id": id
 });
 describe("international logistics", () => {
+  it("audita transições com ator e loja na mesma transação", async () => {
+    const { app, t, d } = await s();
+    fixture = await createOperationalFixture(prisma, d.id);
+    const { trip, bag, admin } = fixture;
+    expect((await request(app).patch(`/logistics/trips/${trip.id}/status`)
+      .set(h(t, d.id)).send({ status: "CLOSED_FOR_ALLOCATION" })).status).toBe(200);
+    expect((await request(app).patch(`/logistics/suitcases/${bag.id}/status`)
+      .set(h(t, d.id)).send({ status: "CLOSED" })).status).toBe(200);
+    const logs = await prisma.auditLog.findMany({
+      where: { entityId: { in: [trip.id, bag.id] } }
+    });
+    expect(logs.map((log) => log.action).sort())
+      .toEqual(["UPDATE_SUITCASE_STATUS", "UPDATE_TRIP_STATUS"]);
+    for (const log of logs) {
+      expect(log.usuarioId).toBe(admin.id);
+      expect(log.lojaId).toBe(d.id);
+      expect(log.origin).toBe("API_LOGISTICS");
+      expect(log.permissionCode).toBeNull();
+      expect(log.correlationId).toBeTruthy();
+      expect(log.beforeData).toMatchObject({ status: expect.any(String) });
+      expect(log.afterData).toMatchObject({ status: expect.any(String) });
+    }
+  });
+
+  it("faz rollback das transições se AuditLog falhar", async () => {
+    const { app, t, d } = await s();
+    fixture = await createOperationalFixture(prisma, d.id);
+    const { trip, bag } = fixture;
+    const { setAuditFailureForTests } = await import("../src/modules/operations/operations.persistence");
+    setAuditFailureForTests((input) => [trip.id, bag.id].includes(input.entityId));
+    try {
+      expect((await request(app).patch(`/logistics/trips/${trip.id}/status`)
+        .set(h(t, d.id)).send({ status: "CLOSED_FOR_ALLOCATION" })).status).toBe(500);
+      expect((await request(app).patch(`/logistics/suitcases/${bag.id}/status`)
+        .set(h(t, d.id)).send({ status: "CLOSED" })).status).toBe(500);
+    } finally {
+      setAuditFailureForTests();
+    }
+    expect((await prisma.viagem.findUniqueOrThrow({ where: { id: trip.id } })).status)
+      .toBe("OPEN_FOR_ALLOCATION");
+    expect((await prisma.mala.findUniqueOrThrow({ where: { id: bag.id } })).status)
+      .toBe("PLANNING");
+    expect(await prisma.auditLog.count({ where: { entityId: { in: [trip.id, bag.id] } } }))
+      .toBe(0);
+  });
+
   it("oferece transições da viagem e rejeita avanço concorrente do mesmo estado", async () => {
     const { app, t, d } = await s();
     fixture = await createOperationalFixture(prisma, d.id);
     const tripId = fixture.trip.id;
+    await prisma.alocacaoMala.delete({ where: { id: fixture.allocation.id } });
     const list = await request(app).get("/logistics/trips").set(h(t, d.id));
     expect(list.body.find((trip: { id: string }) => trip.id === tripId).allowedStatusTransitions)
       .toEqual(["CLOSED_FOR_ALLOCATION", "CANCELLED"]);
@@ -54,6 +106,54 @@ describe("international logistics", () => {
     expect(results.map((result) => result.status).sort()).toEqual([200, 409]);
     expect((await prisma.viagem.findUniqueOrThrow({ where: { id: tripId } })).status)
       .toBe("CLOSED_FOR_ALLOCATION");
+  });
+
+  it("bloqueia cancelamento até desalocar e não aceita alocação após cancelar", async () => {
+    const { app, t, d } = await s();
+    fixture = await createOperationalFixture(prisma, d.id);
+    const { trip, bag, volume, item, allocation } = fixture;
+    const before = await request(app).get("/logistics/trips").set(h(t, d.id));
+    expect(before.body.find((entry: { id: string }) => entry.id === trip.id).allowedStatusTransitions)
+      .toEqual(["CLOSED_FOR_ALLOCATION"]);
+    const cancel = () => request(app).patch(`/logistics/trips/${trip.id}/status`)
+      .set(h(t, d.id)).send({ status: "CANCELLED" });
+    expect((await cancel()).status).toBe(409);
+    expect((await prisma.viagem.findUniqueOrThrow({ where: { id: trip.id } })).status)
+      .toBe("OPEN_FOR_ALLOCATION");
+    expect((await request(app).delete(`/logistics/allocations/${allocation.id}`)
+      .set(h(t, d.id))).status).toBe(200);
+    const after = await request(app).get("/logistics/trips").set(h(t, d.id));
+    expect(after.body.find((entry: { id: string }) => entry.id === trip.id).allowedStatusTransitions)
+      .toEqual(["CLOSED_FOR_ALLOCATION", "CANCELLED"]);
+    expect((await cancel()).status).toBe(200);
+    const rejected = await request(app).post("/logistics/allocations").set(h(t, d.id))
+      .send({ pedidoCompraItemId: item.id, malaId: bag.id, volumeLogisticoId: volume.id, quantidade: 1 });
+    expect(rejected.status).toBe(409);
+    expect(await prisma.alocacaoMala.count({ where: { malaId: bag.id } })).toBe(0);
+  });
+
+  it("serializa cancelamento e nova alocação concorrentes", async () => {
+    const { app, t, d } = await s();
+    fixture = await createOperationalFixture(prisma, d.id);
+    const { trip, bag, volume, item, allocation } = fixture;
+    await prisma.alocacaoMala.delete({ where: { id: allocation.id } });
+    expect((await request(app).post("/logistics/miami-confirmations")
+      .set(h(t, d.id)).send({
+        pedidoCompraItemId: item.id, quantidadeRecebida: 1,
+        recebidoEm: new Date().toISOString()
+      })).status).toBe(200);
+    const results = await Promise.all([
+      request(app).patch(`/logistics/trips/${trip.id}/status`)
+        .set(h(t, d.id)).send({ status: "CANCELLED" }),
+      request(app).post("/logistics/allocations").set(h(t, d.id))
+        .send({ pedidoCompraItemId: item.id, malaId: bag.id, volumeLogisticoId: volume.id, quantidade: 1 })
+    ]);
+    expect(results.map((result) => result.status).sort()).toEqual([200, 409]);
+    const current = await prisma.viagem.findUniqueOrThrow({ where: { id: trip.id } });
+    const allocated = await prisma.alocacaoMala.count({ where: { malaId: bag.id } });
+    expect([current.status, allocated]).toEqual(
+      current.status === "CANCELLED" ? ["CANCELLED", 0] : ["OPEN_FOR_ALLOCATION", 1]
+    );
   });
 
   it("não deixa mala saltar etapas nem declarar chegada antes da viagem", async () => {

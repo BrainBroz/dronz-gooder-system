@@ -35,7 +35,7 @@ Timezone Miami: `America/New_York`. Exibição Brasil: `America/Sao_Paulo`. Dead
 
 `Viajante`: id, lojaId, nome, email?, telefone?, documento?, observacoes?, ativo, timestamps. Documento é sensível, não é identificador público nem conteúdo de logs.
 
-`Viagem`: id, lojaId, viajanteId, origem, destino, partidaEm, chegadaPrevistaEm, chegadaRealEm?, status, observacoes?, timestamps. Status: `PLANNED`, `OPEN_FOR_ALLOCATION`, `CLOSED_FOR_ALLOCATION`, `IN_TRANSIT`, `ARRIVED_BRAZIL`, `CANCELLED`. Transições: PLANNED→OPEN_FOR_ALLOCATION; OPEN_FOR_ALLOCATION→CLOSED_FOR_ALLOCATION/CANCELLED; CLOSED_FOR_ALLOCATION→IN_TRANSIT/CANCELLED; IN_TRANSIT→ARRIVED_BRAZIL. Estados finais: ARRIVED_BRAZIL e CANCELLED.
+`Viagem`: id, lojaId, viajanteId, origem, destino, partidaEm, chegadaPrevistaEm, chegadaRealEm?, status, observacoes?, timestamps. Status: `PLANNED`, `OPEN_FOR_ALLOCATION`, `CLOSED_FOR_ALLOCATION`, `IN_TRANSIT`, `ARRIVED_BRAZIL`, `CANCELLED`. Transições: PLANNED→OPEN_FOR_ALLOCATION; OPEN_FOR_ALLOCATION→CLOSED_FOR_ALLOCATION/CANCELLED; CLOSED_FOR_ALLOCATION→IN_TRANSIT/CANCELLED; IN_TRANSIT→ARRIVED_BRAZIL. Estados finais: ARRIVED_BRAZIL e CANCELLED. Viagem com itens alocados em qualquer mala não pode ser cancelada até que as alocações sejam removidas explicitamente.
 
 `Mala`: id, lojaId, viagemId, codigo, limitePesoKg (padrão 23), status, observacoes?, timestamps. Status: `PLANNING`, `CLOSED`, `CHECKED_IN`, `ARRIVED_BRAZIL`, `RECEIVED`, `CANCELLED`.
 

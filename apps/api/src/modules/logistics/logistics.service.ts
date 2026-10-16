@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { MalaStatus, Prisma, ViagemStatus } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { AppError } from "../../lib/app-error";
@@ -70,9 +71,14 @@ export const trips = async (lojaId: string) =>
     where: { lojaId },
     include: {
       viajante: { select: { id: true, nome: true, ativo: true } },
-      malas: true
+      malas: { include: { _count: { select: { alocacoes: true } } } }
     }
-  })).map((trip) => ({ ...trip, allowedStatusTransitions: tripTransitions[trip.status] }));
+  })).map((trip) => ({
+    ...trip,
+    allowedStatusTransitions: tripTransitions[trip.status].filter((next) =>
+      next !== "CANCELLED" || trip.malas.every((bag) => bag._count.alocacoes === 0)
+    )
+  }));
 export async function createTrip(
   lojaId: string,
   d: {
@@ -106,14 +112,19 @@ export async function createTrip(
 }
 export async function tripStatus(
   lojaId: string,
+  userId: string,
   id: string,
   status: ViagemStatus
 ) {
   return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Viagem" WHERE id = ${id} AND "lojaId" = ${lojaId} FOR UPDATE`;
     const t = await tx.viagem.findFirst({ where: { id, lojaId } });
     if (!t) throw new AppError(404, "not_found");
     if (!tripTransitions[t.status].includes(status))
       throw new AppError(409, "conflict");
+    if (status === "CANCELLED" && await tx.alocacaoMala.count({
+      where: { lojaId, mala: { viagemId: id } }
+    })) throw new AppError(409, "conflict");
     const updated = await tx.viagem.updateMany({
       where: { id, lojaId, status: t.status },
       data: {
@@ -122,7 +133,15 @@ export async function tripStatus(
       }
     });
     if (!updated.count) throw new AppError(409, "conflict");
-    return tx.viagem.findUniqueOrThrow({ where: { id } });
+    const result = await tx.viagem.findUniqueOrThrow({ where: { id } });
+    await audit(tx, {
+      usuarioId: userId, lojaId, permissionCode: null,
+      action: "UPDATE_TRIP_STATUS", entity: "Viagem", entityId: id,
+      correlationId: randomUUID(), origin: "API_LOGISTICS",
+      before: { status: t.status, chegadaRealEm: t.chegadaRealEm },
+      after: { status: result.status, chegadaRealEm: result.chegadaRealEm }
+    });
+    return result;
   });
 }
 export const suitcases = async (lojaId: string) =>
@@ -203,6 +222,15 @@ export async function allocate(
   }
 ) {
   return prisma.$transaction(async (tx) => {
+    const targetBag = await tx.mala.findFirst({
+      where: { id: d.malaId, lojaId }, select: { viagemId: true }
+    });
+    if (!targetBag) throw new AppError(404, "not_found");
+    await tx.$queryRaw`SELECT id FROM "Viagem" WHERE id = ${targetBag.viagemId} AND "lojaId" = ${lojaId} FOR UPDATE`;
+    const trip = await tx.viagem.findFirst({
+      where: { id: targetBag.viagemId, lojaId }
+    });
+    if (!trip || trip.status === "CANCELLED") throw new AppError(409, "conflict");
     await tx.$queryRaw`SELECT id FROM "PedidoCompraItem" WHERE id = ${d.pedidoCompraItemId} AND "lojaId" = ${lojaId} FOR UPDATE`;
     await tx.$queryRaw`SELECT id FROM "Mala" WHERE id = ${d.malaId} AND "lojaId" = ${lojaId} FOR UPDATE`;
     const item = await tx.pedidoCompraItem.findFirst({
@@ -240,6 +268,7 @@ export async function allocate(
 }
 export async function suitcaseStatus(
   lojaId: string,
+  userId: string,
   id: string,
   status: MalaStatus
 ) {
@@ -258,7 +287,14 @@ export async function suitcaseStatus(
       throw new AppError(409, "conflict");
     if (status === "CLOSED" && (await weight(lojaId, id, tx)).excesso)
       throw new AppError(409, "weight_limit");
-    return tx.mala.update({ where: { id }, data: { status } });
+    const result = await tx.mala.update({ where: { id }, data: { status } });
+    await audit(tx, {
+      usuarioId: userId, lojaId, permissionCode: null,
+      action: "UPDATE_SUITCASE_STATUS", entity: "Mala", entityId: id,
+      correlationId: randomUUID(), origin: "API_LOGISTICS",
+      before: { status: m.status }, after: { status: result.status }
+    });
+    return result;
   });
 }
 export async function confirmMiami(

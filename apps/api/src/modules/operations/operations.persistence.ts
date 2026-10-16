@@ -12,7 +12,7 @@ const json = (value: unknown): Prisma.InputJsonValue =>
 type AuditInput = {
   usuarioId: string;
   lojaId?: string;
-  permissionCode: string;
+  permissionCode: string | null;
   action: string;
   entity: string;
   entityId: string;
