@@ -455,24 +455,37 @@ export async function buyerCandidateEvidenceDetail(
 ): Promise<BuyerEvidenceDetailReadModel> {
   if (!hasPermission(identity, "BUYER_INGESTION_VISUALIZAR"))
     throw new AppError(403, "insufficient_permission");
-  const link = await prisma.buyerEvidenceLink.findUnique({
-    where: { candidateId_evidenceId: { candidateId, evidenceId } },
-    include: { evidence: true }
+  return prisma.$transaction(async (tx) => {
+    const link = await tx.buyerEvidenceLink.findUnique({
+      where: { candidateId_evidenceId: { candidateId, evidenceId } },
+      include: { evidence: true }
+    });
+    if (!link) throw new AppError(404, "not_found");
+    const result: BuyerEvidenceDetailReadModel = {
+      candidateId,
+      evidenceId,
+      version: link.evidence.version,
+      source: link.evidence.source,
+      type: link.type,
+      dataClassification: link.evidence.dataClassification,
+      payloadHash: link.evidence.payloadHash,
+      correlationId: link.evidence.correlationId,
+      sourceOccurredAt: link.evidence.sourceOccurredAt.toISOString(),
+      recordedAt: link.evidence.createdAt.toISOString(),
+      order: normalizedMarketplaceOrderSchema.parse(link.evidence.normalizedPayload)
+    };
+    await audit(tx, {
+      usuarioId: identity.user.id,
+      permissionCode: "BUYER_INGESTION_VISUALIZAR",
+      action: "BUYER_EVIDENCE_VIEWED",
+      entity: "BuyerEvidence",
+      entityId: evidenceId,
+      correlationId: randomUUID(),
+      after: { candidateId, evidenceVersion: link.evidence.version },
+      origin: ORIGIN
+    });
+    return result;
   });
-  if (!link) throw new AppError(404, "not_found");
-  return {
-    candidateId,
-    evidenceId,
-    version: link.evidence.version,
-    source: link.evidence.source,
-    type: link.type,
-    dataClassification: link.evidence.dataClassification,
-    payloadHash: link.evidence.payloadHash,
-    correlationId: link.evidence.correlationId,
-    sourceOccurredAt: link.evidence.sourceOccurredAt.toISOString(),
-    recordedAt: link.evidence.createdAt.toISOString(),
-    order: normalizedMarketplaceOrderSchema.parse(link.evidence.normalizedPayload)
-  };
 }
 
 async function merchantForApproval(

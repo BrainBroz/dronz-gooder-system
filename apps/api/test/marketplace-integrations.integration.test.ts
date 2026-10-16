@@ -528,6 +528,19 @@ describe("marketplace integration foundation", () => {
         .toEqual([original.items[0].quantity, changed.items[0].quantity]);
       expect(evidenceDetails.map((response) => response.body.order.currency))
         .toEqual([original.currency, changed.currency]);
+      const accessLogs = await prisma.auditLog.findMany({
+        where: {
+          action: "BUYER_EVIDENCE_VIEWED",
+          entityId: { in: candidate.evidenceLinks.map((link) => link.evidenceId) }
+        }
+      });
+      expect(accessLogs).toHaveLength(2);
+      for (const log of accessLogs) {
+        expect(log.usuarioId).toBe(fixture.userId);
+        expect(log.permissionCode).toBe("BUYER_INGESTION_VISUALIZAR");
+        expect(log.afterData).toMatchObject({ candidateId: candidate.id });
+        expect(JSON.stringify(log.afterData)).not.toContain(externalOrderId);
+      }
       const detail = await request(fixture.app)
         .get(`/integrations/marketplaces/buyer-candidates/${candidate.id}`)
         .set(bearer(fixture.token));
@@ -953,6 +966,17 @@ describe("marketplace integration foundation", () => {
       .get(`${path}${second.currentEvidenceId}`)
       .set(bearer(fixture.token));
     expect(foreign.status).toBe(404);
+    setAuditFailureForTests((entry) =>
+      entry.action === "BUYER_EVIDENCE_VIEWED" && entry.entityId === first.currentEvidenceId);
+    try {
+      const withoutAudit = await request(fixture.app)
+        .get(`${path}${first.currentEvidenceId}`)
+        .set(bearer(fixture.token));
+      expect(withoutAudit.status).toBe(500);
+      expect(withoutAudit.body).not.toHaveProperty("order");
+    } finally {
+      setAuditFailureForTests();
+    }
   });
 
   it("rejeita versão stale e chave reutilizada com payload diferente", async () => {
