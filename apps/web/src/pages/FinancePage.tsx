@@ -16,6 +16,7 @@ function FinanceContent() {
   const client = useQueryClient();
   const [draftOrderNumber, setDraftOrderNumber] = React.useState("");
   const [orderNumber, setOrderNumber] = React.useState("");
+  const [ordersPage, setOrdersPage] = React.useState(1);
   const exchangeForm = useForm<{
     moedaOrigem: string;
     moedaDestino: string;
@@ -68,10 +69,10 @@ function FinanceContent() {
       ).data
   });
   const orders = useQuery<PurchaseOrder[]>({
-    queryKey: [...purchasingQueryKeys.orders(store), "search", orderNumber],
+    queryKey: [...purchasingQueryKeys.orders(store), "search", orderNumber, ordersPage],
     enabled: !!store,
     queryFn: async () =>
-      (await api.get("/purchase-orders", { headers, params: { numero: orderNumber, limit: 20 } })).data.items
+      (await api.get("/purchase-orders", { headers, params: { numero: orderNumber, page: ordersPage, limit: 20 } })).data.items
   });
   const exchange = useMutation({
     mutationFn: (v: {
@@ -189,10 +190,24 @@ function FinanceContent() {
           if (nextOrderNumber === orderNumber) return;
           paymentForm.resetField("pedidoCompraId");
           costForm.resetField("pedidoCompraId");
+          setOrdersPage(1);
           setOrderNumber(nextOrderNumber);
         }}>
           <TextField label="Número do pedido" value={draftOrderNumber} onChange={(event) => setDraftOrderNumber(event.target.value)} />
           <Button type="submit">Buscar</Button>
+        </Stack>
+        <Stack direction="row" alignItems="center" gap={2}>
+          <Button disabled={ordersPage === 1 || orders.isFetching} onClick={() => {
+            paymentForm.resetField("pedidoCompraId");
+            costForm.resetField("pedidoCompraId");
+            setOrdersPage(ordersPage - 1);
+          }}>Anterior</Button>
+          <Typography>Página {ordersPage}</Typography>
+          <Button disabled={orders.isFetching || (orders.data?.length ?? 0) < 20} onClick={() => {
+            paymentForm.resetField("pedidoCompraId");
+            costForm.resetField("pedidoCompraId");
+            setOrdersPage(ordersPage + 1);
+          }}>Próxima</Button>
         </Stack>
         {orders.isError && <Typography>Falha ao buscar pedidos.</Typography>}
       </ContentCard>
@@ -204,7 +219,7 @@ function FinanceContent() {
           onSubmit={paymentForm.handleSubmit((v) => payment.mutate(v))}
         >
           <TextField
-            key={orderNumber}
+            key={`${orderNumber}:${ordersPage}`}
             select
             label="Pedido"
             defaultValue=""
@@ -287,7 +302,7 @@ function FinanceContent() {
           onSubmit={costForm.handleSubmit((v) => costs.mutate(v))}
         >
           <TextField
-            key={orderNumber}
+            key={`${orderNumber}:${ordersPage}`}
             select
             label="Pedido para custos"
             defaultValue=""
