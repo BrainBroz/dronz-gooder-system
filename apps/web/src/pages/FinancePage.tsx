@@ -185,9 +185,11 @@ function FinanceContent() {
       <ContentCard title="Buscar pedido operacional">
         <Stack component="form" direction={{ xs: "column", md: "row" }} gap={1} onSubmit={(event) => {
           event.preventDefault();
+          const nextOrderNumber = draftOrderNumber.trim();
+          if (nextOrderNumber === orderNumber) return;
           paymentForm.resetField("pedidoCompraId");
           costForm.resetField("pedidoCompraId");
-          setOrderNumber(draftOrderNumber.trim());
+          setOrderNumber(nextOrderNumber);
         }}>
           <TextField label="Número do pedido" value={draftOrderNumber} onChange={(event) => setDraftOrderNumber(event.target.value)} />
           <Button type="submit">Buscar</Button>

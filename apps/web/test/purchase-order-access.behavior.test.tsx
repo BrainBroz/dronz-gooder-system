@@ -50,6 +50,8 @@ describe("acesso a pedidos antigos", () => {
     await user.click(screen.getByRole("combobox", { name: "Pedido" }));
     await user.click(await screen.findByRole("option", { name: "OLD-ORDER" }));
     expect(screen.getByRole("combobox", { name: "Pedido" }).textContent).toContain("OLD-ORDER");
+    await user.click(screen.getByRole("button", { name: "Buscar" }));
+    expect(screen.getByRole("combobox", { name: "Pedido" }).textContent).toContain("OLD-ORDER");
     await user.clear(screen.getByLabelText("Número do pedido"));
     await user.type(screen.getByLabelText("Número do pedido"), "MISSING");
     await user.click(screen.getByRole("button", { name: "Buscar" }));
