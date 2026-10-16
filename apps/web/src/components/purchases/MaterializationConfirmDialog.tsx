@@ -22,22 +22,29 @@ export function MaterializationConfirmDialog({
   storeId,
   summary,
   purchaseVersion,
+  canMaterialize,
   open,
   onClose,
-  onSuccess
+  onSuccess,
+  onRefresh
 }: {
   purchaseId: string;
   storeId: string;
   summary: MaterializationSummary;
   purchaseVersion: number;
+  canMaterialize: boolean;
   open: boolean;
   onClose: () => void;
   onSuccess?: () => void;
+  onRefresh?: () => void;
 }) {
   const [error, setError] = React.useState<MutationError | null>(null);
   const { materialize } = useUnifiedPurchaseMutations();
+  const submitting = React.useRef(false);
 
   const handleMaterialize = async () => {
+    if (!canMaterialize || submitting.current || materialize.isSuccess) return;
+    submitting.current = true;
     setError(null);
 
     try {
@@ -50,12 +57,17 @@ export function MaterializationConfirmDialog({
 
       onSuccess?.();
     } catch (err) {
-      const { status, message } = readMutationError(err);
+      const { status, message, code } = readMutationError(err);
 
       if (status === 409) {
+        if (code === "concurrent_modification") onRefresh?.();
         setError({
           type: "conflict",
-          message: "Dados foram atualizados. Recarregando...",
+          message: code === "supplier_mapping_required"
+            ? "Vincule o merchant a um fornecedor da loja no detalhe da compra antes de materializar."
+            : code === "concurrent_modification"
+              ? "Dados foram atualizados. Confira o detalhe atualizado antes de tentar novamente."
+              : `Materialização bloqueada: ${code ?? message ?? "revise as pendências da compra"}.`,
           statusCode: 409
         });
       } else if (status === 401) {
@@ -77,14 +89,17 @@ export function MaterializationConfirmDialog({
           statusCode: status
         });
       }
+    } finally {
+      submitting.current = false;
     }
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+    <Dialog open={open} onClose={materialize.isPending ? undefined : onClose} maxWidth="sm" fullWidth>
       <DialogTitle>Materializar para {summary.storeName}</DialogTitle>
       <DialogContent>
         <Stack gap={2}>
+          {materialize.isSuccess && <Alert severity="success">Materialização concluída. Pedido operacional criado.</Alert>}
           {error && (
             <Alert severity="error" onClose={() => setError(null)}>
               {error.message}
@@ -119,12 +134,12 @@ export function MaterializationConfirmDialog({
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} disabled={materialize.isPending}>
-          Cancelar
+          {materialize.isSuccess ? "Fechar" : "Cancelar"}
         </Button>
         <Button
           onClick={handleMaterialize}
           variant="contained"
-          disabled={materialize.isPending}
+          disabled={!canMaterialize || materialize.isPending || materialize.isSuccess}
         >
           {materialize.isPending ? (
             <>

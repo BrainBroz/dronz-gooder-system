@@ -1,6 +1,19 @@
 # Prontidão para produção
 
-**Baseline técnica:** `8644188` — Batches 0–8 e auditorias independentes aprovados. Os Batches 8.1, 8.2, 9 e o Gate eBay Buyer são documentais. A fundação de integração permanece desabilitada para providers reais. O Gate eBay comprovou OAuth Production e Trading API `GetOrders` buyer, inclusive tracking e quota, mas o adapter, o pipeline comum e a política operacional de sincronização ainda não foram implementados. A Amazon Business Reporting API permanece `PENDENTE_DE_ONBOARDING_EXTERNO`. Esta classificação cobre código, migrations e testes; publicação continua condicionada à infraestrutura e aos segredos do ambiente.
+**Baseline integrada:** `caa148c` — merge da PR #4, incluindo a fila de compras e o drawer de compra manual/externa. A baseline histórica do Batch 8 é `8644188`. A fundação de integração permanece desabilitada para providers reais. O Gate eBay comprovou OAuth Production e Trading API `GetOrders` buyer, inclusive tracking e quota, mas o adapter, o pipeline comum e a política operacional de sincronização ainda não foram implementados. A Amazon Business Reporting API permanece `PENDENTE_DE_ONBOARDING_EXTERNO`. Publicação continua condicionada à infraestrutura, aos segredos do ambiente e aos riscos abaixo; testes verdes não equivalem à homologação operacional completa.
+
+## Revalidação local — 2026-10-16
+
+- Ambiente solicitado: somente local, sem publicação de homologação ou produção.
+- Node `22.23.1`, npm `10.9.8`; instalação reproduzível com `npm ci` em checkout isolado baseado em `caa148c`.
+- Prisma validate/generate, lint, typecheck e builds API/web passaram. A baseline tinha 133 testes API e 172 web. Após a correção, a execução global passou com 133 API + 180 web = 313 testes, sem ignorados; duração aproximada de 85 segundos para as duas suítes, além da preparação do banco. As oito regressões novas estão descritas em `COMPRAS_UNIFICADAS_FRONTEND_V1.md`. `git diff --check` passou.
+- A suíte de API aplicou/verificou as 24 migrations e executou seed no banco exclusivo `dronz_gooder_test`, não no banco usado pela interface.
+- Login local, criação contextual de merchant e criação de compra manual foram exercitados pela UI com dados fictícios. A compra foi criada, com produto mapeado e quantidade atribuída à Dronz.
+- **Mapping e materialização corrigidos no frontend:** o controle merchant–fornecedor foi recuperado da tela anterior e compartilhado com o drawer. `supplier_mapping_required` agora explica a pendência, enquanto `concurrent_modification` provoca refetch. O resumo é preservado após sucesso e o botão não permite novo envio. O contador passa a dizer “Itens totalmente atribuídos”, que corresponde ao campo retornado, sem prometer elegibilidade.
+- **Prova manual local:** a referência fictícia `DEMO-LOCAL-20261016-01` recebeu mapping para um fornecedor cadastrado pela UI e materializou duas unidades em um único pedido operacional `DRAFT`. A confirmação permaneceu aberta, sem crash. Não foi criado estoque.
+- **Fluxo até estoque ainda não homologado:** a tela de Pedidos Operacionais não possui controles de transição de status. O backend já oferece `PATCH /purchase-orders/:id/status`, mas Miami só lista pedidos `CONFIRMED`/`PARTIALLY_RECEIVED_MIAMI`. Não foi alterado status por SQL/API para contornar a lacuna de UI. A próxima entrega precisa expor o fluxo autorizado de envio/confirmação, preservando as transições do backend.
+- **Limitação dos dados de demonstração:** o fornecedor antigo do seed usa ID `seed-supplier-dronz`, rejeitado pelo `cuid()` de `supplierMappingSchema`. Um fornecedor novo criado pela UI funcionou. Compatibilidade desse fixture com o endpoint continua pendente; seed, schema e validação do backend não foram relaxados.
+- Nenhuma regra, migration, seed ou código de backend foi alterado. O frontend de teste em `localhost:5173` passou a ser servido pelo checkout `codex/baseline-local-readiness`, com seu lockfile atualizado. A API permanece na baseline integrada; não foi publicado nada.
 
 ## Segurança
 
@@ -39,7 +52,20 @@ Os stashes anteriores a esta baseline foram preservados apenas como histórico. 
 
 ## Riscos conhecidos
 
-O `npm audit` de 2026-07-13 reporta cinco vulnerabilidades na toolchain de desenvolvimento Vitest/Vite transitiva: três moderadas, uma alta e uma crítica. O audit de dependências de produção (`--omit=dev`) reporta zero vulnerabilidades. A correção completa indicada exige upgrade major do Vitest; por restrição de dependências, deve ser tratada em batch próprio com validação de compatibilidade. Não exponha servidores Vite/Vitest à rede pública.
+O resultado de zero alertas de produção registrado em 2026-07-13 é histórico e não representa o estado atual. Em 2026-10-16, `npm audit --omit=dev` reportou oito pacotes afetados na baseline. Atualizações dentro dos intervalos existentes no lockfile reduziram esse total para três, sem novos pacotes ou mudanças em `package.json`:
+
+| Pacote | Antes | Após atualização |
+| --- | --- | --- |
+| axios | 1.18.1 | 1.20.0 |
+| proxy-addr | 2.0.7 | 2.0.8 |
+| qs | 6.15.3 | 6.16.1 |
+| react-router / react-router-dom | 7.18.1 | 7.18.4 |
+
+Restam três alertas altos na cadeia `prisma → @prisma/config → deepmerge-ts`, não três falhas independentes. O npm recomenda Prisma 7.10.1; esse upgrade major não foi aplicado. A análise do caminho executável não identificou entrada recursiva controlada pelo cliente no uso da configuração Prisma, mas isso não elimina o alerta. A revisão completa, incluindo desenvolvimento, ainda registra 17 pacotes afetados (quatro moderados, 11 altos e dois críticos), incluindo Vitest/tinypool. Não declarar a cadeia de dependências livre de vulnerabilidades nem expor Vite/Vitest à rede pública. Atualização da toolchain exige validação própria.
+
+A triagem distingue alcance do advisory de exploração comprovada: a aplicação não configura `trust proxy` (condição relevante de [proxy-addr](https://github.com/advisories/GHSA-jqcg-44mw-7w3h)) e usa BrowserRouter, não RSC (condição do [advisory React Router](https://github.com/advisories/GHSA-qwww-vcr4-c8h2)). A atualização preventiva não altera essas configurações. A pendência Prisma está descrita no [advisory deepmerge-ts](https://github.com/advisories/GHSA-ggr8-5vv4-36mx).
+
+Prisma validate mantém o warning legado de relação `SetNull` com campo obrigatório. Não houve mudança de schema para silenciá-lo.
 
 O frontend usa lazy routes e chunks estáveis de vendor. O Batch 7 reduziu o maior chunk de 789,22 kB para 297,25 kB e eliminou o aviso do Vite para chunks acima de 500 kB, sem alterar comportamento ou dependências.
 

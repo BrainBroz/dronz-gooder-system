@@ -18,6 +18,7 @@ import { ItemMappingDrawer } from "./ItemMappingDrawer";
 import { ItemAssignmentDrawer } from "./ItemAssignmentDrawer";
 import { MaterializationConfirmDialog } from "./MaterializationConfirmDialog";
 import { ConflictResolutionDrawer } from "./ConflictResolutionDrawer";
+import { SupplierMappingForm } from "../unified-purchases/SupplierMappingForm";
 import type { MaterializationSummary } from "./types";
 import type { UnifiedPurchaseDetail } from "../../types/unified-purchases";
 
@@ -26,6 +27,8 @@ type DrawerState = {
   itemId?: string;
   conflictId?: string;
   storeId?: string;
+  summary?: MaterializationSummary;
+  purchaseId?: string;
 };
 
 function nextItemAction(item: { mapeamentos: unknown[]; atribuicoes: unknown[] }) {
@@ -217,6 +220,10 @@ export function PurchaseDetailDrawer({
             <Typography component="h3" variant="subtitle1" fontWeight={700}>
               Ações Operacionais
             </Typography>
+            {detail.merchantExternoId && detail.allowedActions.includes("SET_SUPPLIER_MAPPING") && (
+              <SupplierMappingForm key={`${detail.id}:${detail.merchantExternoId}`}
+                purchaseId={detail.id} merchantId={detail.merchantExternoId} />
+            )}
             {detail.allowedActions.includes("MATERIALIZE_STORE_ALLOCATION") ? (
               <Stack gap={1}>
                 {materializationByStore.map((summary) => (
@@ -227,7 +234,9 @@ export function PurchaseDetailDrawer({
                     onClick={() =>
                       setDrawerState({
                         type: "materialize",
-                        storeId: summary.storeId
+                        purchaseId: detail.id,
+                        storeId: summary.storeId,
+                        summary
                       })
                     }
                     fullWidth
@@ -351,17 +360,18 @@ export function PurchaseDetailDrawer({
             />
           )}
 
-          {drawerState.type === "materialize" && drawerState.storeId && (
+          {drawerState.type === "materialize" && drawerState.purchaseId === detail.id && drawerState.storeId && drawerState.summary && (
             <MaterializationConfirmDialog
+              key={`${detail.id}:${drawerState.storeId}`}
               purchaseId={purchaseId!}
               storeId={drawerState.storeId}
-              summary={
-                materializationByStore.find((s) => s.storeId === drawerState.storeId)!
-              }
+              summary={materializationByStore.find((s) => s.storeId === drawerState.storeId) ?? drawerState.summary}
+              canMaterialize={detail.allowedActions.includes("MATERIALIZE_STORE_ALLOCATION") && materializationByStore.some((s) => s.storeId === drawerState.storeId)}
               purchaseVersion={detail.version}
               open={true}
               onClose={closeDrawer}
               onSuccess={handleMutationSuccess}
+              onRefresh={handleMutationSuccess}
             />
           )}
 

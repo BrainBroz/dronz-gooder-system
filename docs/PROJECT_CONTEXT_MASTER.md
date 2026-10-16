@@ -15,6 +15,12 @@ Em caso de conflito, prevalecem, nesta ordem:
 
 ## 2. Objetivo do sistema
 
+### Estado verificado em 2026-10-16
+
+A baseline integrada atual é `caa148c` (merge da PR #4). Ela contém a fundação de marketplace e fila de compras da PR #2 (`9c6f087`), o gate local opcional da PR #3 (`d6a7714`) e o drawer de compra manual/externa da PR #4. Esses commits não implementam o pipeline Buyer Ingestion, adapters reais ou tracking automático. O contrato de reconstrução de UX está parcialmente implementado em Compras; não declarar toda a experiência operacional entregue.
+
+A execução local foi atualizada para essa baseline preservando arquivos não rastreados. No checkout de correção `codex/baseline-local-readiness`, o drawer recupera o mapping merchant–fornecedor e distingue pendência de concorrência. A prova manual pela UI criou e materializou uma compra fictícia de duas unidades, sem criar estoque. A jornada para no pedido `DRAFT`: a página atual não expõe envio/confirmação, embora o backend tenha a transição. A jornada manual até estoque permanece não homologada. Resultados, alertas de dependências e limites de publicação estão em [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md). Não há publicação externa nesta etapa.
+
 O sistema coordena a operação internacional de Dronz e Gooder: compras, atribuição por loja, pedidos operacionais, logística, recebimento, entrada definitiva, estoque, custos e análise. A automação deve preservar revisão humana, rastreabilidade, auditoria e isolamento rigoroso por loja.
 
 As lojas iniciais são `dronz` e `gooder`. Uma remessa física pode transportar itens das duas lojas, mas cada item conserva seu próprio `lojaId`; patrimônio, estoque, autorização e operação não são misturados.
@@ -162,7 +168,7 @@ Não implementado:
 | 9 — redirecionamento operacional | `afff787`           | prioriza eBay Buyer e Amazon por e-mail sem iniciar adapters              | APROVADO PARA GATE EBAY |
 | Gate eBay Buyer                  | este commit         | comprova OAuth Production, `GetOrders` buyer, tracking, paginação e quota | PRONTO PARA ADAPTER APÓS BATCH 10 |
 
-As auditorias independentes dos Batches 7 e 8 foram aprovadas. A baseline funcional mais recente é `8644188`; os Batches 8.1, 8.2 e 9 alteram somente documentação e não modificam comportamento. O Batch 8.2 supera apenas a conclusão incorreta de que não havia fonte oficial para compras buyer do eBay. O Batch 9 supera o roadmap provider-first e define primeiro o contrato multicanal comum.
+As auditorias independentes dos Batches 7 e 8 foram aprovadas. A baseline funcional histórica do Batch 8 é `8644188`; a integração atual é `caa148c`, descrita na seção 2. Os Batches 8.1, 8.2 e 9 alteram somente documentação e não modificam comportamento. O Batch 8.2 supera apenas a conclusão incorreta de que não havia fonte oficial para compras buyer do eBay. O Batch 9 supera o roadmap provider-first e define primeiro o contrato multicanal comum.
 
 ## 10. Convenções de implementação
 

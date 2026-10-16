@@ -10,14 +10,15 @@ export type MutationError = {
 
 /** Formato mínimo de erro HTTP usado nos catch das mutações (axios-like). */
 export type MutationHttpError = {
-  response?: { status?: number; data?: { message?: string } };
+  response?: { status?: number; data?: { message?: string; error?: string } };
   message?: string;
 };
 
-export function readMutationError(err: unknown): { status?: number; message?: string } {
+export function readMutationError(err: unknown): { status?: number; message?: string; code?: string } {
   const e = err as MutationHttpError;
   return {
     status: e?.response?.status,
+    code: e?.response?.data?.error,
     message: e?.response?.data?.message ?? e?.message
   };
 }

@@ -65,3 +65,15 @@ Os testes comportamentais em jsdom cobrem:
 ## Fora de escopo
 
 Ingestão automática por e-mail/documentos/CSV, APIs externas, listagem de contas/merchants, matching automático, Dashboard, Relatórios, UI-3C e qualquer mutação de estoque, logística ou financeiro. Tracking futuro será consumido por domínio independente da fonte e não será inferido pelo frontend de Compras Unificadas.
+
+## Correção verificada na jornada local — 2026-10-16
+
+O drawer novo havia omitido o mapping merchant–fornecedor existente no detalhe anterior. `SupplierMappingForm` agora é compartilhado pelas duas apresentações, visível somente com `SET_SUPPLIER_MAPPING` no read model. Reutiliza `GET /suppliers` com query key/header da loja e a mutação existente de mapping, que invalida overview, listas e detalhe. Trocar a loja limpa a seleção anterior; falha no catálogo impede envio e permite retry.
+
+O diálogo de materialização lê o código `error` efetivamente enviado pela API. `supplier_mapping_required` orienta a configurar o vínculo; somente `concurrent_modification` dispara atualização do detalhe. O resumo confirmado continua disponível após o refetch retirar os itens pendentes, sem acessar um resumo inexistente. Sucesso mantém a confirmação aberta e desabilita novo envio; uma requisição pendente não aceita fechamento por ESC ou submissão duplicada.
+
+`fullyAssigned` é exibido como “Itens totalmente atribuídos”, não como prova de que a compra está pronta para materializar. A elegibilidade continua revalidada pelo backend; não se inferem mappings de fornecedor ausentes do read model.
+
+Oito regressões comportamentais foram acrescentadas em `purchase-mutations.behavior.test.tsx`: request de mapping e invalidações; troca de loja; ausência de ação sem autorização do read model; erro/retry do catálogo; erro de fornecedor; conflito de versão com refetch; sucesso com resumo removido do detalhe; bloqueio de ESC e duplo envio durante mutação. Os testes existentes foram preservados.
+
+A prova manual materializou duas unidades fictícias pela UI. Não prova a jornada até estoque: o pedido resultante fica `DRAFT` e a página de Pedidos Operacionais ainda não oferece envio/confirmação. Essa lacuna e a incompatibilidade do ID legado do fornecedor de seed estão registradas em [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md).

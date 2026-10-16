@@ -39,7 +39,7 @@ export function PurchaseHomeHeader({
     },
     {
       key: "readyToMaterialize",
-      label: "Prontas p/ materializar",
+      label: "Itens totalmente atribuídos",
       value: overview.fullyAssigned,
       actionLabel: "Materializar"
     }
