@@ -546,7 +546,19 @@ export async function setAssignment(
       const current = item.atribuicoes.find(
         (assignment) => assignment.lojaId === lojaId
       );
-      if (current && input.quantidade < current.quantidadeMaterializada)
+      const completedStore = await tx.materializacaoCompra.findUnique({
+        where: {
+          compraImportadaId_lojaId: {
+            compraImportadaId: item.compraImportadaId,
+            lojaId
+          }
+        },
+        select: { id: true }
+      });
+      if (
+        (completedStore || current?.quantidadeMaterializada) &&
+        (!current || input.quantidade !== current.quantidade)
+      )
         throw new AppError(409, "already_materialized");
       const other = item.atribuicoes
         .filter((assignment) => assignment.lojaId !== lojaId)
@@ -955,6 +967,28 @@ function actionsFor(identity: AuthIdentity): UnifiedPurchaseAction[] {
   return actions;
 }
 
+function hasPendingMaterialization(purchase: {
+  materializacoes: { lojaId: string }[];
+  itens: {
+    atribuicoes: {
+      lojaId: string;
+      quantidade: number;
+      quantidadeMaterializada: number;
+    }[];
+  }[];
+}) {
+  const completedStores = new Set(
+    purchase.materializacoes.map((entry) => entry.lojaId)
+  );
+  return purchase.itens.some((item) =>
+    item.atribuicoes.some(
+      (assignment) =>
+        !completedStores.has(assignment.lojaId) &&
+        assignment.quantidade > assignment.quantidadeMaterializada
+    )
+  );
+}
+
 export async function listPurchases(
   identity: AuthIdentity,
   input: ListInput
@@ -993,7 +1027,8 @@ export async function listPurchases(
         contaExterna: true,
         merchantExterno: true,
         conflitos: { where: { status: "ABERTO" } },
-        itens: { include: { atribuicoes: true } }
+        itens: { include: { atribuicoes: true } },
+        materializacoes: { select: { lojaId: true } }
       }
     })
   ]);
@@ -1054,11 +1089,12 @@ export async function listPurchases(
           pending: quantities.total - quantities.assigned
         },
         conflictCount: purchase.conflitos.length,
-        allowedActions: blockedReasons.length
-          ? actionsFor(identity).filter(
-              (action) => action !== "MATERIALIZE_STORE_ALLOCATION"
-            )
-          : actionsFor(identity),
+        allowedActions:
+          blockedReasons.length || !hasPendingMaterialization(purchase)
+            ? actionsFor(identity).filter(
+                (action) => action !== "MATERIALIZE_STORE_ALLOCATION"
+              )
+            : actionsFor(identity),
         blockedReasons
       };
     })
@@ -1076,11 +1112,16 @@ export async function overview(identity: AuthIdentity) {
           quantidadeReembolsada: true,
           mapeamentos: { where: { status: "ATIVO" }, select: { id: true } },
           atribuicoes: {
-            select: { quantidade: true, quantidadeMaterializada: true }
+            select: {
+              lojaId: true,
+              quantidade: true,
+              quantidadeMaterializada: true
+            }
           }
         }
       },
-      conflitos: { where: { status: "ABERTO" }, select: { id: true } }
+      conflitos: { where: { status: "ABERTO" }, select: { id: true } },
+      materializacoes: { select: { lojaId: true } }
     }
   });
   const result = {
@@ -1089,6 +1130,7 @@ export async function overview(identity: AuthIdentity) {
     unassigned: 0,
     partiallyAssigned: 0,
     fullyAssigned: 0,
+    awaitingMaterialization: 0,
     materialized: 0,
     pending: 0,
     conflicts: 0,
@@ -1115,6 +1157,13 @@ export async function overview(identity: AuthIdentity) {
       else if (assigned < eligible) result.partiallyAssigned += 1;
       else result.fullyAssigned += 1;
       if (materialized > 0) result.materialized += 1;
+      if (
+        hasPendingMaterialization({
+          materializacoes: purchase.materializacoes,
+          itens: [item]
+        })
+      )
+        result.awaitingMaterialization += 1;
       result.pending += Math.max(0, eligible - assigned);
       if (!item.mapeamentos.length) result.mappingsPending += 1;
     }
@@ -1151,7 +1200,24 @@ export async function purchaseDetail(identity: AuthIdentity, id: string) {
   const history = await historyForPurchase(id);
   return {
     ...purchase,
-    allowedActions: actionsFor(identity),
+    allowedActions: actionsFor(identity).filter((action) => {
+      if (action === "MATERIALIZE_STORE_ALLOCATION")
+        return (
+          !purchase.conflitos.some(
+            (conflict) => conflict.status === "ABERTO"
+          ) && hasPendingMaterialization(purchase)
+        );
+      if (action === "SET_SUPPLIER_MAPPING")
+        return purchase.itens.some(
+          (item) =>
+            itemEligibility(item) >
+            item.atribuicoes.reduce(
+              (sum, assignment) => sum + assignment.quantidadeMaterializada,
+              0
+            )
+        );
+      return true;
+    }),
     blockedReasons: purchase.conflitos.some(
       (conflict) => conflict.status === "ABERTO"
     )

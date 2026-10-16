@@ -15,6 +15,7 @@ const overview = {
   unassigned: 0,
   partiallyAssigned: 1,
   fullyAssigned: 0,
+  awaitingMaterialization: 0,
   materialized: 0,
   pending: 3,
   conflicts: 1,
@@ -107,7 +108,7 @@ const detail: UnifiedPurchaseDetail = {
   blockedReasons: [{ code: "EXTERNAL_ORDER_CONFLICT", message: "Compra possui conflito aberto." }]
 };
 
-function installApi(overrides: { list?: object; overview?: object } = {}) {
+function installApi(overrides: { list?: object; overview?: object; detail?: UnifiedPurchaseDetail } = {}) {
   vi.spyOn(api, "get").mockImplementation(async (url) => {
     if (url === "/imported-purchases/overview") return { data: overrides.overview ?? overview };
     if (url === "/imported-purchases")
@@ -120,6 +121,8 @@ function installApi(overrides: { list?: object; overview?: object } = {}) {
         }
       };
     if (url === "/imported-purchases/purchase-1") return { data: detail };
+    if (url === "/imported-purchases/purchase-2" && overrides.detail)
+      return { data: overrides.detail };
     throw new Error(`GET inesperado: ${url}`);
   });
 }
@@ -179,6 +182,36 @@ describe("UX-1B — Fila de Compras (estrutural, somente leitura)", () => {
     await userEvent.click(screen.getByRole("tab", { name: "Conflitos" }));
     expect(screen.getByText("ORDER-CONFLICT")).toBeTruthy();
     expect(screen.queryByText("ORDER-OLD")).toBeNull();
+  });
+
+  it("não apresenta compra já materializada como trabalho pendente", async () => {
+    installApi({
+      overview: {
+        ...overview,
+        fullyAssigned: 1,
+        awaitingMaterialization: 0,
+        materialized: 1
+      },
+      list: { items: [oldNoBlockItem], page: 1, limit: 20, total: 1 },
+      detail: {
+        ...detail,
+        id: "purchase-2",
+        numeroPedido: "ORDER-OLD",
+        merchantExternoId: "merchant-2",
+        allowedActions: []
+      }
+    });
+    renderWithProviders(<PurchaseQueuePage />, { permissions });
+    await screen.findByText("ORDER-OLD");
+    expect(screen.getByText("Atribuídos não materializados").parentElement?.textContent)
+      .toContain("0");
+    await userEvent.click(screen.getByRole("tab", { name: "Aguardando materialização" }));
+    expect(screen.queryByText("ORDER-OLD")).toBeNull();
+    await userEvent.click(screen.getByRole("tab", { name: "Todas" }));
+    await userEvent.click(screen.getByRole("button", { name: "Abrir" }));
+    await screen.findByText("Itens (1)");
+    expect(screen.queryByText(/O merchant precisa estar vinculado/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /Materializar / })).toBeNull();
   });
 
   it("exibe vazio, erro e retry sem fabricar dados", async () => {

@@ -74,7 +74,7 @@ O diálogo de materialização lê o código `error` efetivamente enviado pela A
 
 Se a atribuição mudar com o diálogo aberto, o resumo acompanha o detalhe atualizado antes do envio. Após sucesso, os números são os do pedido operacional retornado, não a cópia antiga da abertura ou do formulário.
 
-`fullyAssigned` é exibido como “Itens totalmente atribuídos”, não como prova de que a compra está pronta para materializar. A elegibilidade continua revalidada pelo backend; não se inferem mappings de fornecedor ausentes do read model.
+`fullyAssigned` permanece no painel Economia como “Itens totalmente atribuídos”. O card de atenção usa `awaitingMaterialization` como “Atribuídos não materializados” e convida a revisar, sem prometer elegibilidade; a API remove a ação de materializar quando não há atribuição pendente. A elegibilidade completa continua revalidada na mutação, sem inferir mappings de fornecedor ausentes do read model.
 
 Oito regressões comportamentais foram acrescentadas em `purchase-mutations.behavior.test.tsx`: request de mapping e invalidações; troca de loja; ausência de ação sem autorização do read model; erro/retry do catálogo; erro de fornecedor; conflito de versão com refetch; sucesso com resumo removido do detalhe; bloqueio de ESC e duplo envio durante mutação. Os testes existentes foram preservados.
 

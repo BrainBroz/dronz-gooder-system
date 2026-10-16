@@ -361,6 +361,17 @@ describe("unified purchases backend", () => {
   it("materializa Dronz e Gooder independentemente, preserva origem e retry não duplica", async () => {
     const f = await createStaging();
     const item = f.purchase.itens[0] as { id: string; version: number };
+    const secondItem = await prisma.compraImportadaItem.create({
+      data: {
+        compraImportadaId: f.purchase.id,
+        quantidade: 1,
+        identityFingerprint: `batch5-extra-${f.purchase.id}`,
+        identityStrategy: "FINGERPRINT",
+        titulo: "Segundo item externo",
+        precoUnitario: 10,
+        moeda: "USD"
+      }
+    });
     await request(f.app)
       .put(`/imported-purchases/items/${item.id}/assignments/${f.dronz.id}`)
       .set(bearer(f.token))
@@ -403,6 +414,26 @@ describe("unified purchases backend", () => {
       .set(bearer(f.token))
       .set("idempotency-key", "batch5-mat-d")
       .send({ expectedPurchaseVersion: current.version });
+    const afterFirstStore = await request(f.app)
+      .get("/imported-purchases/overview")
+      .set(bearer(f.token));
+    expect(afterFirstStore.status).toBe(200);
+    expect(afterFirstStore.body.awaitingMaterialization).toBe(1);
+    const currentItem = await prisma.compraImportadaItem.findUniqueOrThrow({
+      where: { id: item.id }
+    });
+    const invalidIncrease = await request(f.app)
+      .put(`/imported-purchases/items/${item.id}/assignments/${f.dronz.id}`)
+      .set(bearer(f.token))
+      .send({ quantidade: 3, expectedVersion: currentItem.version });
+    expect(invalidIncrease.status).toBe(409);
+    expect(invalidIncrease.body.error).toBe("already_materialized");
+    const invalidNewItem = await request(f.app)
+      .put(`/imported-purchases/items/${secondItem.id}/assignments/${f.dronz.id}`)
+      .set(bearer(f.token))
+      .send({ quantidade: 1, expectedVersion: secondItem.version });
+    expect(invalidNewItem.status).toBe(409);
+    expect(invalidNewItem.body.error).toBe("already_materialized");
     const existingWithNewKey = await request(f.app)
       .post(`/imported-purchases/${f.purchase.id}/materializations/${f.dronz.id}`)
       .set(bearer(f.token))
@@ -432,6 +463,22 @@ describe("unified purchases backend", () => {
     expect(g.status).toBe(201);
     expect(d.body.pedidoCompra.itens[0].quantidade).toBe(2);
     expect(g.body.pedidoCompra.itens[0].quantidade).toBe(2);
+    const completedOverview = await request(f.app)
+      .get("/imported-purchases/overview")
+      .set(bearer(f.token));
+    expect(completedOverview.status).toBe(200);
+    expect(completedOverview.body.awaitingMaterialization).toBe(0);
+    const completedList = await request(f.app)
+      .get("/imported-purchases")
+      .set(bearer(f.token));
+    const listedPurchase = completedList.body.items.find(
+      (entry: { id: string }) => entry.id === f.purchase.id
+    );
+    expect(listedPurchase.allowedActions).not.toContain("MATERIALIZE_STORE_ALLOCATION");
+    const completedDetail = await request(f.app)
+      .get(`/imported-purchases/${f.purchase.id}`)
+      .set(bearer(f.token));
+    expect(completedDetail.body.allowedActions).not.toContain("MATERIALIZE_STORE_ALLOCATION");
     expect(
       await prisma.materializacaoCompra.count({
         where: { compraImportadaId: f.purchase.id }
@@ -442,6 +489,43 @@ describe("unified purchases backend", () => {
         where: { produtoId: { in: [f.productD.id, f.productG.id] } }
       })
     ).toBe(0);
+  });
+
+  it("remove ações de materialização e mapping contextual após concluir toda a compra", async () => {
+    const f = await createStaging();
+    const item = f.purchase.itens[0] as { id: string; version: number };
+    const assignment = await request(f.app)
+      .put(`/imported-purchases/items/${item.id}/assignments/${f.dronz.id}`)
+      .set(bearer(f.token))
+      .send({ quantidade: 5, expectedVersion: item.version });
+    expect(assignment.status).toBe(200);
+    const productMapping = await request(f.app)
+      .put(`/imported-purchases/items/${item.id}/product-mappings/${f.dronz.id}`)
+      .set(bearer(f.token))
+      .send({ produtoId: f.productD.id });
+    expect(productMapping.status).toBe(200);
+    const supplierMapping = await request(f.app)
+      .put(`/imported-purchases/merchants/${f.merchant.id}/supplier-mappings/${f.dronz.id}`)
+      .set(bearer(f.token))
+      .send({ fornecedorId: f.supplierD.id });
+    expect(supplierMapping.status).toBe(200);
+    const current = await prisma.compraImportada.findUniqueOrThrow({
+      where: { id: f.purchase.id }
+    });
+    const materialization = await request(f.app)
+      .post(`/imported-purchases/${f.purchase.id}/materializations/${f.dronz.id}`)
+      .set(bearer(f.token))
+      .send({ expectedPurchaseVersion: current.version });
+    expect(materialization.status).toBe(201);
+    const [overview, detail] = await Promise.all([
+      request(f.app).get("/imported-purchases/overview").set(bearer(f.token)),
+      request(f.app).get(`/imported-purchases/${f.purchase.id}`).set(bearer(f.token))
+    ]);
+    expect(overview.body.fullyAssigned).toBe(1);
+    expect(overview.body.materialized).toBe(1);
+    expect(overview.body.awaitingMaterialization).toBe(0);
+    expect(detail.body.allowedActions).not.toContain("MATERIALIZE_STORE_ALLOCATION");
+    expect(detail.body.allowedActions).not.toContain("SET_SUPPLIER_MAPPING");
   });
 
   it("impede produto e materialização cross-store", async () => {

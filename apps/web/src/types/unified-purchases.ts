@@ -25,6 +25,7 @@ export type UnifiedPurchaseOverview = {
   unassigned: number;
   partiallyAssigned: number;
   fullyAssigned: number;
+  awaitingMaterialization: number;
   materialized: number;
   pending: number;
   conflicts: number;

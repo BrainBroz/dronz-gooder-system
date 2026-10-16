@@ -39,9 +39,9 @@ export function PurchaseHomeHeader({
     },
     {
       key: "readyToMaterialize",
-      label: "Itens totalmente atribuídos",
-      value: overview.fullyAssigned,
-      actionLabel: "Materializar"
+      label: "Atribuídos não materializados",
+      value: overview.awaitingMaterialization,
+      actionLabel: "Revisar"
     }
   ];
 
