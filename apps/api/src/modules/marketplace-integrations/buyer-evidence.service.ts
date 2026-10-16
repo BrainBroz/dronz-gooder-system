@@ -49,6 +49,11 @@ export async function recordMarketplaceEvidence(input: {
   const externalEvidenceId = normalizeId(input.order.externalOrderId);
   const sourceIdentity = `${input.provider}:${input.accountId}`;
   const source = input.provider === "EBAY" ? "EBAY_BUYER_API" : "AMAZON_BUSINESS_API";
+  const candidateIdentity = {
+    provider: input.provider,
+    contaExternaId: input.accountId,
+    externalOrderIdNormalized: externalEvidenceId
+  };
 
   try {
     return await prisma.$transaction(
@@ -64,7 +69,13 @@ export async function recordMarketplaceEvidence(input: {
           },
           select: { id: true, version: true }
         });
-        if (replay) return { ...replay, created: false };
+        if (replay) {
+          const candidate = await tx.buyerPurchaseCandidate.findUniqueOrThrow({
+            where: { provider_contaExternaId_externalOrderIdNormalized: candidateIdentity },
+            select: { id: true }
+          });
+          return { ...replay, candidateId: candidate.id, created: false };
+        }
 
         const latest = await tx.buyerEvidence.findFirst({
           where: { sourceIdentity, externalEvidenceId },
@@ -119,6 +130,30 @@ export async function recordMarketplaceEvidence(input: {
           },
           select: { id: true, version: true }
         });
+        const prior = await tx.buyerPurchaseCandidate.findUnique({
+          where: { provider_contaExternaId_externalOrderIdNormalized: candidateIdentity }
+        });
+        const candidate = prior
+          ? await tx.buyerPurchaseCandidate.update({
+              where: { id: prior.id },
+              data: {
+                currentEvidenceId: evidence.id,
+                status: prior.compraImportadaId
+                  ? "COM_DIVERGENCIA"
+                  : input.order.cancelled ? "CANCELADA" : "AGUARDANDO_APROVACAO",
+                version: { increment: 1 }
+              }
+            })
+          : await tx.buyerPurchaseCandidate.create({
+              data: {
+                ...candidateIdentity,
+                currentEvidenceId: evidence.id,
+                status: input.order.cancelled ? "CANCELADA" : "AGUARDANDO_APROVACAO"
+              }
+            });
+        await tx.buyerEvidenceLink.create({
+          data: { candidateId: candidate.id, evidenceId: evidence.id }
+        });
         await audit(tx, {
           usuarioId: input.actorId,
           permissionCode: "INTEGRACAO_MARKETPLACE_SINCRONIZAR",
@@ -136,7 +171,19 @@ export async function recordMarketplaceEvidence(input: {
           },
           origin: "API_MARKETPLACE_INTEGRATIONS"
         });
-        return { ...evidence, created: true };
+        await audit(tx, {
+          usuarioId: input.actorId,
+          permissionCode: "INTEGRACAO_MARKETPLACE_SINCRONIZAR",
+          action: prior ? "BUYER_CANDIDATE_UPDATED" : "BUYER_CANDIDATE_DETECTED",
+          entity: "BuyerPurchaseCandidate",
+          entityId: candidate.id,
+          correlationId: input.correlationId,
+          idempotencyKey: input.idempotencyKey,
+          before: prior ? { status: prior.status, version: prior.version } : undefined,
+          after: { status: candidate.status, version: candidate.version, evidenceId: evidence.id },
+          origin: "API_MARKETPLACE_INTEGRATIONS"
+        });
+        return { ...evidence, candidateId: candidate.id, created: true };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
     );

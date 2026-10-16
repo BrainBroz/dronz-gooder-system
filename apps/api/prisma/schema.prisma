@@ -78,6 +78,7 @@ model Usuario {
   materializacoesCompra          MaterializacaoCompra[]
   conflitosCompraResolvidos      ConflitoCompra[]
   conexoesMarketplaceCriadas     ConexaoMarketplace[]
+  decisoesBuyerCompra            BuyerApprovalDecision[]
 }
 
 model Perfil {
@@ -408,6 +409,26 @@ enum ClassificacaoEvidenciaCompra {
   DADOS_COMERCIAIS_NORMALIZADOS
 }
 
+enum EstadoCandidatoCompra {
+  AGUARDANDO_APROVACAO
+  COM_DIVERGENCIA
+  APROVADA
+  REJEITADA
+  CANCELADA
+}
+
+enum DecisaoCandidatoCompra {
+  APROVAR
+  REJEITAR
+}
+
+enum TipoVinculoEvidenciaCompra {
+  MATCHED
+  SUPPORTING
+  CONFLICTING
+  REJECTED
+}
+
 enum StatusMerchantExterno {
   ATIVO
   INATIVO
@@ -480,10 +501,11 @@ model ContaExterna {
   createdAt               DateTime                @default(now())
   updatedAt               DateTime                @updatedAt
 
-  criadoPor Usuario              @relation(fields: [criadoPorId], references: [id], onDelete: Restrict)
-  compras   CompraImportada[]
-  conexoes  ConexaoMarketplace[]
+  criadoPor        Usuario                  @relation(fields: [criadoPorId], references: [id], onDelete: Restrict)
+  compras          CompraImportada[]
+  conexoes         ConexaoMarketplace[]
   evidenciasCompra BuyerEvidence[]
+  candidatosCompra BuyerPurchaseCandidate[]
 
   @@unique([plataforma, identificadorExterno])
   @@index([status, plataforma])
@@ -517,7 +539,7 @@ model ConexaoMarketplace {
   criadoPor         Usuario                 @relation(fields: [criadoPorId], references: [id], onDelete: Restrict)
   execucoes         ExecucaoSincronizacao[]
   comprasImportadas CompraImportada[]
-  evidenciasCompra   BuyerEvidence[]
+  evidenciasCompra  BuyerEvidence[]
 
   @@unique([provider, identificadorExterno])
   @@unique([contaExternaId])
@@ -557,7 +579,7 @@ model ExecucaoSincronizacao {
 }
 
 model BuyerEvidence {
-  id                        String                         @id @default(cuid())
+  id                        String                       @id @default(cuid())
   source                    FonteEvidenciaCompra
   sourceIdentity            String
   externalEvidenceId        String
@@ -568,13 +590,16 @@ model BuyerEvidence {
   payloadHash               String
   version                   Int
   normalizedPayload         Json
-  dataClassification        ClassificacaoEvidenciaCompra   @default(DADOS_COMERCIAIS_NORMALIZADOS)
+  dataClassification        ClassificacaoEvidenciaCompra @default(DADOS_COMERCIAIS_NORMALIZADOS)
   correlationId             String
-  createdAt                 DateTime                       @default(now())
+  createdAt                 DateTime                     @default(now())
 
-  contaExterna       ContaExterna?       @relation(fields: [contaExternaId], references: [id], onDelete: Restrict)
-  conexaoMarketplace ConexaoMarketplace? @relation(fields: [conexaoMarketplaceId], references: [id], onDelete: Restrict)
-  items              BuyerEvidenceItem[]
+  contaExterna         ContaExterna?            @relation(fields: [contaExternaId], references: [id], onDelete: Restrict)
+  conexaoMarketplace   ConexaoMarketplace?      @relation(fields: [conexaoMarketplaceId], references: [id], onDelete: Restrict)
+  items                BuyerEvidenceItem[]
+  candidateLinks       BuyerEvidenceLink[]
+  currentForCandidates BuyerPurchaseCandidate[] @relation("CurrentBuyerEvidence")
+  approvalDecisions    BuyerApprovalDecision[]
 
   @@unique([sourceIdentity, externalEvidenceId, payloadHash])
   @@unique([sourceIdentity, externalEvidenceId, version])
@@ -583,8 +608,64 @@ model BuyerEvidence {
   @@index([conexaoMarketplaceId, createdAt])
 }
 
+model BuyerPurchaseCandidate {
+  id                        String                @id @default(cuid())
+  provider                  MarketplaceProvider
+  contaExternaId            String
+  externalOrderIdNormalized String
+  currentEvidenceId         String
+  status                    EstadoCandidatoCompra @default(AGUARDANDO_APROVACAO)
+  version                   Int                   @default(1)
+  compraImportadaId         String?               @unique
+  createdAt                 DateTime              @default(now())
+  updatedAt                 DateTime              @updatedAt
+
+  contaExterna    ContaExterna            @relation(fields: [contaExternaId], references: [id], onDelete: Restrict)
+  currentEvidence BuyerEvidence           @relation("CurrentBuyerEvidence", fields: [currentEvidenceId], references: [id], onDelete: Restrict)
+  compraImportada CompraImportada?        @relation(fields: [compraImportadaId], references: [id], onDelete: Restrict)
+  evidenceLinks   BuyerEvidenceLink[]
+  decisions       BuyerApprovalDecision[]
+
+  @@unique([provider, contaExternaId, externalOrderIdNormalized], map: "BuyerPurchaseCandidate_provider_contaExternaId_order_key")
+  @@index([status, updatedAt])
+}
+
+model BuyerEvidenceLink {
+  id          String                     @id @default(cuid())
+  candidateId String
+  evidenceId  String
+  type        TipoVinculoEvidenciaCompra @default(MATCHED)
+  createdAt   DateTime                   @default(now())
+
+  candidate BuyerPurchaseCandidate @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+  evidence  BuyerEvidence          @relation(fields: [evidenceId], references: [id], onDelete: Restrict)
+
+  @@unique([candidateId, evidenceId])
+  @@index([evidenceId])
+}
+
+model BuyerApprovalDecision {
+  id               String                 @id @default(cuid())
+  candidateId      String
+  evidenceId       String
+  candidateVersion Int
+  decision         DecisaoCandidatoCompra
+  actorId          String
+  reason           String?
+  correlationId    String
+  idempotencyKey   String
+  createdAt        DateTime               @default(now())
+
+  candidate BuyerPurchaseCandidate @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+  evidence  BuyerEvidence          @relation(fields: [evidenceId], references: [id], onDelete: Restrict)
+  actor     Usuario                @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@unique([candidateId, candidateVersion])
+  @@index([actorId, createdAt])
+}
+
 model BuyerEvidenceItem {
-  id                    String        @id @default(cuid())
+  id                    String  @id @default(cuid())
   evidenceId            String
   externalLineId        String?
   identityFingerprint   String
@@ -597,7 +678,7 @@ model BuyerEvidenceItem {
   quantity              Int
   cancelledQuantity     Int
   refundedQuantity      Int
-  unitPrice             Decimal       @db.Decimal(14, 2)
+  unitPrice             Decimal @db.Decimal(14, 2)
   currency              String
 
   evidence BuyerEvidence @relation(fields: [evidenceId], references: [id], onDelete: Restrict)
@@ -656,16 +737,17 @@ model CompraImportada {
   ultimaSincronizacaoEm      DateTime?
   conexaoMarketplaceId       String?
 
-  loja                Loja?                  @relation(fields: [lojaId], references: [id], onDelete: SetNull)
-  itens               CompraImportadaItem[]  @relation("compraImportadaItens")
+  loja                Loja?                   @relation(fields: [lojaId], references: [id], onDelete: SetNull)
+  itens               CompraImportadaItem[]   @relation("compraImportadaItens")
   atribuicoes         AtribuicaoItem[]
   pedidosOperacionais PedidoCompra[]
-  contaExterna        ContaExterna?          @relation(fields: [contaExternaId], references: [id], onDelete: Restrict)
-  merchantExterno     MerchantExterno?       @relation(fields: [merchantExternoId], references: [id], onDelete: Restrict)
+  contaExterna        ContaExterna?           @relation(fields: [contaExternaId], references: [id], onDelete: Restrict)
+  merchantExterno     MerchantExterno?        @relation(fields: [merchantExternoId], references: [id], onDelete: Restrict)
   materializacoes     MaterializacaoCompra[]
   conflitos           ConflitoCompra[]
-  conexaoMarketplace  ConexaoMarketplace?    @relation(fields: [conexaoMarketplaceId], references: [id], onDelete: Restrict)
+  conexaoMarketplace  ConexaoMarketplace?     @relation(fields: [conexaoMarketplaceId], references: [id], onDelete: Restrict)
   enviosExternos      EnvioExterno[]
+  buyerCandidate      BuyerPurchaseCandidate?
 
   @@unique([fornecedorId, numeroPedido])
   @@unique([plataforma, contaExternaId, externalOrderIdNormalizado])

@@ -34,7 +34,7 @@ import type {
 
 type AccountInput = z.infer<typeof accountSchema>;
 type MerchantInput = z.infer<typeof merchantSchema>;
-type ImportInput = z.infer<typeof importPurchaseSchema>;
+export type ImportInput = z.infer<typeof importPurchaseSchema>;
 type ManualInput = z.infer<typeof manualPurchaseSchema>;
 type AssignmentInput = z.infer<typeof assignmentSchema>;
 type ProductMappingInput = z.infer<typeof productMappingSchema>;
@@ -217,11 +217,11 @@ export async function upsertMerchant(
   });
 }
 
-async function createImportedPurchase(
+export async function createImportedPurchase(
   tx: Prisma.TransactionClient,
-  input: ImportInput,
-  payloadHash: string
+  input: ImportInput
 ) {
+  const payloadHash = hash(input);
   const account = await tx.contaExterna.findUnique({
     where: { id: input.contaExternaId }
   });
@@ -371,7 +371,7 @@ export async function importPurchase(
     key,
     payload: input,
     execute: async (tx, correlationId) => {
-      const result = await createImportedPurchase(tx, input, payloadHash);
+      const result = await createImportedPurchase(tx, input);
       await audit(tx, {
         usuarioId: identity.user.id,
         permissionCode: "COMPRAS_IMPORTADAS_IMPORTAR",

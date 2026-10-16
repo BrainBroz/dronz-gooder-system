@@ -215,16 +215,16 @@ Falhas por pedido são contabilizadas como resultado parcial. Falha de página/p
 
 ## 8. Compras Unificadas
 
-A sincronização reutiliza `upsertMerchant` e `importPurchase`; não existe um segundo domínio de pedidos. Uma importação:
+A fundação do Batch 8 sincronizava diretamente com `importPurchase`. A correção incremental do Batch 10 separa esse caminho: sincronização registra somente `BuyerEvidence` versionada e atualiza o candidato global. A compra em staging (`CompraImportada`) só é criada após decisão humana `APROVAR`, na mesma transação que grava decisão e auditoria. Essa aprovação reutiliza a criação de compra do domínio existente; não há segundo domínio de pedidos. O fluxo:
 
-- cria staging sem loja;
-- preserva conexão e conta de origem;
+- preserva evidência, conexão e conta de origem antes da aprovação;
+- cria staging sem loja somente após aprovação;
 - não apaga mappings ou atribuições;
 - não materializa pedido operacional;
 - não cria estoque, checkpoint, venda ou pagamento;
-- trata alteração incompatível segundo os conflitos existentes de Compras Unificadas.
+- mantém nova versão de evidência posterior à aprovação em `COM_DIVERGENCIA`, sem reescrever a compra já aprovada.
 
-Cancelamentos/reembolsos já chegam no contrato inicial. Evoluções externas incompatíveis com o snapshot atual permanecem conflito explícito até o adapter real definir a política específica e testada de atualização.
+Cancelamentos/reembolsos já chegam no contrato inicial. A aprovação de candidato cancelado é bloqueada. Conciliação multicanal, classificação humana do legado e resolução operacional de divergências ainda não estão concluídas; nenhum adapter real deve ser habilitado nesta etapa.
 
 ## 9. RBAC, read models e auditoria
 
@@ -237,6 +237,8 @@ Permissões comuns:
 - `INTEGRACAO_MARKETPLACE_REPROCESSAR`.
 
 O seed as concede ao `SUPER_ADMIN`; perfis locais não as recebem. Conexões dedicadas também exigem vínculo do usuário com a loja. O read model devolve `allowedActions` e `blockedReasons`; toda mutação revalida RBAC e escopo.
+
+O início do Batch 10 acrescenta `BUYER_INGESTION_VISUALIZAR`, `BUYER_INGESTION_APROVAR` e `BUYER_INGESTION_REJEITAR`, concedidas inicialmente apenas ao `SUPER_ADMIN`. O candidato tem lista e detalhe globais paginados; a decisão exige versão atual, chave idempotente e permissão funcional. A atribuição a outros perfis depende de decisão operacional do Product Owner.
 
 São auditados criação de conexão, início/fim/falha de sincronização e tentativa incompatível de atribuição. Falha crítica de auditoria participa da transação da mutação correspondente. Valores secretos e erros brutos ficam fora do AuditLog.
 

@@ -13,8 +13,8 @@ import {
   idempotentMutation
 } from "../operations/operations.persistence";
 import {
-  importPurchase,
-  upsertMerchant
+  createImportedPurchase,
+  type ImportInput
 } from "../unified-purchases/unified-purchases.service";
 import {
   marketplaceAdapterRegistry,
@@ -23,14 +23,18 @@ import {
 import { recordMarketplaceEvidence } from "./buyer-evidence.service";
 import {
   capabilitySchema,
-  marketplaceOrderPageSchema
+  marketplaceOrderPageSchema,
+  normalizedMarketplaceOrderSchema
 } from "./marketplace-integrations.schemas";
 import type {
+  buyerCandidateListSchema,
+  buyerDecisionSchema,
   createConnectionSchema,
   listConnectionsSchema,
   syncConnectionSchema
 } from "./marketplace-integrations.schemas";
 import type {
+  BuyerCandidateReadModel,
   MarketplaceAdapterRegistry,
   MarketplaceBlockedReason,
   MarketplaceConnectionReadModel,
@@ -41,6 +45,8 @@ import type {
 type CreateConnectionInput = z.infer<typeof createConnectionSchema>;
 type ListConnectionsInput = z.infer<typeof listConnectionsSchema>;
 type SyncConnectionInput = z.infer<typeof syncConnectionSchema>;
+type BuyerCandidateListInput = z.infer<typeof buyerCandidateListSchema>;
+type BuyerDecisionInput = z.infer<typeof buyerDecisionSchema>;
 
 const GLOBAL_SCOPE = "GLOBAL_MARKETPLACE_INTEGRATIONS";
 const ORIGIN = "API_MARKETPLACE_INTEGRATIONS";
@@ -327,12 +333,318 @@ export async function syncHistory(
   return { items, page, limit, total };
 }
 
+type CandidateWithCurrent = Prisma.BuyerPurchaseCandidateGetPayload<{
+  include: { contaExterna: true; currentEvidence: true };
+}>;
+
+function candidateReadModel(
+  identity: AuthIdentity,
+  candidate: CandidateWithCurrent
+): BuyerCandidateReadModel {
+  const blockedReasons: BuyerCandidateReadModel["blockedReasons"] = [];
+  if (candidate.compraImportadaId && candidate.status !== "APROVADA")
+    blockedReasons.push(candidate.status === "COM_DIVERGENCIA"
+      ? "NEW_EVIDENCE_REQUIRES_RECONCILIATION"
+      : "LEGACY_PURCHASE_REQUIRES_REVIEW");
+  else if (candidate.status === "CANCELADA") blockedReasons.push("CANCELLED");
+  else if (candidate.status !== "AGUARDANDO_APROVACAO")
+    blockedReasons.push("ALREADY_DECIDED");
+  const allowedActions: BuyerCandidateReadModel["allowedActions"] = ["VIEW"];
+  if (candidate.status === "AGUARDANDO_APROVACAO" &&
+      !candidate.compraImportadaId) {
+    if (hasPermission(identity, "BUYER_INGESTION_APROVAR"))
+      allowedActions.push("APPROVE");
+    if (hasPermission(identity, "BUYER_INGESTION_REJEITAR"))
+      allowedActions.push("REJECT");
+  }
+  return {
+    id: candidate.id,
+    provider: candidate.provider,
+    account: {
+      id: candidate.contaExterna.id,
+      name: candidate.contaExterna.nomeExibicao
+    },
+    externalOrderId: candidate.externalOrderIdNormalized,
+    status: candidate.status,
+    version: candidate.version,
+    purchaseId: candidate.compraImportadaId,
+    order: normalizedMarketplaceOrderSchema.parse(candidate.currentEvidence.normalizedPayload),
+    currentEvidence: {
+      id: candidate.currentEvidence.id,
+      version: candidate.currentEvidence.version,
+      source: candidate.currentEvidence.source,
+      recordedAt: candidate.currentEvidence.createdAt.toISOString()
+    },
+    allowedActions,
+    blockedReasons
+  };
+}
+
+export async function listBuyerCandidates(
+  identity: AuthIdentity,
+  input: BuyerCandidateListInput
+) {
+  if (!hasPermission(identity, "BUYER_INGESTION_VISUALIZAR"))
+    throw new AppError(403, "insufficient_permission");
+  const where = { status: input.status };
+  const [items, total] = await prisma.$transaction([
+    prisma.buyerPurchaseCandidate.findMany({
+      where,
+      include: { contaExterna: true, currentEvidence: true },
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      skip: (input.page - 1) * input.limit,
+      take: input.limit
+    }),
+    prisma.buyerPurchaseCandidate.count({ where })
+  ]);
+  return {
+    items: items.map((candidate) => candidateReadModel(identity, candidate)),
+    page: input.page,
+    limit: input.limit,
+    total
+  };
+}
+
+export async function buyerCandidateDetail(identity: AuthIdentity, id: string) {
+  if (!hasPermission(identity, "BUYER_INGESTION_VISUALIZAR"))
+    throw new AppError(403, "insufficient_permission");
+  const candidate = await prisma.buyerPurchaseCandidate.findUnique({
+    where: { id },
+    include: {
+      contaExterna: true,
+      currentEvidence: true,
+      evidenceLinks: {
+        include: { evidence: true },
+        orderBy: { evidence: { createdAt: "desc" } }
+      },
+      decisions: { orderBy: { createdAt: "desc" } }
+    }
+  });
+  if (!candidate) throw new AppError(404, "not_found");
+  return {
+    ...candidateReadModel(identity, candidate),
+    evidenceVersions: candidate.evidenceLinks.map((link) => ({
+      id: link.evidence.id,
+      version: link.evidence.version,
+      source: link.evidence.source,
+      type: link.type,
+      payloadHash: link.evidence.payloadHash,
+      sourceOccurredAt: link.evidence.sourceOccurredAt.toISOString(),
+      recordedAt: link.evidence.createdAt.toISOString()
+    })),
+    decisions: candidate.decisions.map((decision) => ({
+      id: decision.id,
+      decision: decision.decision,
+      candidateVersion: decision.candidateVersion,
+      evidenceId: decision.evidenceId,
+      actorId: decision.actorId,
+      reason: decision.reason,
+      decidedAt: decision.createdAt.toISOString()
+    }))
+  };
+}
+
+async function merchantForApproval(
+  tx: Prisma.TransactionClient,
+  provider: MarketplaceProvider,
+  merchant: NormalizedMarketplaceOrder["merchant"],
+  actorId: string,
+  correlationId: string,
+  key: string
+) {
+  if (!merchant) return undefined;
+  const externalId = merchant.externalMerchantId
+    ? normalizeExternalId(merchant.externalMerchantId)
+    : null;
+  const normalizedName = merchant.name.trim().replace(/\s+/g, " ")
+    .toLocaleLowerCase("pt-BR");
+  const existing = externalId
+    ? await tx.merchantExterno.findUnique({
+        where: {
+          plataforma_externalMerchantId: {
+            plataforma: provider,
+            externalMerchantId: externalId
+          }
+        }
+      })
+    : await tx.merchantExterno.findFirst({
+        where: {
+          plataforma: provider,
+          externalMerchantId: null,
+          nomeNormalizado: normalizedName
+        }
+      });
+  if (existing) return existing.id;
+  const created = await tx.merchantExterno.create({
+    data: {
+      plataforma: provider,
+      externalMerchantId: externalId,
+      nomeOriginal: merchant.name,
+      nomeNormalizado: normalizedName,
+      metadata: { source: "BUYER_APPROVAL" }
+    }
+  });
+  await audit(tx, {
+    usuarioId: actorId,
+    permissionCode: "BUYER_INGESTION_APROVAR",
+    action: "BUYER_MERCHANT_CREATED",
+    entity: "MerchantExterno",
+    entityId: created.id,
+    correlationId,
+    idempotencyKey: key,
+    after: { provider, externalId, name: merchant.name },
+    origin: ORIGIN
+  });
+  return created.id;
+}
+
+export async function decideBuyerCandidate(
+  identity: AuthIdentity,
+  id: string,
+  input: BuyerDecisionInput,
+  key: string
+) {
+  const permission = input.decision === "APROVAR"
+    ? "BUYER_INGESTION_APROVAR" : "BUYER_INGESTION_REJEITAR";
+  if (!hasPermission(identity, permission))
+    throw new AppError(403, "insufficient_permission");
+  return idempotentMutation({
+    lojaId: GLOBAL_SCOPE,
+    operation: "DECIDE_BUYER_CANDIDATE",
+    entityId: id,
+    key,
+    payload: input,
+    execute: async (tx, correlationId) => {
+      const target = await tx.buyerPurchaseCandidate.findUnique({
+        where: { id }, select: { contaExternaId: true }
+      });
+      if (!target) throw new AppError(404, "not_found");
+      await tx.$queryRaw`SELECT id FROM "ContaExterna" WHERE id = ${target.contaExternaId} FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM "BuyerPurchaseCandidate" WHERE id = ${id} FOR UPDATE`;
+      const candidate = await tx.buyerPurchaseCandidate.findUniqueOrThrow({
+        where: { id },
+        include: { contaExterna: true, currentEvidence: true }
+      });
+      if (candidate.version !== input.expectedVersion)
+        throw new AppError(409, "concurrent_modification");
+      if (candidate.compraImportadaId)
+        throw new AppError(409, "legacy_purchase_requires_review");
+      if (candidate.status !== "AGUARDANDO_APROVACAO")
+        throw new AppError(409, "buyer_candidate_not_reviewable");
+
+      let purchaseId: string | null = null;
+      if (input.decision === "APROVAR") {
+        const order = normalizedMarketplaceOrderSchema.parse(
+          candidate.currentEvidence.normalizedPayload
+        );
+        if (order.cancelled) throw new AppError(409, "buyer_candidate_cancelled");
+        const legacy = await tx.compraImportada.findUnique({
+          where: {
+            plataforma_contaExternaId_externalOrderIdNormalizado: {
+              plataforma: candidate.provider,
+              contaExternaId: candidate.contaExternaId,
+              externalOrderIdNormalizado: candidate.externalOrderIdNormalized
+            }
+          },
+          select: { id: true }
+        });
+        if (legacy) throw new AppError(409, "legacy_purchase_requires_review");
+        const merchantId = await merchantForApproval(
+          tx, candidate.provider, order.merchant, identity.user.id,
+          correlationId, key
+        );
+        const importInput: ImportInput = {
+          plataforma: candidate.provider,
+          contaExternaId: candidate.contaExternaId,
+          merchantExternoId: merchantId,
+          externalOrderId: order.externalOrderId,
+          referencia: order.reference,
+          dataPedido: new Date(order.orderedAt),
+          moeda: order.currency.toUpperCase(),
+          statusExterno: order.externalStatus,
+          totalExterno: order.total,
+          origem: "API",
+          itens: order.items.map((item) => ({
+            externalLineId: item.externalLineId,
+            titulo: item.title,
+            variacao: item.variation,
+            sku: item.sku,
+            asin: item.asin,
+            identificadorOferta: item.offerId,
+            quantidade: item.quantity,
+            quantidadeCancelada: item.cancelledQuantity,
+            quantidadeReembolsada: item.refundedQuantity,
+            precoUnitario: item.unitPrice,
+            moeda: item.currency.toUpperCase(),
+            merchantExternoId: merchantId,
+            snapshot: { sourceUpdatedAt: order.updatedAt }
+          })),
+          snapshot: {
+            sourceUpdatedAt: order.updatedAt,
+            cancelled: order.cancelled,
+            approvedEvidenceId: candidate.currentEvidenceId
+          }
+        };
+        const imported = await createImportedPurchase(tx, importInput);
+        if (imported.replay)
+          throw new AppError(409, "legacy_purchase_requires_review");
+        purchaseId = imported.purchase.id;
+        await tx.compraImportada.update({
+          where: { id: purchaseId },
+          data: { conexaoMarketplaceId: candidate.currentEvidence.conexaoMarketplaceId }
+        });
+        await persistShippingData(tx, purchaseId, order);
+      }
+      const decided = await tx.buyerPurchaseCandidate.update({
+        where: { id },
+        data: {
+          status: input.decision === "APROVAR" ? "APROVADA" : "REJEITADA",
+          compraImportadaId: purchaseId,
+          version: { increment: 1 }
+        },
+        include: { contaExterna: true, currentEvidence: true }
+      });
+      const decision = await tx.buyerApprovalDecision.create({
+        data: {
+          candidateId: id,
+          evidenceId: candidate.currentEvidenceId,
+          candidateVersion: candidate.version,
+          decision: input.decision,
+          actorId: identity.user.id,
+          reason: input.reason,
+          correlationId,
+          idempotencyKey: key
+        }
+      });
+      await audit(tx, {
+        usuarioId: identity.user.id,
+        permissionCode: permission,
+        action: input.decision === "APROVAR"
+          ? "BUYER_CANDIDATE_APPROVED" : "BUYER_CANDIDATE_REJECTED",
+        entity: "BuyerPurchaseCandidate",
+        entityId: id,
+        correlationId,
+        idempotencyKey: key,
+        reason: input.reason,
+        before: { status: candidate.status, version: candidate.version },
+        after: {
+          status: decided.status,
+          version: decided.version,
+          evidenceId: candidate.currentEvidenceId,
+          purchaseId
+        },
+        origin: ORIGIN
+      });
+      return { ...candidateReadModel(identity, decided), decisionId: decision.id };
+    }
+  });
+}
+
 async function persistShippingData(
+  tx: Prisma.TransactionClient,
   purchaseId: string,
   order: NormalizedMarketplaceOrder
 ) {
-  await prisma.$transaction(
-    async (tx) => {
       for (const shipment of order.shipments) {
         const savedShipment = await tx.envioExterno.upsert({
           where: {
@@ -455,20 +767,16 @@ async function persistShippingData(
           }
         }
       }
-    },
-    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
-  );
 }
 
 async function importNormalizedOrder(
   identity: AuthIdentity,
   connection: ConnectionWithRelations,
   order: NormalizedMarketplaceOrder,
-  executionId: string,
   correlationId: string,
   idempotencyKey: string
 ) {
-  await recordMarketplaceEvidence({
+  const evidence = await recordMarketplaceEvidence({
     provider: connection.provider,
     accountId: connection.contaExternaId,
     connectionId: connection.id,
@@ -477,72 +785,7 @@ async function importNormalizedOrder(
     correlationId,
     idempotencyKey
   });
-  const merchant = order.merchant
-    ? await upsertMerchant(
-        identity,
-        {
-          plataforma: connection.provider,
-          externalMerchantId: order.merchant.externalMerchantId,
-          nome: order.merchant.name,
-          metadata: { source: "MARKETPLACE_SYNC" }
-        },
-        `merchant:${executionId}:${order.merchant.externalMerchantId ?? order.merchant.name}`
-      )
-    : null;
-  const normalizedOrderId = normalizeExternalId(order.externalOrderId);
-  const existing = await prisma.compraImportada.findUnique({
-    where: {
-      plataforma_contaExternaId_externalOrderIdNormalizado: {
-        plataforma: connection.provider,
-        contaExternaId: connection.contaExternaId,
-        externalOrderIdNormalizado: normalizedOrderId
-      }
-    }
-  });
-  const purchase = await importPurchase(
-    identity,
-    {
-      plataforma: connection.provider,
-      contaExternaId: connection.contaExternaId,
-      merchantExternoId: merchant?.id,
-      externalOrderId: order.externalOrderId,
-      referencia: order.reference,
-      dataPedido: new Date(order.orderedAt),
-      moeda: order.currency.toUpperCase(),
-      statusExterno: order.externalStatus,
-      totalExterno: order.total,
-      origem: "API",
-      itens: order.items.map((item) => ({
-        externalLineId: item.externalLineId,
-        titulo: item.title,
-        variacao: item.variation,
-        sku: item.sku,
-        asin: item.asin,
-        identificadorOferta: item.offerId,
-        quantidade: item.quantity,
-        quantidadeCancelada: item.cancelledQuantity,
-        quantidadeReembolsada: item.refundedQuantity,
-        precoUnitario: item.unitPrice,
-        moeda: item.currency.toUpperCase(),
-        merchantExternoId: merchant?.id,
-        snapshot: { sourceUpdatedAt: order.updatedAt }
-      })),
-      snapshot: {
-        sourceUpdatedAt: order.updatedAt,
-        cancelled: order.cancelled
-      }
-    },
-    `order:${executionId}:${normalizedOrderId}:${order.updatedAt}`
-  );
-  await prisma.compraImportada.update({
-    where: { id: purchase.id },
-    data: {
-      conexaoMarketplaceId: connection.id,
-      ultimaSincronizacaoEm: new Date()
-    }
-  });
-  await persistShippingData(purchase.id, order);
-  return { created: !existing };
+  return { created: evidence.created };
 }
 
 function sanitizeProviderError(error: unknown) {
@@ -602,7 +845,6 @@ async function executePages(
           identity,
           connection,
           order,
-          executionId,
           correlationId,
           idempotencyKey
         );

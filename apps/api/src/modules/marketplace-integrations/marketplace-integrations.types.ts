@@ -93,6 +93,24 @@ export type MarketplaceOrderPage = {
   nextCursor?: string;
 };
 
+export type BuyerCandidateReadModel = {
+  id: string;
+  provider: "AMAZON" | "EBAY";
+  account: { id: string; name: string };
+  externalOrderId: string;
+  status: "AGUARDANDO_APROVACAO" | "COM_DIVERGENCIA" | "APROVADA" |
+    "REJEITADA" | "CANCELADA";
+  version: number;
+  purchaseId: string | null;
+  order: NormalizedMarketplaceOrder;
+  currentEvidence: { id: string; version: number; source: string; recordedAt: string };
+  allowedActions: Array<"VIEW" | "APPROVE" | "REJECT">;
+  blockedReasons: Array<
+    "LEGACY_PURCHASE_REQUIRES_REVIEW" | "CANCELLED" |
+    "ALREADY_DECIDED" | "NEW_EVIDENCE_REQUIRES_RECONCILIATION"
+  >;
+};
+
 export type MarketplaceConnectionContext = {
   id: string;
   provider: "AMAZON" | "EBAY";
