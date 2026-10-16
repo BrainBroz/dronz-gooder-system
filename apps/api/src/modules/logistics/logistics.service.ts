@@ -9,6 +9,19 @@ const tripTransitions: Record<string, string[]> = {
   CLOSED_FOR_ALLOCATION: ["IN_TRANSIT", "CANCELLED"],
   IN_TRANSIT: ["ARRIVED_BRAZIL"]
 };
+async function withPlanningSuitcase<T>(
+  lojaId: string,
+  id: string,
+  action: (tx: Prisma.TransactionClient) => Promise<T>
+) {
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Mala" WHERE id = ${id} AND "lojaId" = ${lojaId} FOR UPDATE`;
+    const bag = await tx.mala.findFirst({ where: { id, lojaId } });
+    if (!bag) throw new AppError(404, "not_found");
+    if (bag.status !== "PLANNING") throw new AppError(409, "conflict");
+    return action(tx);
+  });
+}
 export const travelers = (lojaId: string) =>
   prisma.viajante.findMany({
     where: { lojaId },
@@ -126,16 +139,16 @@ export async function addVolume(
   d: { codigo: string; taraKg: number }
 ) {
   if (d.taraKg < 0) throw new AppError(400, "bad_request");
-  if (
-    !(await prisma.mala.findFirst({
-      where: { id: malaId, lojaId, status: "PLANNING" }
-    }))
-  )
-    throw new AppError(409, "conflict");
-  return prisma.volumeLogistico.create({ data: { ...d, malaId, lojaId } });
+  return withPlanningSuitcase(lojaId, malaId, (tx) =>
+    tx.volumeLogistico.create({ data: { ...d, malaId, lojaId } })
+  );
 }
-export async function weight(lojaId: string, malaId: string) {
-  const m = await prisma.mala.findFirst({
+export async function weight(
+  lojaId: string,
+  malaId: string,
+  db: Prisma.TransactionClient = prisma
+) {
+  const m = await db.mala.findFirst({
     where: { id: malaId, lojaId },
     include: { volumes: true, alocacoes: true }
   });
@@ -163,41 +176,55 @@ export async function allocate(
     quantidade: number;
   }
 ) {
-  const item = await prisma.pedidoCompraItem.findFirst({
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "PedidoCompraItem" WHERE id = ${d.pedidoCompraItemId} AND "lojaId" = ${lojaId} FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "Mala" WHERE id = ${d.malaId} AND "lojaId" = ${lojaId} FOR UPDATE`;
+    const item = await tx.pedidoCompraItem.findFirst({
       where: { id: d.pedidoCompraItemId, lojaId },
       include: { produto: true, alocacoesMala: true }
-    }),
-    m = await prisma.mala.findFirst({
-      where: { id: d.malaId, lojaId, status: "PLANNING" }
-    }),
-    v = await prisma.volumeLogistico.findFirst({
+    });
+    const bag = await tx.mala.findFirst({
+      where: { id: d.malaId, lojaId, status: "PLANNING" },
+      include: { volumes: true, alocacoes: true }
+    });
+    const volume = await tx.volumeLogistico.findFirst({
       where: { id: d.volumeLogisticoId, malaId: d.malaId, lojaId }
     });
-  if (!item || !m || !v) throw new AppError(404, "not_found");
-  if (!item.produto.peso) throw new AppError(409, "missing_weight");
-  const used = item.alocacoesMala.reduce((s, a) => s + a.quantidade, 0);
-  // Alocação só pode consumir o que já foi fisicamente recebido em Miami.
-  if (d.quantidade < 1 || used + d.quantidade > item.quantidadeRecebidaMiami)
-    throw new AppError(409, "conflict");
-  const created = await prisma.alocacaoMala.create({
-    data: { ...d, lojaId, pesoConteudoKg: item.produto.peso.mul(d.quantidade) }
+    if (!item || !bag || !volume) throw new AppError(404, "not_found");
+    if (!item.produto.peso) throw new AppError(409, "missing_weight");
+    const used = item.alocacoesMala.reduce((sum, allocation) => sum + allocation.quantidade, 0);
+    // Alocação só pode consumir o que já foi fisicamente recebido em Miami.
+    if (d.quantidade < 1 || used + d.quantidade > item.quantidadeRecebidaMiami)
+      throw new AppError(409, "conflict");
+    const content = bag.alocacoes.reduce(
+      (sum, allocation) => sum.plus(allocation.pesoConteudoKg),
+      new Prisma.Decimal(0)
+    );
+    const tare = bag.volumes.reduce(
+      (sum, entry) => sum.plus(entry.taraKg),
+      new Prisma.Decimal(0)
+    );
+    const allocationWeight = item.produto.peso.mul(d.quantidade);
+    if (content.plus(tare).plus(allocationWeight).greaterThan(bag.limitePesoKg))
+      throw new AppError(409, "weight_limit");
+    return tx.alocacaoMala.create({
+      data: { ...d, lojaId, pesoConteudoKg: allocationWeight }
+    });
   });
-  if ((await weight(lojaId, d.malaId)).excesso) {
-    await prisma.alocacaoMala.delete({ where: { id: created.id } });
-    throw new AppError(409, "weight_limit");
-  }
-  return created;
 }
 export async function suitcaseStatus(
   lojaId: string,
   id: string,
   status: MalaStatus
 ) {
-  const m = await prisma.mala.findFirst({ where: { id, lojaId } });
-  if (!m) throw new AppError(404, "not_found");
-  if (status === "CLOSED" && (await weight(lojaId, id)).excesso)
-    throw new AppError(409, "weight_limit");
-  return prisma.mala.update({ where: { id }, data: { status } });
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Mala" WHERE id = ${id} AND "lojaId" = ${lojaId} FOR UPDATE`;
+    const m = await tx.mala.findFirst({ where: { id, lojaId } });
+    if (!m) throw new AppError(404, "not_found");
+    if (status === "CLOSED" && (await weight(lojaId, id, tx)).excesso)
+      throw new AppError(409, "weight_limit");
+    return tx.mala.update({ where: { id }, data: { status } });
+  });
 }
 export async function confirmMiami(
   lojaId: string,
@@ -341,27 +368,19 @@ export async function updateSuitcase(
     observacoes?: string;
   }
 ) {
-  const m = await prisma.mala.findFirst({
-    where: { id, lojaId }
-  });
-  if (!m) throw new AppError(404, "not_found");
-  if (m.status !== "PLANNING") throw new AppError(409, "conflict");
-  return prisma.mala.update({
-    where: { id },
-    data: d,
-    include: { volumes: true, alocacoes: { include: { item: { include: { produto: true } } } } }
-  });
+  return withPlanningSuitcase(lojaId, id, (tx) =>
+    tx.mala.update({
+      where: { id },
+      data: d,
+      include: { volumes: true, alocacoes: { include: { item: { include: { produto: true } } } } }
+    })
+  );
 }
 
 export async function deleteSuitcase(lojaId: string, id: string) {
-  const m = await prisma.mala.findFirst({
-    where: { id, lojaId },
-    include: { alocacoes: true }
-  });
-  if (!m) throw new AppError(404, "not_found");
-  if (m.status !== "PLANNING") throw new AppError(409, "conflict");
-  if (m.alocacoes.length > 0) throw new AppError(409, "conflict");
-  return prisma.$transaction(async (tx) => {
+  return withPlanningSuitcase(lojaId, id, async (tx) => {
+    if (await tx.alocacaoMala.count({ where: { malaId: id, lojaId } }))
+      throw new AppError(409, "conflict");
     await tx.volumeLogistico.deleteMany({ where: { malaId: id, lojaId } });
     return tx.mala.delete({ where: { id } });
   });
@@ -376,18 +395,12 @@ export async function updateVolume(
     taraKg?: number;
   }
 ) {
-  const m = await prisma.mala.findFirst({
-    where: { id: malaId, lojaId }
-  });
-  if (!m) throw new AppError(404, "not_found");
-  if (m.status !== "PLANNING") throw new AppError(409, "conflict");
-  const v = await prisma.volumeLogistico.findFirst({
-    where: { id: volumeId, malaId, lojaId }
-  });
-  if (!v) throw new AppError(404, "not_found");
-  return prisma.volumeLogistico.update({
-    where: { id: volumeId },
-    data: d
+  return withPlanningSuitcase(lojaId, malaId, async (tx) => {
+    const volume = await tx.volumeLogistico.findFirst({
+      where: { id: volumeId, malaId, lojaId }
+    });
+    if (!volume) throw new AppError(404, "not_found");
+    return tx.volumeLogistico.update({ where: { id: volumeId }, data: d });
   });
 }
 
@@ -396,26 +409,27 @@ export async function deleteVolume(
   malaId: string,
   volumeId: string
 ) {
-  const m = await prisma.mala.findFirst({
-    where: { id: malaId, lojaId }
+  return withPlanningSuitcase(lojaId, malaId, async (tx) => {
+    const volume = await tx.volumeLogistico.findFirst({
+      where: { id: volumeId, malaId, lojaId }
+    });
+    if (!volume) throw new AppError(404, "not_found");
+    return tx.volumeLogistico.delete({ where: { id: volumeId } });
   });
-  if (!m) throw new AppError(404, "not_found");
-  if (m.status !== "PLANNING") throw new AppError(409, "conflict");
-  const v = await prisma.volumeLogistico.findFirst({
-    where: { id: volumeId, malaId, lojaId }
-  });
-  if (!v) throw new AppError(404, "not_found");
-  return prisma.volumeLogistico.delete({ where: { id: volumeId } });
 }
 
 export async function deallocate(lojaId: string, alocacaoId: string) {
   const a = await prisma.alocacaoMala.findFirst({
-    where: { id: alocacaoId, lojaId },
-    include: { mala: true }
+    where: { id: alocacaoId, lojaId }
   });
   if (!a) throw new AppError(404, "not_found");
-  if (a.mala.status !== "PLANNING") throw new AppError(409, "conflict");
-  return prisma.alocacaoMala.delete({ where: { id: alocacaoId } });
+  return withPlanningSuitcase(lojaId, a.malaId, async (tx) => {
+    const allocation = await tx.alocacaoMala.findFirst({
+      where: { id: alocacaoId, malaId: a.malaId, lojaId }
+    });
+    if (!allocation) throw new AppError(404, "not_found");
+    return tx.alocacaoMala.delete({ where: { id: alocacaoId } });
+  });
 }
 
 export async function confirmParaguai(
