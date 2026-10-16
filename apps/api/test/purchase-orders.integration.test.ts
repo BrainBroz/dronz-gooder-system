@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { PrismaClient } from "@prisma/client";
 process.env.DATABASE_URL =
@@ -11,8 +11,10 @@ process.env.JWT_ACCESS_EXPIRES_IN = "15m";
 process.env.JWT_REFRESH_EXPIRES_IN = "30d";
 const prisma = new PrismaClient();
 let createApp: typeof import("../src/app").createApp;
+let appPrisma: typeof import("../src/lib/prisma").prisma;
 beforeAll(async () => {
   ({ createApp } = await import("../src/app"));
+  ({ prisma: appPrisma } = await import("../src/lib/prisma"));
 });
 beforeEach(async () => {
   await prisma.pedidoCompraItem.deleteMany({
@@ -223,16 +225,37 @@ describe("suppliers and purchase orders", () => {
       });
     expect(order.status).toBe(201);
 
-    const attempts = await Promise.all(Array.from({ length: 6 }, () =>
-      request(app)
-        .patch(`/purchase-orders/${order.body.id}/status`)
-        .set(h(token, d.id))
-        .send({ status: "PLACED" })
-    ));
-    expect(attempts.filter((attempt) => attempt.status === 200)).toHaveLength(1);
-    expect(attempts.filter((attempt) => attempt.status === 409)).toHaveLength(5);
-    expect((await request(app)
-      .get(`/purchase-orders/${order.body.id}`)
-      .set(h(token, d.id))).body.status).toBe("PLACED");
+    const findFirst = appPrisma.pedidoCompra.findFirst;
+    let reads = 0;
+    let releaseReads = () => {};
+    const bothRead = new Promise<void>((resolve) => { releaseReads = resolve; });
+    const readSpy = vi.spyOn(appPrisma.pedidoCompra, "findFirst").mockImplementation(async (...args) => {
+      const result = await findFirst(...args);
+      if (args[0]?.where?.id === order.body.id && reads < 2) {
+        expect(result?.status).toBe("DRAFT");
+        reads += 1;
+        if (reads === 2) releaseReads();
+        await bothRead;
+      }
+      return result;
+    });
+    try {
+      const attempts = await Promise.all(Array.from({ length: 2 }, () =>
+        request(app)
+          .patch(`/purchase-orders/${order.body.id}/status`)
+          .set(h(token, d.id))
+          .send({ status: "PLACED" })
+      ));
+      expect(reads).toBe(2);
+      expect(attempts.filter((attempt) => attempt.status === 200)).toHaveLength(1);
+      expect(attempts.filter((attempt) => attempt.status === 409)).toHaveLength(1);
+      const finalOrder = await request(app)
+        .get(`/purchase-orders/${order.body.id}`)
+        .set(h(token, d.id));
+      expect(finalOrder.status).toBe(200);
+      expect(finalOrder.body.status).toBe("PLACED");
+    } finally {
+      readSpy.mockRestore();
+    }
   });
 });
