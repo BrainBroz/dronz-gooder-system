@@ -371,7 +371,40 @@ export async function importPurchase(
     key,
     payload: input,
     execute: async (tx, correlationId) => {
+      await tx.$queryRaw`SELECT id FROM "ContaExterna" WHERE id = ${input.contaExternaId} FOR UPDATE`;
       const result = await createImportedPurchase(tx, input);
+      if (input.plataforma === "AMAZON" || input.plataforma === "EBAY") {
+        const candidate = await tx.buyerPurchaseCandidate.findUnique({
+          where: {
+            provider_contaExternaId_externalOrderIdNormalized: {
+              provider: input.plataforma,
+              contaExternaId: input.contaExternaId,
+              externalOrderIdNormalized: normalizedOrderId
+            }
+          },
+          select: { id: true, compraImportadaId: true }
+        });
+        if (candidate && !candidate.compraImportadaId) {
+          await tx.buyerPurchaseCandidate.update({
+            where: { id: candidate.id },
+            data: {
+              compraImportadaId: result.purchase.id,
+              version: { increment: 1 }
+            }
+          });
+          await audit(tx, {
+            usuarioId: identity.user.id,
+            permissionCode: "COMPRAS_IMPORTADAS_IMPORTAR",
+            action: "BUYER_LEGACY_PURCHASE_LINKED",
+            entity: "BuyerPurchaseCandidate",
+            entityId: candidate.id,
+            correlationId,
+            idempotencyKey: key,
+            after: { compraImportadaId: result.purchase.id },
+            origin: ORIGIN
+          });
+        }
+      }
       await audit(tx, {
         usuarioId: identity.user.id,
         permissionCode: "COMPRAS_IMPORTADAS_IMPORTAR",

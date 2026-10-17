@@ -35,6 +35,8 @@
 
 O Batch 10 agora persiste divergências de evidências em `BuyerReconciliationConflict` e permite consulta paginada e auditada dos tipos e versões envolvidas. A migration preserva vínculos conflitantes anteriores como `LEGACY_UNCLASSIFIED`. Isso torna o bloqueio inspecionável, mas não resolve a divergência nem autoriza aprovação; a decisão humana sobre resolução permanece aberta.
 
+Compras externas já importadas são vinculadas ao candidato correspondente por identidade persistente, inclusive quando a importação ocorreu depois da evidência. O vínculo não implica aprovação e bloqueia materialização no read model e no POST; uma migration aditiva liga pares legados sem alterar status. O teste de regressão cobre importação antes/depois do candidato. Permanecem fora deste incremento a classificação humana do legado e a decisão de resolução de conflitos.
+
 - Configure `WEB_ORIGIN` com a origem HTTPS exata da aplicação web; CORS não aceita wildcard com credenciais.
 - Gere valores fortes e distintos para `JWT_ACCESS_SECRET` e `JWT_REFRESH_SECRET` em um gerenciador de segredos.
 - Em `NODE_ENV=production`, o refresh token usa cookie `HttpOnly`, `SameSite=Lax`, `Secure` e `Path=/`; o token bruto não integra respostas nem storage do navegador.

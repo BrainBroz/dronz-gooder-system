@@ -97,6 +97,18 @@ export async function recordMarketplaceEvidence(input: {
     return await prisma.$transaction(
       async (tx) => {
         await tx.$queryRaw`SELECT id FROM "ContaExterna" WHERE id = ${input.accountId} FOR UPDATE`;
+        const legacyPurchase = await tx.compraImportada.findUnique({
+          where: {
+            plataforma_contaExternaId_externalOrderIdNormalizado: {
+              plataforma: input.provider,
+              contaExternaId: input.accountId,
+              externalOrderIdNormalizado: externalEvidenceId
+            }
+          },
+          select: { id: true }
+        });
+        if (legacyPurchase)
+          await tx.$queryRaw`SELECT id FROM "CompraImportada" WHERE id = ${legacyPurchase.id} FOR UPDATE`;
         const replay = await tx.buyerEvidence.findUnique({
           where: {
             sourceIdentity_externalEvidenceId_payloadHash: {
@@ -174,8 +186,9 @@ export async function recordMarketplaceEvidence(input: {
             select: { sourceOccurredAt: true, normalizedPayload: true }
           } }
         });
-        if (prior?.compraImportadaId)
+        if (prior?.compraImportadaId && prior.compraImportadaId !== legacyPurchase?.id)
           await tx.$queryRaw`SELECT id FROM "CompraImportada" WHERE id = ${prior.compraImportadaId} FOR UPDATE`;
+        const linkedPurchaseId = prior?.compraImportadaId ?? legacyPurchase?.id ?? null;
         const incomingTime = new Date(input.order.updatedAt).getTime();
         const currentTime = prior?.currentEvidence.sourceOccurredAt.getTime() ?? -Infinity;
         const sameTime = currentTime === incomingTime;
@@ -193,10 +206,12 @@ export async function recordMarketplaceEvidence(input: {
         const materialChange = conflictTypes.length > 0;
         const conflict = materialChange || prior?.status === "COM_DIVERGENCIA";
         const candidate = prior
-          ? promote || materialChange ? await tx.buyerPurchaseCandidate.update({
+          ? promote || materialChange || !prior.compraImportadaId && !!linkedPurchaseId
+            ? await tx.buyerPurchaseCandidate.update({
               where: { id: prior.id },
               data: {
                 ...(promote ? { currentEvidenceId: evidence.id } : {}),
+                ...(linkedPurchaseId ? { compraImportadaId: linkedPurchaseId } : {}),
                 status: prior.status === "REJEITADA" ? "REJEITADA"
                   : !promote && prior.status === "CANCELADA" ? "CANCELADA"
                   : prior.compraImportadaId
@@ -211,6 +226,7 @@ export async function recordMarketplaceEvidence(input: {
               data: {
                 ...candidateIdentity,
                 currentEvidenceId: evidence.id,
+                ...(linkedPurchaseId ? { compraImportadaId: linkedPurchaseId } : {}),
                 status: input.order.cancelled ? "CANCELADA" : "AGUARDANDO_APROVACAO"
               }
             });
@@ -274,6 +290,7 @@ export async function recordMarketplaceEvidence(input: {
           after: {
             status: candidate.status,
             version: candidate.version,
+            compraImportadaId: candidate.compraImportadaId,
             currentEvidenceId: candidate.currentEvidenceId,
             linkedEvidenceId: evidence.id
           },

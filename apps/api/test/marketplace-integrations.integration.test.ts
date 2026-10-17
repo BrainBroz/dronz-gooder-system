@@ -130,7 +130,7 @@ async function cleanup() {
     where: { conexaoMarketplace: { identificadorExterno: { startsWith: "batch8-" } } }
   });
   const purchases = await prisma.compraImportada.findMany({
-    where: { conexaoMarketplaceId: { not: null } },
+    where: { contaExterna: { identificadorExterno: { startsWith: "batch8-" } } },
     select: { id: true }
   });
   const purchaseIds = purchases.map((purchase) => purchase.id);
@@ -796,6 +796,7 @@ describe("marketplace integration foundation", () => {
     const candidate = await prisma.buyerPurchaseCandidate.findFirstOrThrow({
       where: { externalOrderIdNormalized: externalOrderId }
     });
+    expect(candidate.compraImportadaId).toBe(legacy.id);
     const result = await request(fixture.app)
       .post(`/integrations/marketplaces/buyer-candidates/${candidate.id}/decision`)
       .set(bearer(fixture.token))
@@ -809,6 +810,76 @@ describe("marketplace integration foundation", () => {
     expect(await prisma.buyerApprovalDecision.count({
       where: { candidateId: candidate.id }
     })).toBe(0);
+    const detail = await request(fixture.app)
+      .get(`/imported-purchases/${legacy.id}`).set(bearer(fixture.token));
+    expect(detail.body.allowedActions).not.toContain("MATERIALIZE_STORE_ALLOCATION");
+    expect(detail.body.blockedReasons).toContainEqual(expect.objectContaining({
+      code: "BUYER_EVIDENCE_REVIEW_REQUIRED"
+    }));
+    expect((await syncConnection(identity, fixture.connectionId, { replay: true },
+      "batch8-buyer-legacy-cancel",
+      disabledRegistry(new FakeAdapter("EBAY", [{ orders: [order(externalOrderId, {
+        updatedAt: "2026-07-14T12:00:00.000Z",
+        cancelled: true
+      })] }]))
+    )).status).toBe("SUCCEEDED");
+    expect(await prisma.buyerPurchaseCandidate.findUniqueOrThrow({
+      where: { id: candidate.id }, select: { compraImportadaId: true, status: true }
+    })).toEqual({ compraImportadaId: legacy.id, status: "COM_DIVERGENCIA" });
+    const materialize = await request(fixture.app)
+      .post(`/imported-purchases/${legacy.id}/materializations/${fixture.dronz.id}`)
+      .set(bearer(fixture.token))
+      .set("idempotency-key", "batch8-buyer-legacy-materialize")
+      .send({ expectedPurchaseVersion: legacy.version });
+    expect(materialize.status).toBe(409);
+    expect(materialize.body.error).toBe("buyer_evidence_review_required");
+    expect(await prisma.materializacaoCompra.count({ where: { compraImportadaId: legacy.id } }))
+      .toBe(0);
+  });
+
+  it("vincula importação externa posterior ao candidato sem criar aprovação fictícia", async () => {
+    const fixture = await connectionFixture("EBAY", "SHARED", "buyer-late-legacy");
+    const identity = await getAuthenticatedUser(fixture.userId);
+    const externalOrderId = "batch8-buyer-late-legacy";
+    expect((await syncConnection(identity, fixture.connectionId, { replay: true },
+      "batch8-buyer-late-legacy-sync",
+      disabledRegistry(new FakeAdapter("EBAY", [{ orders: [order(externalOrderId)] }]))
+    )).status).toBe("SUCCEEDED");
+    const account = await prisma.conexaoMarketplace.findUniqueOrThrow({
+      where: { id: fixture.connectionId }, select: { contaExternaId: true }
+    });
+    const imported = await request(fixture.app)
+      .post("/imported-purchases")
+      .set(bearer(fixture.token))
+      .set("idempotency-key", "batch8-buyer-late-legacy-import")
+      .send({
+        plataforma: "EBAY",
+        contaExternaId: account.contaExternaId,
+        externalOrderId,
+        referencia: externalOrderId,
+        dataPedido: "2026-07-14T10:00:00.000Z",
+        moeda: "USD",
+        origem: "API",
+        itens: [{ titulo: "Legacy item", quantidade: 1, precoUnitario: 10, moeda: "USD" }]
+      });
+    expect(imported.status).toBe(201);
+    const candidate = await prisma.buyerPurchaseCandidate.findFirstOrThrow({
+      where: { externalOrderIdNormalized: externalOrderId }
+    });
+    expect(candidate).toMatchObject({
+      compraImportadaId: imported.body.id,
+      status: "AGUARDANDO_APROVACAO",
+      version: 2
+    });
+    expect(await prisma.buyerApprovalDecision.count({ where: { candidateId: candidate.id } }))
+      .toBe(0);
+    const blocked = await request(fixture.app)
+      .post(`/imported-purchases/${imported.body.id}/materializations/${fixture.dronz.id}`)
+      .set(bearer(fixture.token))
+      .set("idempotency-key", "batch8-buyer-late-legacy-materialize")
+      .send({ expectedPurchaseVersion: imported.body.version });
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.error).toBe("buyer_evidence_review_required");
   });
 
   it("exige decisão humana para criar compra e mostra ações da versão atual", async () => {

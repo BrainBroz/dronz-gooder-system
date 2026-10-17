@@ -229,6 +229,8 @@ Cancelamentos/reembolsos já chegam no contrato inicial. A aprovação de candid
 
 Conflitos de evidências antes da aprovação ficam em `BuyerReconciliationConflict`, separados de `ConflitoCompra`, que exige uma compra já importada. Cada registro tipado aponta para o candidato e as versões de evidência comparadas, sem copiar payloads. A detecção e o `AuditLog` participam da mesma transação da evidência; a consulta `/buyer-candidates/:candidateId/conflicts` é paginada e auditada. As migrations `20261017020000_buyer_reconciliation_conflicts` e `20261017021000_buyer_conflict_event_types` são aditivas; vínculos legados `CONFLICTING` entram como `LEGACY_UNCLASSIFIED`, sem resolução presumida. Ainda não existe comando para resolver esses conflitos: a regra humana de escolha da evidência permanece pendente.
 
+Quando uma compra operacional já existe com a mesma identidade provider/conta/pedido, sincronização e importação vinculam o candidato à compra sem criar aprovação retroativa. O vínculo retira a ação de materializar do read model e é revalidado no POST. A migration `20261017022000_link_legacy_buyer_candidates` faz o mesmo para pares persistidos antes desta correção, incrementando a versão do candidato sem mudar seu estado; a migração não inventa ator nem decisão humana.
+
 ## 9. RBAC, read models e auditoria
 
 Permissões comuns:
