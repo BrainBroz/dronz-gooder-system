@@ -72,6 +72,28 @@ export const syncHistorySchema = z
   })
   .strict();
 
+export const buyerCandidateListSchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+  status: z.enum([
+    "AGUARDANDO_APROVACAO", "COM_DIVERGENCIA", "APROVADA",
+    "REJEITADA", "CANCELADA"
+  ]).optional()
+}).strict();
+
+export const buyerDecisionSchema = z.object({
+  decision: z.enum(["APROVAR", "REJEITAR"]),
+  expectedVersion: z.number().int().positive(),
+  reason: z.string().trim().min(1).max(1000).optional()
+}).strict().superRefine((value, context) => {
+  if (value.decision === "REJEITAR" && !value.reason)
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["reason"],
+      message: "rejection reason required"
+    });
+});
+
 const normalizedTrackingSchema = z
   .object({
     code: z.string().trim().min(1).max(240),

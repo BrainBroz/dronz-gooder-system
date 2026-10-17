@@ -1,10 +1,14 @@
 import { Router, type Response } from "express";
 import { z } from "zod";
-import { requireAuth, requireStore, type AuthenticatedRequest } from "../../middlewares/auth";
+import { requireAuth, requireReadWrite, requireStore, type AuthenticatedRequest } from "../../middlewares/auth";
 import * as s from "./simulation.service";
 
 export const simulationRouter = Router();
-simulationRouter.use(requireAuth, requireStore);
+simulationRouter.use(
+  requireAuth,
+  requireStore,
+  requireReadWrite(["SIMULACAO_VISUALIZAR"], ["SIMULACAO_GERENCIAR"])
+);
 
 const w =
   (fn: (r: AuthenticatedRequest) => Promise<unknown>, status = 200) =>

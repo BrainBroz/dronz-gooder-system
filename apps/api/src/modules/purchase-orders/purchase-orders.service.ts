@@ -7,7 +7,7 @@ type OrderCreate = z.infer<typeof orderCreateSchema>;
 type OrderUpdate = z.infer<typeof orderUpdateSchema>;
 type Item = z.infer<typeof itemSchema>;
 type ItemUpdate = z.infer<typeof itemUpdateSchema>;
-const transitions: Record<string, string[]> = {
+const transitions: Record<PedidoCompraStatus, PedidoCompraStatus[]> = {
   DRAFT: ["PLACED", "CANCELLED"],
   PLACED: ["CONFIRMED", "CANCELLED"],
   CONFIRMED: ["PARTIALLY_RECEIVED_MIAMI", "RECEIVED_MIAMI", "CANCELLED"],
@@ -15,8 +15,14 @@ const transitions: Record<string, string[]> = {
   RECEIVED_MIAMI: ["ALLOCATED_TO_TRIP"],
   ALLOCATED_TO_TRIP: ["IN_TRANSIT_BRAZIL"],
   IN_TRANSIT_BRAZIL: ["ARRIVED_BRAZIL"],
-  ARRIVED_BRAZIL: ["COMPLETED"]
+  ARRIVED_BRAZIL: ["COMPLETED"],
+  COMPLETED: [],
+  CANCELLED: []
 };
+const withTransitions = <T extends { status: PedidoCompraStatus }>(order: T) => ({
+  ...order,
+  allowedStatusTransitions: transitions[order.status]
+});
 const total = (q: number, p: number, d: number) =>
   Math.max(0, q * p - d).toFixed(2);
 async function recalc(tx: Prisma.TransactionClient, id: string) {
@@ -46,7 +52,7 @@ async function product(lojaId: string, id: string) {
   if (!(await prisma.produto.findFirst({ where: { id, lojaId } })))
     throw new AppError(404, "not_found");
 }
-export const list = (
+export const list = async (
   lojaId: string,
   q: {
     numero?: string;
@@ -56,7 +62,7 @@ export const list = (
     limit: number;
   }
 ) =>
-  prisma.pedidoCompra.findMany({
+  (await prisma.pedidoCompra.findMany({
     where: {
       lojaId,
       ...(q.numero
@@ -66,17 +72,17 @@ export const list = (
       ...(q.status ? { status: q.status as PedidoCompraStatus } : {})
     },
     include: { fornecedor: true, itens: true },
-    orderBy: { dataCompra: "desc" },
+    orderBy: [{ dataCompra: "desc" }, { id: "desc" }],
     skip: (q.page - 1) * q.limit,
     take: q.limit
-  });
+  })).map(withTransitions);
 export async function get(lojaId: string, id: string) {
   const o = await prisma.pedidoCompra.findFirst({
     where: { id, lojaId },
     include: { fornecedor: true, itens: { include: { produto: true } } }
   });
   if (!o) throw new AppError(404, "not_found");
-  return o;
+  return withTransitions(o);
 }
 export async function create(lojaId: string, d: OrderCreate) {
   await supplier(lojaId, d.fornecedorId);
@@ -131,10 +137,12 @@ export async function changeStatus(
   const o = await get(lojaId, id);
   if (!transitions[o.status]?.includes(status))
     throw new AppError(409, "conflict");
-  return prisma.pedidoCompra.update({
-    where: { id: o.id },
+  const updated = await prisma.pedidoCompra.updateMany({
+    where: { id: o.id, lojaId, status: o.status },
     data: { status, canceladoEm: status === "CANCELLED" ? new Date() : null }
   });
+  if (!updated.count) throw new AppError(409, "conflict");
+  return get(lojaId, id);
 }
 export async function addItem(lojaId: string, id: string, d: Item) {
   const o = await get(lojaId, id);
@@ -187,15 +195,30 @@ export async function removeItem(lojaId: string, id: string, itemId: string) {
     return recalc(tx, id);
   });
 }
-export async function searchByNumero(lojaId: string, numero: string) {
+export async function searchByNumero(
+  lojaId: string,
+  numero: string,
+  includeValues = true
+) {
+  const hide = !includeValues;
   return prisma.pedidoCompra.findMany({
     where: {
       lojaId,
       numeroPedido: { contains: numero, mode: "insensitive" }
     },
+    omit: hide
+      ? { descontoPedido: true, frete: true, imposto: true, subtotal: true, total: true }
+      : undefined,
     include: {
       fornecedor: true,
-      itens: { include: { produto: true } }
+      itens: {
+        omit: hide
+          ? { precoUnitario: true, descontoItem: true, totalItem: true }
+          : undefined,
+        include: {
+          produto: { omit: hide ? { precoVenda: true, markup: true } : undefined }
+        }
+      }
     },
     orderBy: { dataCompra: "desc" },
     take: 20

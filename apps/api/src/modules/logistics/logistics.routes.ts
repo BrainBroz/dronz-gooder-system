@@ -126,6 +126,7 @@ logisticsRouter.patch(
   wrap((r) =>
     s.tripStatus(
       r.storeId!,
+      r.identity!.user.id,
       String(r.params.id),
       parse(
         z
@@ -250,6 +251,7 @@ logisticsRouter.patch(
   wrap((r) =>
     s.suitcaseStatus(
       r.storeId!,
+      r.identity!.user.id,
       String(r.params.id),
       parse(
         z

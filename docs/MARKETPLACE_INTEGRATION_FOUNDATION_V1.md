@@ -215,16 +215,33 @@ Falhas por pedido são contabilizadas como resultado parcial. Falha de página/p
 
 ## 8. Compras Unificadas
 
-A sincronização reutiliza `upsertMerchant` e `importPurchase`; não existe um segundo domínio de pedidos. Uma importação:
+A fundação do Batch 8 sincronizava diretamente com `importPurchase`. A correção incremental do Batch 10 separa esse caminho: sincronização registra somente `BuyerEvidence` versionada e atualiza o candidato global. A compra em staging (`CompraImportada`) só é criada após decisão humana `APROVAR`, na mesma transação que grava decisão e auditoria. Essa aprovação reutiliza a criação de compra do domínio existente; não há segundo domínio de pedidos. O fluxo:
 
-- cria staging sem loja;
-- preserva conexão e conta de origem;
+- preserva evidência, conexão e conta de origem antes da aprovação;
+- cria staging sem loja somente após aprovação;
 - não apaga mappings ou atribuições;
 - não materializa pedido operacional;
 - não cria estoque, checkpoint, venda ou pagamento;
-- trata alteração incompatível segundo os conflitos existentes de Compras Unificadas.
+- mantém nova versão de evidência posterior à aprovação em `COM_DIVERGENCIA`, sem reescrever a compra já aprovada e bloqueando materialização até revisão;
+- vincula evidência recebida fora de ordem sem substituir a projeção de evento mais recente.
 
-Cancelamentos/reembolsos já chegam no contrato inicial. Evoluções externas incompatíveis com o snapshot atual permanecem conflito explícito até o adapter real definir a política específica e testada de atualização.
+Cancelamentos/reembolsos já chegam no contrato inicial. A aprovação de candidato cancelado é bloqueada. Conciliação multicanal, classificação humana do legado e resolução operacional de divergências ainda não estão concluídas; nenhum adapter real deve ser habilitado nesta etapa.
+
+Conflitos de evidências antes da aprovação ficam em `BuyerReconciliationConflict`, separados de `ConflitoCompra`, que exige uma compra já importada. Cada registro tipado aponta para o candidato e as versões de evidência comparadas, sem copiar payloads. A detecção e o `AuditLog` participam da mesma transação da evidência; a consulta `/buyer-candidates/:candidateId/conflicts` é paginada e auditada. As migrations `20261017020000_buyer_reconciliation_conflicts` e `20261017021000_buyer_conflict_event_types` são aditivas; vínculos legados `CONFLICTING` entram como `LEGACY_UNCLASSIFIED`, sem resolução presumida. Ainda não existe comando para resolver esses conflitos: a regra humana de escolha da evidência permanece pendente.
+
+Quando uma compra operacional já existe com a mesma identidade provider/conta/pedido, sincronização e importação vinculam o candidato à compra sem criar aprovação retroativa. O vínculo retira a ação de materializar do read model e é revalidado no POST. A migration `20261017022000_link_legacy_buyer_candidates` faz o mesmo para pares persistidos antes desta correção, incrementando a versão do candidato sem mudar seu estado; a migração não inventa ator nem decisão humana.
+
+Enquanto um candidato vinculado não estiver aprovado, a atribuição por loja também fica ausente dos read models e é rejeitada no POST. Se qualquer evidência de uma página falhar depois das tentativas limitadas para conflito transitório, a sincronização termina parcialmente e mantém o cursor no início dessa página. Na sincronização incremental, a próxima execução reprocessa a página; evidências já gravadas são deduplicadas pelo hash. Replay histórico usa janela e cursor próprios e não altera o cursor incremental da conexão, tanto no sucesso como na falha parcial. O replay incompleto precisa ser repetido explicitamente enquanto a política operacional de recuperação não estiver definida; esta proteção não decide se a sincronização incremental deve ser bloqueada nesse intervalo. Datas ISO equivalentes são comparadas como instantes, sem criar divergência material artificial.
+
+Uma primeira evidência cujo item use moeda diferente da moeda do pedido entra como `COM_DIVERGENCIA`, com conflito `CURRENCY` e sem ação de aprovação. O POST de aprovação revalida a moeda antes de criar a compra. Isso não converte valores nem presume que diferenças de moeda sejam seguras.
+
+Datas ISO são normalizadas para o mesmo instante antes do hash de evidência. Um replay com grafia de data equivalente não cria nova evidência nem bloqueia uma compra aprovada; a comparação com a evidência corrente também preserva esse comportamento para snapshots gravados antes da normalização.
+
+IDs oficiais de linha repetidos no mesmo pedido são rejeitados antes da persistência; a página de sincronização fica parcial para correção na fonte e repetição controlada. Candidatos legados que já contenham essa duplicidade não oferecem `APPROVE`, e o POST revalida a restrição.
+
+A migration aditiva `20261017023000_repair_legacy_buyer_projection` reavalia apenas candidatos intocados do backfill inicial: escolhe a evidência pelo instante externo (cancelamento vence empate), bloqueia divergências materiais conservadoramente e registra conflitos legados sem fabricar decisão humana. Candidatos já decididos, com compra vinculada, conflito existente ou ingestão posterior não são reescritos. Caso algum deles tenha sido aprovado antes desta correção com evidência obsoleta, exige auditoria operacional específica; a migration não desfaz pedidos ou estoque.
+
+A migration seguinte, `20261017024000_reconcile_equivalent_legacy_dates`, remove apenas conflitos criados pela correção anterior quando os campos materiais são idênticos e as grafias ISO de `orderedAt` representam o mesmo instante. Decisões humanas e divergências reais permanecem intocadas.
 
 ## 9. RBAC, read models e auditoria
 
@@ -237,6 +254,8 @@ Permissões comuns:
 - `INTEGRACAO_MARKETPLACE_REPROCESSAR`.
 
 O seed as concede ao `SUPER_ADMIN`; perfis locais não as recebem. Conexões dedicadas também exigem vínculo do usuário com a loja. O read model devolve `allowedActions` e `blockedReasons`; toda mutação revalida RBAC e escopo.
+
+O início do Batch 10 acrescenta `BUYER_INGESTION_VISUALIZAR`, `BUYER_INGESTION_APROVAR` e `BUYER_INGESTION_REJEITAR`, concedidas inicialmente apenas ao `SUPER_ADMIN`. A lista global de candidatos é paginada; o detalhe lista as versões vinculadas. `GET /integrations/marketplaces/buyer-candidates/:candidateId/evidence/:evidenceId` permite inspecionar uma versão normalizada somente quando ela pertence ao candidato, sem retornar payload bruto ou segredo. Lista, detalhe e leitura individual gravam a respectiva ação de acesso no `AuditLog`, sem conteúdo da compra; falha da auditoria impede a resposta. A decisão exige versão atual, chave idempotente e permissão funcional. A atribuição a outros perfis depende de decisão operacional do Product Owner.
 
 São auditados criação de conexão, início/fim/falha de sincronização e tentativa incompatível de atribuição. Falha crítica de auditoria participa da transação da mutação correspondente. Valores secretos e erros brutos ficam fora do AuditLog.
 

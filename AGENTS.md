@@ -19,7 +19,7 @@ Construir um sistema operacional para Dronz e Gooder com separação rigorosa en
 - Pacote externo usa tracking e código de barras da transportadora.
 - Caixa/remessa interna usa código interno e QR Code.
 - OCR é apenas fallback.
-- Compra confirmada já integra o patrimônio.
+- Compra confirmada é `CAPITAL COMPROMETIDO NO CICLO OPERACIONAL` (F-9); estoque patrimonial só nasce na entrada definitiva.
 - Disponibilidade física depende de localização e conferência.
 - Nunca duplicar a mesma unidade em vários estoques.
 - Toda movimentação deve ser auditável.

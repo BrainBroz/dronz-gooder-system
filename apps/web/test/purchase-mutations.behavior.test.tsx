@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../src/api/client";
 import { PurchaseDetailDrawer } from "../src/components/purchases/PurchaseDetailDrawer";
-import { unifiedPurchasesQueryKeys } from "../src/queryKeys";
+import { purchasingQueryKeys, unifiedPurchasesQueryKeys } from "../src/queryKeys";
 import type {
   UnifiedPurchaseDetail,
   UnifiedPurchaseItemDetail
@@ -198,10 +198,18 @@ const detailDuasLojasEligible: UnifiedPurchaseDetail = {
   itens: [...baseDetail.itens, itemProntoMaterializar2]
 };
 
+const materialized = (...quantities: number[]) => ({
+  data: { pedidoCompra: { itens: quantities.map((quantidade) => ({ quantidade })) } }
+});
+
 function installApi(detail: UnifiedPurchaseDetail = baseDetail) {
-  vi.spyOn(api, "get").mockImplementation(async (url: string) => {
+  vi.spyOn(api, "get").mockImplementation(async (url, config) => {
     if (url === "/imported-purchases/purchase-1") return { data: detail };
     if (url === "/products") return { data: { items: products } };
+    if (url === "/suppliers") return { data: { items: [{
+      id: `supplier-${config?.headers?.["x-store-id"]}`,
+      nome: config?.headers?.["x-store-id"] === "store-dronz" ? "Fornecedor Dronz" : "Fornecedor Gooder"
+    }] } };
     throw new Error(`GET inesperado: ${url}`);
   });
 }
@@ -215,6 +223,90 @@ function renderDrawer(detail: UnifiedPurchaseDetail = baseDetail) {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+});
+
+describe("Regressão — mapping merchant/fornecedor no drawer", () => {
+  const detail: UnifiedPurchaseDetail = {
+    ...baseDetail, merchantExternoId: "merchant-1",
+    merchantExterno: { id: "merchant-1", nomeOriginal: "Merchant demo" },
+    allowedActions: [...baseDetail.allowedActions, "SET_SUPPLIER_MAPPING"]
+  };
+
+  it("salva o vínculo com loja, fornecedor, idempotência e invalida a compra", async () => {
+    const put = vi.spyOn(api, "put").mockResolvedValue({ data: {} });
+    const { queryClient } = renderDrawer(detail);
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("combobox", { name: "Fornecedor", exact: true }));
+    await user.click(await screen.findByRole("option", { name: "Fornecedor Dronz" }));
+    await user.click(screen.getByRole("button", { name: "Mapear fornecedor" }));
+    expect(await screen.findByText("Fornecedor mapeado.")).toBeTruthy();
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(put).toHaveBeenCalledWith(
+      "/imported-purchases/merchants/merchant-1/supplier-mappings/store-dronz",
+      { fornecedorId: "supplier-store-dronz", expectedVersion: undefined },
+      { headers: { Authorization: "Bearer access-test", "x-store-id": "store-dronz", "idempotency-key": expect.any(String) } }
+    );
+    for (const key of [unifiedPurchasesQueryKeys.detail("purchase-1"), unifiedPurchasesQueryKeys.overview(), unifiedPurchasesQueryKeys.lists()]) {
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: key });
+    }
+  });
+
+  it("troca de loja limpa fornecedor e usa somente os dados da nova loja", async () => {
+    const put = vi.spyOn(api, "put").mockResolvedValue({ data: {} });
+    const { queryClient } = renderDrawer(detail);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("combobox", { name: "Fornecedor", exact: true }));
+    await user.click(await screen.findByRole("option", { name: "Fornecedor Dronz" }));
+    await user.click(screen.getByRole("combobox", { name: "Loja do fornecedor" }));
+    await user.click(screen.getByRole("option", { name: "Gooder" }));
+    expect(screen.getByRole("button", { name: "Mapear fornecedor" }).hasAttribute("disabled")).toBe(true);
+    await user.click(screen.getByRole("combobox", { name: "Fornecedor", exact: true }));
+    expect(screen.queryByRole("option", { name: "Fornecedor Dronz" })).toBeNull();
+    await user.click(await screen.findByRole("option", { name: "Fornecedor Gooder" }));
+    await user.click(screen.getByRole("button", { name: "Mapear fornecedor" }));
+    expect(await screen.findByText("Fornecedor mapeado.")).toBeTruthy();
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(put).toHaveBeenCalledWith(
+      "/imported-purchases/merchants/merchant-1/supplier-mappings/store-gooder",
+      { fornecedorId: "supplier-store-gooder", expectedVersion: undefined },
+      { headers: { Authorization: "Bearer access-test", "x-store-id": "store-gooder", "idempotency-key": expect.any(String) } }
+    );
+    expect(queryClient.getQueryData(purchasingQueryKeys.suppliers("store-gooder"))).toEqual([
+      { id: "supplier-store-gooder", nome: "Fornecedor Gooder" }
+    ]);
+  });
+
+  it("não exibe mapping sem a allowedAction, mesmo com permissão na sessão", async () => {
+    installApi({ ...detail, allowedActions: [] });
+    const put = vi.spyOn(api, "put");
+    renderWithProviders(<PurchaseDetailDrawer purchaseId="purchase-1" onClose={vi.fn()} />, {
+      permissions: ["MAPPING_FORNECEDOR_GERENCIAR"]
+    });
+    await screen.findByText("ORDER-1");
+    expect(screen.queryByRole("button", { name: "Mapear fornecedor" })).toBeNull();
+    expect(put).not.toHaveBeenCalled();
+    expect(api.get).not.toHaveBeenCalledWith("/suppliers", expect.anything());
+  });
+
+  it("falha no catálogo de fornecedores permite retry sem enviar mutação", async () => {
+    installApi(detail);
+    const get = vi.mocked(api.get);
+    const fallback = get.getMockImplementation()!;
+    get.mockImplementation((url, config) => url === "/suppliers"
+      ? Promise.reject(new Error("indisponível")) : fallback(url, config));
+    const put = vi.spyOn(api, "put");
+    renderWithProviders(<PurchaseDetailDrawer purchaseId="purchase-1" onClose={vi.fn()} />);
+    expect(await screen.findByText("Falha ao carregar fornecedores desta loja.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Mapear fornecedor" }).hasAttribute("disabled")).toBe(true);
+    expect(put).not.toHaveBeenCalled();
+    get.mockImplementation(fallback);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Tentar novamente" }));
+    await waitFor(() => expect(screen.queryByText("Falha ao carregar fornecedores desta loja.")).toBeNull());
+    await user.click(screen.getByRole("combobox", { name: "Fornecedor", exact: true }));
+    expect(await screen.findByRole("option", { name: "Fornecedor Dronz" })).toBeTruthy();
+  });
 });
 
 describe("UX-1C — Mapeamento de produto", () => {
@@ -399,7 +491,7 @@ describe("UX-1C — Materialização (compra + loja, não por item)", () => {
   });
 
   it("sucesso: POST usa storeId + expectedPurchaseVersion e o dialog permanece aberto", async () => {
-    const post = vi.spyOn(api, "post").mockResolvedValue({ data: { id: "materialization-1" } });
+    const post = vi.spyOn(api, "post").mockResolvedValue(materialized(5));
     const { queryClient } = renderDrawer();
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
     const user = userEvent.setup();
@@ -423,7 +515,7 @@ describe("UX-1C — Materialização (compra + loja, não por item)", () => {
   });
 
   it("agrega múltiplos itens elegíveis da mesma loja em UMA única chamada", async () => {
-    const post = vi.spyOn(api, "post").mockResolvedValue({ data: {} });
+    const post = vi.spyOn(api, "post").mockResolvedValue(materialized(5, 2));
     renderDrawer(detailDuasLojasEligible);
     const user = userEvent.setup();
 
@@ -445,6 +537,122 @@ describe("UX-1C — Materialização (compra + loja, não por item)", () => {
     expect(screen.queryByRole("button", { name: /item-materialize\)/ })).toBeNull();
     // apenas um botão para a loja Dronz, mesmo havendo dois itens elegíveis
     expect(screen.getAllByRole("button", { name: /Materializar Dronz/ }).length).toBe(1);
+  });
+
+  it("409 de fornecedor explica a pendência sem alegar concorrência", async () => {
+    const post = vi.spyOn(api, "post").mockRejectedValue({ response: {
+      status: 409, data: { error: "supplier_mapping_required" }
+    } });
+    renderDrawer();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: /Materializar Dronz/ }));
+    await user.click(screen.getByRole("button", { name: "Materializar", exact: true }));
+    expect(await screen.findByText(/Vincule o merchant a um fornecedor da loja/)).toBeTruthy();
+    expect(screen.queryByText(/Dados foram atualizados/)).toBeNull();
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("dialog")).toBeTruthy();
+  });
+
+  it("conflito de versão refaz o detalhe e o retry envia a versão atual", async () => {
+    const post = vi.spyOn(api, "post").mockRejectedValueOnce({ response: {
+      status: 409, data: { error: "concurrent_modification" }
+    } }).mockResolvedValue(materialized(5));
+    renderDrawer();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: /Materializar Dronz/ }));
+    vi.mocked(api.get).mockResolvedValue({ data: { ...baseDetail, version: 3 } });
+    await user.click(screen.getByRole("button", { name: "Materializar", exact: true }));
+    await screen.findByText(/Confira o detalhe atualizado/);
+    await user.click(screen.getByRole("button", { name: "Materializar", exact: true }));
+    expect(await screen.findByText(/Materialização concluída/)).toBeTruthy();
+    expect(post).toHaveBeenLastCalledWith(expect.any(String), { expectedPurchaseVersion: 3 }, expect.anything());
+  });
+
+  it("refetch após materializar mantém confirmação sem crash e impede novo envio", async () => {
+    const post = vi.spyOn(api, "post").mockResolvedValue(materialized(5));
+    renderDrawer({ ...baseDetail, itens: [itemProntoMaterializar] });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: /Materializar Dronz/ }));
+    vi.mocked(api.get).mockResolvedValue({ data: {
+      ...baseDetail,
+      itens: [{ ...itemProntoMaterializar, itensMaterializados: [{ id: "mat-1", lojaId: "store-dronz", quantidade: 5 }] }]
+    } });
+    await user.click(screen.getByRole("button", { name: "Materializar", exact: true }));
+    expect(await screen.findByText(/Materialização concluída/)).toBeTruthy();
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Materializar", exact: true }).hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Materializar", exact: true }));
+    expect(post).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "Fechar", exact: true }));
+    expect(screen.queryByRole("dialog", { name: "Materializar para Dronz" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Materializar Dronz/ })).toBeNull();
+  });
+
+  it("sucesso mostra a quantidade persistida após atribuição mudar com o diálogo aberto", async () => {
+    const updatedItem: UnifiedPurchaseItemDetail = {
+      ...itemProntoMaterializar,
+      atribuicoes: [{ ...itemProntoMaterializar.atribuicoes[0], quantidade: 3 }]
+    };
+    const updatedDetail: UnifiedPurchaseDetail = { ...baseDetail, version: 3, itens: [updatedItem] };
+    vi.spyOn(api, "post").mockResolvedValue(materialized(3));
+    const { queryClient } = renderDrawer({ ...baseDetail, itens: [itemProntoMaterializar] });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: /Materializar Dronz/ }));
+    vi.mocked(api.get).mockResolvedValue({ data: updatedDetail });
+    await queryClient.invalidateQueries({ queryKey: unifiedPurchasesQueryKeys.detail("purchase-1") });
+    expect(await screen.findByText((_, el) => el?.textContent === "Total de unidades: 3")).toBeTruthy();
+    vi.mocked(api.get).mockResolvedValue({ data: {
+      ...updatedDetail,
+      itens: [{ ...updatedItem, itensMaterializados: [{ id: "mat-3", lojaId: "store-dronz", quantidade: 3 }] }]
+    } });
+    await user.click(screen.getByRole("button", { name: "Materializar", exact: true }));
+    expect(await screen.findByText(/Materialização concluída/)).toBeTruthy();
+    expect(screen.getByText((_, el) => el?.textContent === "Total de unidades: 3")).toBeTruthy();
+    expect(screen.queryByText((_, el) => el?.textContent === "Total de unidades: 5")).toBeNull();
+  });
+
+  it("retry após outra materialização mostra a quantidade retornada, não a do diálogo", async () => {
+    const post = vi.spyOn(api, "post").mockResolvedValue(materialized(3));
+    renderDrawer({ ...baseDetail, itens: [itemProntoMaterializar] });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: /Materializar Dronz/ }));
+    expect(screen.getByText((_, el) => el?.textContent === "Total de unidades: 5")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Materializar", exact: true }));
+    expect(await screen.findByText(/Materialização concluída/)).toBeTruthy();
+    expect(screen.getByText((_, el) => el?.textContent === "Total de unidades: 3")).toBeTruthy();
+    expect(screen.queryByText((_, el) => el?.textContent === "Total de unidades: 5")).toBeNull();
+    expect(post).toHaveBeenCalledWith(
+      "/imported-purchases/purchase-1/materializations/store-dronz",
+      { expectedPurchaseVersion: 2 },
+      expect.objectContaining({ headers: expect.objectContaining({ "x-store-id": "store-dronz" }) })
+    );
+  });
+
+  it("resposta sem itens não confirma a quantidade anterior como materializada", async () => {
+    vi.spyOn(api, "post").mockResolvedValue({ data: {} });
+    renderDrawer({ ...baseDetail, itens: [itemProntoMaterializar] });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: /Materializar Dronz/ }));
+    await user.click(screen.getByRole("button", { name: "Materializar", exact: true }));
+    expect(await screen.findByText(/resumo da resposta está indisponível/)).toBeTruthy();
+    expect(screen.queryByText((_, el) => el?.textContent === "Total de unidades: 5")).toBeNull();
+  });
+
+  it("mutação pendente não fecha com ESC nem aceita duplo envio", async () => {
+    let finish!: (value: ReturnType<typeof materialized>) => void;
+    const post = vi.spyOn(api, "post").mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    renderDrawer();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: /Materializar Dronz/ }));
+    const submit = screen.getByRole("button", { name: "Materializar", exact: true });
+    fireEvent.click(submit);
+    fireEvent.click(submit);
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog", { name: "Materializar para Dronz" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Cancelar" }).hasAttribute("disabled")).toBe(true);
+    expect(post).toHaveBeenCalledTimes(1);
+    finish(materialized(5));
+    expect(await screen.findByText(/Materialização concluída/)).toBeTruthy();
   });
 });
 
@@ -601,5 +809,111 @@ describe("UX-1C — Comportamento geral das mutações", () => {
     renderDrawer(withCustomBlock);
 
     expect(await screen.findByText("Mensagem exata vinda do backend.")).toBeTruthy();
+  });
+});
+
+describe("Correção de atribuição legada", () => {
+  const legacyDetail: UnifiedPurchaseDetail = {
+    ...baseDetail,
+    itens: [{
+      ...itemProntoMaterializar,
+      id: "legacy-item",
+      version: 7,
+      atribuicoes: [{
+        ...itemProntoMaterializar.atribuicoes[0],
+        quantidade: 3,
+        quantidadeMaterializada: 2
+      }]
+    }],
+    materializacoes: [{
+      id: "materialization-1",
+      lojaId: "store-dronz",
+      status: "CONCLUIDA",
+      pedidoCompraId: "order-1",
+      createdAt: "2026-07-13T12:00:00.000Z",
+      pedidoCompra: { id: "order-1", numeroPedido: "EXT-1", status: "RASCUNHO" }
+    }],
+    allowedActions: ["ASSIGN_TO_STORE"],
+    blockedReasons: [{
+      code: "ALREADY_MATERIALIZED",
+      message: "Atribuição excede a quantidade já materializada. Corrija o saldo com motivo."
+    }]
+  };
+
+  it("corrige somente o excesso com motivo, loja, versão e chave idempotente", async () => {
+    const put = vi.spyOn(api, "put").mockResolvedValue({ data: {} });
+    renderDrawer(legacyDetail);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Corrigir saldo Dronz" }));
+    expect(screen.getByText(/3 → 2 unidades/)).toBeTruthy();
+    const confirm = screen.getByRole("button", { name: "Confirmar correção" }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    await user.type(screen.getByRole("textbox", { name: "Motivo da correção" }), "Saldo legado incorreto");
+    await user.click(confirm);
+    await waitFor(() => expect(put).toHaveBeenCalledWith(
+      "/imported-purchases/items/legacy-item/assignments/store-dronz",
+      { quantidade: 2, expectedVersion: 7, motivo: "Saldo legado incorreto" },
+      { headers: {
+        Authorization: "Bearer access-test",
+        "x-store-id": "store-dronz",
+        "idempotency-key": expect.any(String)
+      } }
+    ));
+  });
+
+  it("não oferece correção sem allowedAction mesmo com bloqueio e excesso", async () => {
+    renderDrawer({ ...legacyDetail, allowedActions: [] });
+    await screen.findByText("Item Pronto Para Materializar");
+    expect(screen.queryByRole("button", { name: "Corrigir saldo Dronz" })).toBeNull();
+  });
+
+  it("remove atribuição legada sem unidades materializadas usando a ação autorizada", async () => {
+    const deleteRequest = vi.spyOn(api, "delete").mockResolvedValue({ data: { removed: true } });
+    renderDrawer({
+      ...legacyDetail,
+      allowedActions: ["REMOVE_ASSIGNMENT"],
+      itens: [{
+        ...legacyDetail.itens[0],
+        atribuicoes: [{ ...legacyDetail.itens[0].atribuicoes[0], quantidadeMaterializada: 0 }]
+      }]
+    });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Corrigir saldo Dronz" }));
+    await user.type(screen.getByRole("textbox", { name: "Motivo da correção" }), "Atribuição posterior indevida");
+    await user.click(screen.getByRole("button", { name: "Confirmar correção" }));
+    await waitFor(() => expect(deleteRequest).toHaveBeenCalledWith(
+      "/imported-purchases/items/legacy-item/assignments/store-dronz",
+      {
+        data: { motivo: "Atribuição posterior indevida" },
+        headers: {
+          Authorization: "Bearer access-test",
+          "x-store-id": "store-dronz",
+          "idempotency-key": expect.any(String)
+        }
+      }
+    ));
+  });
+
+  it("não oferece nova materialização para loja concluída quando outra loja ainda está pendente", async () => {
+    renderDrawer({
+      ...legacyDetail,
+      allowedActions: ["ASSIGN_TO_STORE", "MATERIALIZE_STORE_ALLOCATION"],
+      itens: [{
+        ...legacyDetail.itens[0],
+        atribuicoes: [
+          ...legacyDetail.itens[0].atribuicoes,
+          {
+            ...legacyDetail.itens[0].atribuicoes[0],
+            id: "assignment-gooder",
+            lojaId: "store-gooder",
+            quantidade: 1,
+            quantidadeMaterializada: 0,
+            loja: { id: "store-gooder", nome: "Gooder", slug: "gooder" }
+          }
+        ]
+      }]
+    });
+    expect(await screen.findByRole("button", { name: /Materializar Gooder/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Materializar Dronz/ })).toBeNull();
   });
 });

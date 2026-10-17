@@ -94,10 +94,11 @@ describe("sessão web", () => {
         <Route path="/operacao" element={<Shell>Conteúdo</Shell>} />
         <Route path="/categorias" element={<div>Categorias acessíveis</div>} />
       </Routes>,
-      { route: "/operacao" }
+      { route: "/operacao", permissions: ["CATALOGO_VISUALIZAR"] }
     );
 
     expect(screen.getByRole("button", { name: "Abrir menu" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Financeiro" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Categorias" }));
     expect(await screen.findByText("Categorias acessíveis")).toBeTruthy();
   });

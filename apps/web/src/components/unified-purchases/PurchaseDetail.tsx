@@ -15,15 +15,15 @@ import { api } from "../../api/client";
 import { ContentCard } from "../ui/ContentCard";
 import { MutationStatus } from "../ui/MutationStatus";
 import { unifiedPurchaseActionPresentation } from "./actionPresentation";
+import { SupplierMappingForm } from "./SupplierMappingForm";
 import {
   newIdempotencyKey,
   useUnifiedPurchaseDetail,
   useUnifiedPurchaseMutations
 } from "../../hooks/useUnifiedPurchases";
-import { catalogQueryKeys, purchasingQueryKeys } from "../../queryKeys";
+import { catalogQueryKeys } from "../../queryKeys";
 import { authHeader, useAuthStore } from "../../stores/auth";
 import type { Product } from "../../types/catalog";
-import type { Supplier } from "../../types/purchasing";
 import type {
   UnifiedPurchaseAction,
   UnifiedPurchaseDetail,
@@ -208,21 +208,7 @@ export function PurchaseDetail({
   const detail = useUnifiedPurchaseDetail(id);
   const stores = useAuthStore((state) => state.stores);
   const mutations = useUnifiedPurchaseMutations();
-  const [storeId, setStoreId] = React.useState(stores[0]?.id ?? "");
-  const [supplierId, setSupplierId] = React.useState("");
   const [reason, setReason] = React.useState("Conflito revisado manualmente");
-  const suppliers = useQuery<Supplier[]>({
-    queryKey: purchasingQueryKeys.suppliers(storeId || null),
-    enabled:
-      Boolean(storeId) &&
-      Boolean(detail.data?.allowedActions.includes("SET_SUPPLIER_MAPPING")),
-    queryFn: async () =>
-      (
-        await api.get("/suppliers", {
-          headers: { ...authHeader(), "x-store-id": storeId }
-        })
-      ).data.items
-  });
   if (detail.isLoading)
     return (
       <ContentCard>
@@ -300,56 +286,8 @@ export function PurchaseDetail({
         {purchase.merchantExternoId &&
           hasAction(purchase, "SET_SUPPLIER_MAPPING") && (
             <ContentCard title="Mapping de fornecedor interno">
-              <Stack direction={{ xs: "column", sm: "row" }} gap={1}>
-                <TextField
-                  select
-                  label="Loja"
-                  value={storeId}
-                  onChange={(event) => {
-                    setStoreId(event.target.value);
-                    setSupplierId("");
-                  }}
-                >
-                  {stores.map((store) => (
-                    <MenuItem key={store.id} value={store.id}>
-                      {store.nome}
-                    </MenuItem>
-                  ))}
-                </TextField>
-                <TextField
-                  select
-                  label="Fornecedor"
-                  value={supplierId}
-                  onChange={(event) => setSupplierId(event.target.value)}
-                  sx={{ minWidth: 240 }}
-                >
-                  {(suppliers.data ?? []).map((supplier) => (
-                    <MenuItem key={supplier.id} value={supplier.id}>
-                      {supplier.nome}
-                    </MenuItem>
-                  ))}
-                </TextField>
-                <Button
-                  disabled={
-                    !supplierId || mutations.setSupplierMapping.isPending
-                  }
-                  onClick={() =>
-                    mutations.setSupplierMapping.mutate({
-                      purchaseId: purchase.id,
-                      merchantId: purchase.merchantExternoId!,
-                      storeId,
-                      fornecedorId: supplierId,
-                      idempotencyKey: newIdempotencyKey()
-                    })
-                  }
-                >
-                  {unifiedPurchaseActionPresentation.SET_SUPPLIER_MAPPING.label}
-                </Button>
-              </Stack>
-              <MutationStatus
-                mutation={mutations.setSupplierMapping}
-                successMessage="Fornecedor mapeado."
-              />
+              <SupplierMappingForm key={`${purchase.id}:${purchase.merchantExternoId}`}
+                purchaseId={purchase.id} merchantId={purchase.merchantExternoId} />
             </ContentCard>
           )}
         {hasAction(purchase, "MATERIALIZE_STORE_ALLOCATION") && (

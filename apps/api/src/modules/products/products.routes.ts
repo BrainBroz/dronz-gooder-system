@@ -1,9 +1,24 @@
 import { Router } from "express";
-import { requireAuth, requireStore } from "../../middlewares/auth";
+import {
+  requireAuth,
+  requireReadWrite,
+  requireStore
+} from "../../middlewares/auth";
 import * as controller from "./products.controller";
 
 export const productsRouter = Router();
-productsRouter.use(requireAuth, requireStore);
+productsRouter.use(
+  requireAuth,
+  requireStore,
+  requireReadWrite(
+    [
+      "CATALOGO_VISUALIZAR",
+      "MAPPING_PRODUTO_GERENCIAR",
+      "COMPRAS_IMPORTADAS_IMPORTAR"
+    ],
+    ["CATALOGO_GERENCIAR"]
+  )
+);
 productsRouter.get("/", controller.list);
 productsRouter.get("/:id", controller.get);
 productsRouter.post("/", controller.create);

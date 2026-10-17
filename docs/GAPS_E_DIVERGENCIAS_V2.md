@@ -244,3 +244,19 @@ Sugestão de implementação: um serializer/view separado para esse perfil (ex.:
 ---
 
 *Gerado a partir do commit `5132e8a` do repositório `BrainBroz/dronz-gooder-system`. Todos os itens de escopo desta fase (seção 2) foram confirmados com o dono do produto — não há mais pendências de decisão para o Simulador de Viagem, Despesas internas, condição do produto, regra do dólar ou perfil `CHECKPOINT_MIAMI`.*
+
+## 4. Reconciliação com a Especificação Integral de 2026-10-17
+
+A "Especificação de Desenvolvimento Dronz e Gooder" v1.0 (17/10/2026) consolida fontes de julho (S1–S7) e não reflete decisões registradas depois neste repositório. Pela precedência do `AGENTS.md`, valem os contratos aprovados aqui; a especificação serve como índice de cenários (T01–T57) e propostas.
+
+| Especificação | Situação no repositório |
+|---|---|
+| D-3 (alerta acima de 23 kg) | Encerrada por F-7: bloqueio mantido. T42 não se aplica. |
+| X-02 (rateio por maiores resíduos) | Conflita com F-2 aprovada (proporcional, `ROUND_HALF_UP`, resíduo na maior linha). Vale F-2. |
+| DEC-DOM-001 (reembolso não reduz elegível) | Conflita com F-1 aprovada (reembolso pré-materialização deixa de ser elegível). Vale F-1. |
+| X-08 (câmbio) | F-5: manual. A margem fixa de 0,20 em `createExchange` continua sem decisão explícita e não deve ser tratada como regra nova. |
+| X-03 (score) | `AGENTS.md`: score só prioriza; nunca aprova. Fórmula e faixas continuam abertas. |
+| Roadmap B10 = Amazon | Superado: gate eBay concluído; B10 = pipeline comum, B11 = eBay, B12 = e-mail; Amazon `PENDENTE_DE_ONBOARDING_EXTERNO`. |
+| F0–F8 | Equivale a FIX-0/UX-0…UX-9 deste repositório. |
+| D-1, D-2, D-4, D-6…D-17, X-01, X-04–X-07, X-09–X-15 | Abertas; cada uma bloqueia somente o batch correspondente (Base Miami/Envios dependem de D-2, D-8, D-9, D-11, D-12, D-13 e D-14). |
+| SUPER_ADMIN × SYSTEM_ADMIN | `SUPER_ADMIN` é perfil; `SYSTEM_ADMIN` é permissão curinga desse perfil e não dispensa vínculo com loja. Sem alias. |

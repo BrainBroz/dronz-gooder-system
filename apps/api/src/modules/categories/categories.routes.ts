@@ -1,9 +1,17 @@
 import { Router } from "express";
-import { requireAuth, requireStore } from "../../middlewares/auth";
+import {
+  requireAuth,
+  requireReadWrite,
+  requireStore
+} from "../../middlewares/auth";
 import * as controller from "./categories.controller";
 
 export const categoriesRouter = Router();
-categoriesRouter.use(requireAuth, requireStore);
+categoriesRouter.use(
+  requireAuth,
+  requireStore,
+  requireReadWrite(["CATALOGO_VISUALIZAR"], ["CATALOGO_GERENCIAR"])
+);
 categoriesRouter.get("/", controller.list);
 categoriesRouter.get("/:id", controller.get);
 categoriesRouter.post("/", controller.create);

@@ -25,7 +25,7 @@ const quickFilterTabs: { key: QuickFilterKey; label: string }[] = [
   { key: "all", label: "Todas" },
   { key: "mappingsPending", label: "Sem mapping" },
   { key: "unassigned", label: "Sem atribuição" },
-  { key: "readyToMaterialize", label: "Materializar" },
+  { key: "readyToMaterialize", label: "Atribuições pendentes" },
   { key: "conflicts", label: "Conflitos" }
 ];
 

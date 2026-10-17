@@ -1,3 +1,11 @@
+import type {
+  ClassificacaoEvidenciaCompra,
+  FonteEvidenciaCompra,
+  StatusConflitoEvidenciaCompra,
+  TipoConflitoEvidenciaCompra,
+  TipoVinculoEvidenciaCompra
+} from "@prisma/client";
+
 export const marketplaceCapabilities = [
   "LIST_ORDERS",
   "GET_ORDER",
@@ -91,6 +99,48 @@ export type NormalizedMarketplaceOrder = {
 export type MarketplaceOrderPage = {
   orders: NormalizedMarketplaceOrder[];
   nextCursor?: string;
+};
+
+export type BuyerCandidateReadModel = {
+  id: string;
+  provider: "AMAZON" | "EBAY";
+  account: { id: string; name: string };
+  externalOrderId: string;
+  status: "AGUARDANDO_APROVACAO" | "COM_DIVERGENCIA" | "APROVADA" |
+    "REJEITADA" | "CANCELADA";
+  version: number;
+  purchaseId: string | null;
+  order: NormalizedMarketplaceOrder;
+  currentEvidence: { id: string; version: number; source: string; recordedAt: string };
+  allowedActions: Array<"VIEW" | "APPROVE" | "REJECT">;
+  blockedReasons: Array<
+    "LEGACY_PURCHASE_REQUIRES_REVIEW" | "CANCELLED" |
+    "ALREADY_DECIDED" | "NEW_EVIDENCE_REQUIRES_RECONCILIATION" |
+    "MATERIAL_DIVERGENCE" | "DUPLICATE_EXTERNAL_LINE_ID"
+  >;
+};
+
+export type BuyerEvidenceDetailReadModel = {
+  candidateId: string;
+  evidenceId: string;
+  version: number;
+  source: FonteEvidenciaCompra;
+  type: TipoVinculoEvidenciaCompra;
+  dataClassification: ClassificacaoEvidenciaCompra;
+  payloadHash: string;
+  correlationId: string;
+  sourceOccurredAt: string;
+  recordedAt: string;
+  order: NormalizedMarketplaceOrder;
+};
+
+export type BuyerConflictReadModel = {
+  id: string;
+  type: TipoConflitoEvidenciaCompra;
+  status: StatusConflitoEvidenciaCompra;
+  referenceEvidenceId: string | null;
+  evidenceId: string;
+  createdAt: string;
 };
 
 export type MarketplaceConnectionContext = {

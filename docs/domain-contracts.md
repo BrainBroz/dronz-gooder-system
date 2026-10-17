@@ -35,13 +35,13 @@ Timezone Miami: `America/New_York`. Exibição Brasil: `America/Sao_Paulo`. Dead
 
 `Viajante`: id, lojaId, nome, email?, telefone?, documento?, observacoes?, ativo, timestamps. Documento é sensível, não é identificador público nem conteúdo de logs.
 
-`Viagem`: id, lojaId, viajanteId, origem, destino, partidaEm, chegadaPrevistaEm, chegadaRealEm?, status, observacoes?, timestamps. Status: `PLANNED`, `OPEN_FOR_ALLOCATION`, `CLOSED_FOR_ALLOCATION`, `IN_TRANSIT`, `ARRIVED_BRAZIL`, `CANCELLED`. Transições: PLANNED→OPEN_FOR_ALLOCATION; OPEN_FOR_ALLOCATION→CLOSED_FOR_ALLOCATION/CANCELLED; CLOSED_FOR_ALLOCATION→IN_TRANSIT/CANCELLED; IN_TRANSIT→ARRIVED_BRAZIL. Estados finais: ARRIVED_BRAZIL e CANCELLED.
+`Viagem`: id, lojaId, viajanteId, origem, destino, partidaEm, chegadaPrevistaEm, chegadaRealEm?, status, observacoes?, timestamps. Status: `PLANNED`, `OPEN_FOR_ALLOCATION`, `CLOSED_FOR_ALLOCATION`, `IN_TRANSIT`, `ARRIVED_BRAZIL`, `CANCELLED`. Transições: PLANNED→OPEN_FOR_ALLOCATION; OPEN_FOR_ALLOCATION→CLOSED_FOR_ALLOCATION/CANCELLED; CLOSED_FOR_ALLOCATION→IN_TRANSIT/CANCELLED; IN_TRANSIT→ARRIVED_BRAZIL. Estados finais: ARRIVED_BRAZIL e CANCELLED. Viagem com itens alocados em qualquer mala não pode ser cancelada até que as alocações sejam removidas explicitamente.
 
 `Mala`: id, lojaId, viagemId, codigo, limitePesoKg (padrão 23), status, observacoes?, timestamps. Status: `PLANNING`, `CLOSED`, `CHECKED_IN`, `ARRIVED_BRAZIL`, `RECEIVED`, `CANCELLED`.
 
 Volumes logísticos registram pesoConteudoKg, taraKg (padrão 0,5 por caixa) e pesoTotalKg. Tara não é aplicada por unidade nem uma única vez por pedido com múltiplas caixas. Peso da mala soma produtos alocados e taras. Acima de 23 kg é proibido. Peso ausente permite planejamento, mas bloqueia fechamento. Mala, viagem, viajante e itens respeitam a mesma loja.
 
-Chegada ao Brasil exige viagem ARRIVED_BRAZIL, mala ARRIVED_BRAZIL ou RECEIVED e data real. Miami, alocação, mala fechada ou viagem em trânsito não geram estoque.
+Na rota com Paraguai obrigatório, a viagem só pode passar a `ARRIVED_BRAZIL` após checkpoint Paraguai efetivo `CORRETO` para cada mala ativa da viagem. Chegada ao Brasil exige viagem ARRIVED_BRAZIL, mala ARRIVED_BRAZIL ou RECEIVED e data real. Miami, alocação, mala fechada ou viagem em trânsito não geram estoque.
 
 ## Recebimento e estoque
 
@@ -49,7 +49,7 @@ Status de recebimento: `PENDING`, `IN_PROGRESS`, `PARTIALLY_COMPLETED`, `COMPLET
 
 Movimentos: `ENTRY`, `RESERVE`, `RELEASE_RESERVATION`, `EXIT`, `ADJUSTMENT_POSITIVE`, `ADJUSTMENT_NEGATIVE`, `RETURN_ENTRY`, `RETURN_EXIT`. Motivos: `PURCHASE_RECEIPT`, `SALE`, `MANUAL_CORRECTION`, `DAMAGE`, `LOSS`, `RETURN`, `RESERVATION`, `RESERVATION_RELEASE`.
 
-`quantidadeDisponivel = quantidadeFisica - quantidadeReservada`. Saldo físico e disponível nunca ficam negativos. Reserva não muda físico; baixa reduz físico; liberação reduz reservado. Confirmações de recebimento registram conferência, mas não geram estoque. Somente a entrada definitiva, após Brasil e conferência válida, gera `ENTRY`. Ajustes exigem motivo e observação. Operações usam transação Prisma. Movimentos confirmados não são editados nem apagados; correções usam eventos e movimentos compensatórios auditáveis.
+`quantidadeDisponivel = quantidadeFisica - quantidadeReservada`. Saldo físico e disponível nunca ficam negativos. Reserva não muda físico; baixa reduz físico; liberação reduz reservado. Alocações do mesmo item em volumes diferentes da mesma mala somam uma única quantidade esperada no recebimento. Confirmações de recebimento registram conferência, mas não geram estoque. Somente a entrada definitiva, após Brasil e conferência válida, gera `ENTRY`. Ajustes exigem motivo e observação. Operações usam transação Prisma. Movimentos confirmados não são editados nem apagados; correções usam eventos e movimentos compensatórios auditáveis.
 
 ## Financeiro
 
@@ -74,4 +74,6 @@ Relatórios oficiais: Pedidos de Compra, Itens Comprados, Logística por Viagem,
 
 ## Autorização e decisões futuras
 
-Vale o modelo atual: usuário autenticado e ativo, vínculo explícito com loja e `SUPER_ADMIN` limitado às lojas vinculadas nas operações tenantadas. O RBAC granular aprovado para UI-3C e Compras Unificadas está definido nos contratos específicos e supera a restrição histórica de não criar permissões nesses fluxos. Novas permissões fora desses contratos exigem aprovação. Buyer purchase ingestion por e-mail/documentos/CSV, APIs externas, PayPal, bancos, cartões, companhias aéreas, tracking automático, PDF e Excel permanecem futuros.
+Vale o modelo atual: usuário autenticado e ativo, vínculo explícito com loja e `SUPER_ADMIN` limitado às lojas vinculadas nas operações tenantadas. O RBAC granular aprovado para UI-3C e Compras Unificadas está definido nos contratos específicos e supera a restrição histórica de não criar permissões nesses fluxos. Novas permissões fora desses contratos exigem aprovação.
+
+Módulos operacionais legados (aprovado pelo PO em 2026-10-17, FIX-2): leitura e escrita exigem capacidades distintas — `CATALOGO_VISUALIZAR`/`CATALOGO_GERENCIAR` (categorias, produtos, fornecedores; leitura também aceita as permissões de mapping e importação de Compras Unificadas), `PEDIDOS_COMPRA_VISUALIZAR`/`PEDIDOS_COMPRA_GERENCIAR`, `ESTOQUE_VISUALIZAR`/`ESTOQUE_MOVIMENTAR`, `ESTOQUE_AJUSTAR` (ajustes e devoluções que alteram o saldo fora da entrada definitiva), `FINANCEIRO_VISUALIZAR`/`FINANCEIRO_REGISTRAR`, `ANALYTICS_VISUALIZAR` e `SIMULACAO_VISUALIZAR`/`SIMULACAO_GERENCIAR`. O perfil `GESTOR_LOJA` agrupa essas capacidades e as operacionais de checkpoint/recebimento; `CHECKPOINT_MIAMI` não recebe nenhuma delas e localiza pedido por número sem valores. Usuários não administradores existentes precisam receber `GESTOR_LOJA` (ou perfil equivalente) após o deploy. Buyer purchase ingestion por e-mail/documentos/CSV, APIs externas, PayPal, bancos, cartões, companhias aéreas, tracking automático, PDF e Excel permanecem futuros.

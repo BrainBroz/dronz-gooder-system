@@ -55,7 +55,22 @@ async function main() {
     "INTEGRACAO_MARKETPLACE_GERENCIAR",
     "INTEGRACAO_MARKETPLACE_SINCRONIZAR",
     "INTEGRACAO_MARKETPLACE_HISTORICO_VISUALIZAR",
-    "INTEGRACAO_MARKETPLACE_REPROCESSAR"
+    "INTEGRACAO_MARKETPLACE_REPROCESSAR",
+    "BUYER_INGESTION_VISUALIZAR",
+    "BUYER_INGESTION_APROVAR",
+    "BUYER_INGESTION_REJEITAR",
+    "FINANCEIRO_VISUALIZAR",
+    "FINANCEIRO_REGISTRAR",
+    "ESTOQUE_VISUALIZAR",
+    "ESTOQUE_MOVIMENTAR",
+    "ESTOQUE_AJUSTAR",
+    "PEDIDOS_COMPRA_VISUALIZAR",
+    "PEDIDOS_COMPRA_GERENCIAR",
+    "CATALOGO_VISUALIZAR",
+    "CATALOGO_GERENCIAR",
+    "ANALYTICS_VISUALIZAR",
+    "SIMULACAO_VISUALIZAR",
+    "SIMULACAO_GERENCIAR"
   ] as const;
   const permissions = await Promise.all(
     permissionCodes.map((code) =>
@@ -71,6 +86,49 @@ async function main() {
     update: { name: "CHECKPOINT_MIAMI" },
     create: { code: "CHECKPOINT_MIAMI", name: "CHECKPOINT_MIAMI" }
   });
+
+  // Gestor de loja: acesso completo aos módulos operacionais da própria loja (F-10), sem staging global.
+  const storeManagerProfile = await prisma.perfil.upsert({
+    where: { code: "GESTOR_LOJA" },
+    update: { name: "GESTOR_LOJA" },
+    create: { code: "GESTOR_LOJA", name: "GESTOR_LOJA" }
+  });
+  for (const code of [
+    "FINANCEIRO_VISUALIZAR",
+    "FINANCEIRO_REGISTRAR",
+    "ESTOQUE_VISUALIZAR",
+    "ESTOQUE_MOVIMENTAR",
+    "ESTOQUE_AJUSTAR",
+    "PEDIDOS_COMPRA_VISUALIZAR",
+    "PEDIDOS_COMPRA_GERENCIAR",
+    "CATALOGO_VISUALIZAR",
+    "CATALOGO_GERENCIAR",
+    "ANALYTICS_VISUALIZAR",
+    "SIMULACAO_VISUALIZAR",
+    "SIMULACAO_GERENCIAR",
+    "MIAMI_RECEBIMENTO_VISUALIZAR",
+    "MIAMI_RECEBIMENTO_CONFIRMAR",
+    "PARAGUAI_CHECKPOINT_VISUALIZAR",
+    "PARAGUAI_CHECKPOINT_CONFIRMAR",
+    "BRASIL_CHECKPOINT_VISUALIZAR",
+    "BRASIL_CHECKPOINT_CONFIRMAR",
+    "RECEBIMENTO_VISUALIZAR",
+    "RECEBIMENTO_CONFIRMAR",
+    "ENTRADA_DEFINITIVA_VISUALIZAR",
+    "ENTRADA_DEFINITIVA_CONFIRMAR"
+  ] as const) {
+    const permission = permissions.find((entry) => entry.code === code)!;
+    await prisma.perfilPermissao.upsert({
+      where: {
+        perfilId_permissaoId: {
+          perfilId: storeManagerProfile.id,
+          permissaoId: permission.id
+        }
+      },
+      update: {},
+      create: { perfilId: storeManagerProfile.id, permissaoId: permission.id }
+    });
+  }
 
   const user = await prisma.usuario.upsert({
     where: { email: adminEmail },

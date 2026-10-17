@@ -118,7 +118,7 @@ export const productMappingSchema = z
 
 export const supplierMappingSchema = z
   .object({
-    fornecedorId: z.string().cuid(),
+    fornecedorId: z.string().min(1),
     expectedVersion: z.number().int().nonnegative().optional()
   })
   .strict();

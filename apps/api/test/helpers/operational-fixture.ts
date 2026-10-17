@@ -34,6 +34,7 @@ export async function createOperationalFixture(
       fornecedorId: supplier.id,
       numeroPedido: `TEST-${suffix}`,
       dataCompra: new Date(),
+      status: "CONFIRMED",
       subtotal: 100,
       total: 100,
       itens: {
@@ -102,8 +103,8 @@ export async function createOperationalFixture(
       await prisma.checkpointBrasil.deleteMany({ where: { malaId: bag.id } });
       await prisma.checkpointParaguai.deleteMany({ where: { malaId: bag.id } });
       await prisma.recebimentoMiami.deleteMany({ where: { pedidoCompraItemId: order.itens[0].id } });
-      await prisma.alocacaoMala.deleteMany({ where: { id: allocation.id } });
-      await prisma.volumeLogistico.deleteMany({ where: { id: volume.id } });
+      await prisma.alocacaoMala.deleteMany({ where: { malaId: bag.id } });
+      await prisma.volumeLogistico.deleteMany({ where: { malaId: bag.id } });
       await prisma.mala.deleteMany({ where: { id: bag.id } });
       await prisma.viagem.deleteMany({ where: { id: trip.id } });
       await prisma.viajante.deleteMany({ where: { id: traveler.id } });

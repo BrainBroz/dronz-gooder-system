@@ -1,14 +1,64 @@
+import { randomUUID } from "node:crypto";
 import { MalaStatus, Prisma, ViagemStatus } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { AppError } from "../../lib/app-error";
 import { audit, idempotentMutation } from "../operations/operations.persistence";
 import { assertBrazilTransition, assertParaguayTransition } from "../operations/operations.policy";
-const tripTransitions: Record<string, string[]> = {
+const tripTransitions: Record<ViagemStatus, ViagemStatus[]> = {
   PLANNED: ["OPEN_FOR_ALLOCATION"],
   OPEN_FOR_ALLOCATION: ["CLOSED_FOR_ALLOCATION", "CANCELLED"],
   CLOSED_FOR_ALLOCATION: ["IN_TRANSIT", "CANCELLED"],
-  IN_TRANSIT: ["ARRIVED_BRAZIL"]
+  IN_TRANSIT: ["ARRIVED_BRAZIL"],
+  ARRIVED_BRAZIL: [],
+  CANCELLED: []
 };
+const suitcaseTransitions: Record<MalaStatus, MalaStatus[]> = {
+  PLANNING: ["CLOSED", "CANCELLED"],
+  CLOSED: ["CHECKED_IN", "CANCELLED"],
+  CHECKED_IN: ["ARRIVED_BRAZIL"],
+  ARRIVED_BRAZIL: ["RECEIVED"],
+  RECEIVED: [],
+  CANCELLED: []
+};
+async function clearedParaguayBags(
+  db: Prisma.TransactionClient,
+  lojaId: string,
+  bagIds: string[]
+) {
+  if (!bagIds.length) return new Set<string>();
+  const checkpoints = await db.checkpointParaguai.findMany({
+    where: { lojaId, malaId: { in: bagIds }, supersededAt: null },
+    select: { id: true, malaId: true, tipoDivergencia: true }
+  });
+  const projections = await db.projecaoOperacional.findMany({
+    where: { lojaId, entity: "CheckpointParaguai", entityId: { in: checkpoints.map((checkpoint) => checkpoint.id) } },
+    select: { entityId: true, state: true }
+  });
+  const effective = new Map(projections.map((projection) => [
+    projection.entityId, projection.state as { tipoDivergencia?: string }
+  ]));
+  return new Set(checkpoints.filter((checkpoint) =>
+    (effective.get(checkpoint.id)?.tipoDivergencia ?? checkpoint.tipoDivergencia) === "CORRETO"
+  ).map((checkpoint) => checkpoint.malaId));
+}
+const readyAfterParaguay = (
+  bags: Array<{ id: string; status: MalaStatus }>,
+  cleared: Set<string>
+) => bags.filter((bag) => bag.status !== "CANCELLED")
+  .every((bag) => bag.status === "CHECKED_IN" && cleared.has(bag.id));
+async function withPlanningSuitcase<T>(
+  lojaId: string,
+  id: string,
+  action: (tx: Prisma.TransactionClient) => Promise<T>
+) {
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Mala" WHERE id = ${id} AND "lojaId" = ${lojaId} FOR UPDATE`;
+    const bag = await tx.mala.findFirst({ where: { id, lojaId } });
+    if (!bag) throw new AppError(404, "not_found");
+    if (bag.status !== "PLANNING") throw new AppError(409, "conflict");
+    return action(tx);
+  });
+}
 export const travelers = (lojaId: string) =>
   prisma.viajante.findMany({
     where: { lojaId },
@@ -42,14 +92,28 @@ export const createTraveler = (
       updatedAt: true
     }
   });
-export const trips = (lojaId: string) =>
-  prisma.viagem.findMany({
+export const trips = async (lojaId: string) => {
+  const listed = await prisma.viagem.findMany({
     where: { lojaId },
     include: {
       viajante: { select: { id: true, nome: true, ativo: true } },
-      malas: true
+      malas: { include: { _count: { select: { alocacoes: true } } } }
     }
   });
+  const requiringParaguay = listed.filter((trip) =>
+    trip.status === "IN_TRANSIT" && trip.checkpointsObrigatorios.includes("PARAGUAI")
+  );
+  const cleared = await clearedParaguayBags(prisma, lojaId,
+    requiringParaguay.flatMap((trip) => trip.malas.map((bag) => bag.id)));
+  return listed.map((trip) => ({
+    ...trip,
+    allowedStatusTransitions: tripTransitions[trip.status].filter((next) =>
+      (next !== "CANCELLED" || trip.malas.every((bag) => bag._count.alocacoes === 0)) &&
+      (next !== "ARRIVED_BRAZIL" || !trip.checkpointsObrigatorios.includes("PARAGUAI") ||
+        readyAfterParaguay(trip.malas, cleared))
+    )
+  }));
+};
 export async function createTrip(
   lojaId: string,
   d: {
@@ -83,42 +147,80 @@ export async function createTrip(
 }
 export async function tripStatus(
   lojaId: string,
+  userId: string,
   id: string,
   status: ViagemStatus
 ) {
-  const t = await prisma.viagem.findFirst({ where: { id, lojaId } });
-  if (!t) throw new AppError(404, "not_found");
-  if (!tripTransitions[t.status]?.includes(status))
-    throw new AppError(409, "conflict");
-  return prisma.viagem.update({
-    where: { id },
-    data: {
-      status,
-      chegadaRealEm: status === "ARRIVED_BRAZIL" ? new Date() : undefined
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Viagem" WHERE id = ${id} AND "lojaId" = ${lojaId} FOR UPDATE`;
+    const t = await tx.viagem.findFirst({ where: { id, lojaId } });
+    if (!t) throw new AppError(404, "not_found");
+    if (!tripTransitions[t.status].includes(status))
+      throw new AppError(409, "conflict");
+    if (status === "CANCELLED" && await tx.alocacaoMala.count({
+      where: { lojaId, mala: { viagemId: id } }
+    })) throw new AppError(409, "conflict");
+    if (status === "ARRIVED_BRAZIL" && t.checkpointsObrigatorios.includes("PARAGUAI")) {
+      const bags = await tx.mala.findMany({
+        where: { lojaId, viagemId: id, status: { not: "CANCELLED" } },
+        select: { id: true, status: true }
+      });
+      const cleared = await clearedParaguayBags(tx, lojaId, bags.map((bag) => bag.id));
+      if (!readyAfterParaguay(bags, cleared))
+        throw new AppError(409, "checkpoint_required");
     }
+    const updated = await tx.viagem.updateMany({
+      where: { id, lojaId, status: t.status },
+      data: {
+        status,
+        chegadaRealEm: status === "ARRIVED_BRAZIL" ? new Date() : undefined
+      }
+    });
+    if (!updated.count) throw new AppError(409, "conflict");
+    const result = await tx.viagem.findUniqueOrThrow({ where: { id } });
+    await audit(tx, {
+      usuarioId: userId, lojaId, permissionCode: null,
+      action: "UPDATE_TRIP_STATUS", entity: "Viagem", entityId: id,
+      correlationId: randomUUID(), origin: "API_LOGISTICS",
+      before: { status: t.status, chegadaRealEm: t.chegadaRealEm },
+      after: { status: result.status, chegadaRealEm: result.chegadaRealEm }
+    });
+    return result;
   });
 }
-export const suitcases = (lojaId: string) =>
-  prisma.mala.findMany({
+export const suitcases = async (lojaId: string) =>
+  (await prisma.mala.findMany({
     where: { lojaId },
     include: {
+      viagem: { select: { status: true } },
+      recebimentos: { where: { status: "COMPLETED", supersededAt: null }, select: { id: true } },
       volumes: true,
       alocacoes: { include: { item: { include: { produto: true } } } }
     }
-  });
+  })).map(({ viagem, recebimentos, ...bag }) => ({
+    ...bag,
+    allowedStatusTransitions: suitcaseTransitions[bag.status].filter((next) =>
+      (next !== "ARRIVED_BRAZIL" || viagem.status === "ARRIVED_BRAZIL") &&
+      (next !== "RECEIVED" || recebimentos.length > 0) &&
+      (next !== "CANCELLED" || bag.alocacoes.length === 0) &&
+      (next !== "CLOSED" || bag.alocacoes.reduce((sum, allocation) => sum.plus(allocation.pesoConteudoKg), new Prisma.Decimal(0))
+        .plus(bag.volumes.reduce((sum, volume) => sum.plus(volume.taraKg), new Prisma.Decimal(0)))
+        .lessThanOrEqualTo(bag.limitePesoKg))
+    )
+  }));
 export async function createSuitcase(
   lojaId: string,
   d: { viagemId: string; codigo: string; limitePesoKg?: number }
 ) {
-  const t = await prisma.viagem.findFirst({
-    where: {
-      id: d.viagemId,
-      lojaId,
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Viagem" WHERE id = ${d.viagemId} AND "lojaId" = ${lojaId} FOR UPDATE`;
+    const trip = await tx.viagem.findFirst({ where: {
+      id: d.viagemId, lojaId,
       status: { notIn: ["CANCELLED", "ARRIVED_BRAZIL"] }
-    }
+    } });
+    if (!trip) throw new AppError(404, "not_found");
+    return tx.mala.create({ data: { ...d, lojaId } });
   });
-  if (!t) throw new AppError(404, "not_found");
-  return prisma.mala.create({ data: { ...d, lojaId } });
 }
 export async function addVolume(
   lojaId: string,
@@ -126,16 +228,16 @@ export async function addVolume(
   d: { codigo: string; taraKg: number }
 ) {
   if (d.taraKg < 0) throw new AppError(400, "bad_request");
-  if (
-    !(await prisma.mala.findFirst({
-      where: { id: malaId, lojaId, status: "PLANNING" }
-    }))
-  )
-    throw new AppError(409, "conflict");
-  return prisma.volumeLogistico.create({ data: { ...d, malaId, lojaId } });
+  return withPlanningSuitcase(lojaId, malaId, (tx) =>
+    tx.volumeLogistico.create({ data: { ...d, malaId, lojaId } })
+  );
 }
-export async function weight(lojaId: string, malaId: string) {
-  const m = await prisma.mala.findFirst({
+export async function weight(
+  lojaId: string,
+  malaId: string,
+  db: Prisma.TransactionClient = prisma
+) {
+  const m = await db.mala.findFirst({
     where: { id: malaId, lojaId },
     include: { volumes: true, alocacoes: true }
   });
@@ -163,41 +265,81 @@ export async function allocate(
     quantidade: number;
   }
 ) {
-  const item = await prisma.pedidoCompraItem.findFirst({
+  return prisma.$transaction(async (tx) => {
+    const targetBag = await tx.mala.findFirst({
+      where: { id: d.malaId, lojaId }, select: { viagemId: true }
+    });
+    if (!targetBag) throw new AppError(404, "not_found");
+    await tx.$queryRaw`SELECT id FROM "Viagem" WHERE id = ${targetBag.viagemId} AND "lojaId" = ${lojaId} FOR UPDATE`;
+    const trip = await tx.viagem.findFirst({
+      where: { id: targetBag.viagemId, lojaId }
+    });
+    if (!trip || trip.status === "CANCELLED") throw new AppError(409, "conflict");
+    await tx.$queryRaw`SELECT id FROM "PedidoCompraItem" WHERE id = ${d.pedidoCompraItemId} AND "lojaId" = ${lojaId} FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "Mala" WHERE id = ${d.malaId} AND "lojaId" = ${lojaId} FOR UPDATE`;
+    const item = await tx.pedidoCompraItem.findFirst({
       where: { id: d.pedidoCompraItemId, lojaId },
       include: { produto: true, alocacoesMala: true }
-    }),
-    m = await prisma.mala.findFirst({
-      where: { id: d.malaId, lojaId, status: "PLANNING" }
-    }),
-    v = await prisma.volumeLogistico.findFirst({
+    });
+    const bag = await tx.mala.findFirst({
+      where: { id: d.malaId, lojaId, status: "PLANNING" },
+      include: { volumes: true, alocacoes: true }
+    });
+    const volume = await tx.volumeLogistico.findFirst({
       where: { id: d.volumeLogisticoId, malaId: d.malaId, lojaId }
     });
-  if (!item || !m || !v) throw new AppError(404, "not_found");
-  if (!item.produto.peso) throw new AppError(409, "missing_weight");
-  const used = item.alocacoesMala.reduce((s, a) => s + a.quantidade, 0);
-  // Alocação só pode consumir o que já foi fisicamente recebido em Miami.
-  if (d.quantidade < 1 || used + d.quantidade > item.quantidadeRecebidaMiami)
-    throw new AppError(409, "conflict");
-  const created = await prisma.alocacaoMala.create({
-    data: { ...d, lojaId, pesoConteudoKg: item.produto.peso.mul(d.quantidade) }
+    if (!item || !bag || !volume) throw new AppError(404, "not_found");
+    if (!item.produto.peso) throw new AppError(409, "missing_weight");
+    const used = item.alocacoesMala.reduce((sum, allocation) => sum + allocation.quantidade, 0);
+    // Alocação só pode consumir o que já foi fisicamente recebido em Miami.
+    if (d.quantidade < 1 || used + d.quantidade > item.quantidadeRecebidaMiami)
+      throw new AppError(409, "conflict");
+    const content = bag.alocacoes.reduce(
+      (sum, allocation) => sum.plus(allocation.pesoConteudoKg),
+      new Prisma.Decimal(0)
+    );
+    const tare = bag.volumes.reduce(
+      (sum, entry) => sum.plus(entry.taraKg),
+      new Prisma.Decimal(0)
+    );
+    const allocationWeight = item.produto.peso.mul(d.quantidade);
+    if (content.plus(tare).plus(allocationWeight).greaterThan(bag.limitePesoKg))
+      throw new AppError(409, "weight_limit");
+    return tx.alocacaoMala.create({
+      data: { ...d, lojaId, pesoConteudoKg: allocationWeight }
+    });
   });
-  if ((await weight(lojaId, d.malaId)).excesso) {
-    await prisma.alocacaoMala.delete({ where: { id: created.id } });
-    throw new AppError(409, "weight_limit");
-  }
-  return created;
 }
 export async function suitcaseStatus(
   lojaId: string,
+  userId: string,
   id: string,
   status: MalaStatus
 ) {
-  const m = await prisma.mala.findFirst({ where: { id, lojaId } });
-  if (!m) throw new AppError(404, "not_found");
-  if (status === "CLOSED" && (await weight(lojaId, id)).excesso)
-    throw new AppError(409, "weight_limit");
-  return prisma.mala.update({ where: { id }, data: { status } });
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Mala" WHERE id = ${id} AND "lojaId" = ${lojaId} FOR UPDATE`;
+    const m = await tx.mala.findFirst({ where: { id, lojaId }, include: { viagem: true } });
+    if (!m) throw new AppError(404, "not_found");
+    if (!suitcaseTransitions[m.status].includes(status))
+      throw new AppError(409, "conflict");
+    if (status === "ARRIVED_BRAZIL" && m.viagem.status !== "ARRIVED_BRAZIL")
+      throw new AppError(409, "conflict");
+    if (status === "RECEIVED" && !(await tx.recebimento.findFirst({
+      where: { lojaId, malaId: id, status: "COMPLETED", supersededAt: null }
+    }))) throw new AppError(409, "conflict");
+    if (status === "CANCELLED" && (await tx.alocacaoMala.count({ where: { lojaId, malaId: id } })) > 0)
+      throw new AppError(409, "conflict");
+    if (status === "CLOSED" && (await weight(lojaId, id, tx)).excesso)
+      throw new AppError(409, "weight_limit");
+    const result = await tx.mala.update({ where: { id }, data: { status } });
+    await audit(tx, {
+      usuarioId: userId, lojaId, permissionCode: null,
+      action: "UPDATE_SUITCASE_STATUS", entity: "Mala", entityId: id,
+      correlationId: randomUUID(), origin: "API_LOGISTICS",
+      before: { status: m.status }, after: { status: result.status }
+    });
+    return result;
+  });
 }
 export async function confirmMiami(
   lojaId: string,
@@ -220,6 +362,7 @@ export async function confirmMiami(
     });
     if (
       !i ||
+      (i.pedido.status !== "CONFIRMED" && i.pedido.status !== "PARTIALLY_RECEIVED_MIAMI") ||
       d.quantidadeRecebida < 1 ||
       i.quantidadeRecebidaMiami + d.quantidadeRecebida > i.quantidade
     )
@@ -341,27 +484,19 @@ export async function updateSuitcase(
     observacoes?: string;
   }
 ) {
-  const m = await prisma.mala.findFirst({
-    where: { id, lojaId }
-  });
-  if (!m) throw new AppError(404, "not_found");
-  if (m.status !== "PLANNING") throw new AppError(409, "conflict");
-  return prisma.mala.update({
-    where: { id },
-    data: d,
-    include: { volumes: true, alocacoes: { include: { item: { include: { produto: true } } } } }
-  });
+  return withPlanningSuitcase(lojaId, id, (tx) =>
+    tx.mala.update({
+      where: { id },
+      data: d,
+      include: { volumes: true, alocacoes: { include: { item: { include: { produto: true } } } } }
+    })
+  );
 }
 
 export async function deleteSuitcase(lojaId: string, id: string) {
-  const m = await prisma.mala.findFirst({
-    where: { id, lojaId },
-    include: { alocacoes: true }
-  });
-  if (!m) throw new AppError(404, "not_found");
-  if (m.status !== "PLANNING") throw new AppError(409, "conflict");
-  if (m.alocacoes.length > 0) throw new AppError(409, "conflict");
-  return prisma.$transaction(async (tx) => {
+  return withPlanningSuitcase(lojaId, id, async (tx) => {
+    if (await tx.alocacaoMala.count({ where: { malaId: id, lojaId } }))
+      throw new AppError(409, "conflict");
     await tx.volumeLogistico.deleteMany({ where: { malaId: id, lojaId } });
     return tx.mala.delete({ where: { id } });
   });
@@ -376,18 +511,12 @@ export async function updateVolume(
     taraKg?: number;
   }
 ) {
-  const m = await prisma.mala.findFirst({
-    where: { id: malaId, lojaId }
-  });
-  if (!m) throw new AppError(404, "not_found");
-  if (m.status !== "PLANNING") throw new AppError(409, "conflict");
-  const v = await prisma.volumeLogistico.findFirst({
-    where: { id: volumeId, malaId, lojaId }
-  });
-  if (!v) throw new AppError(404, "not_found");
-  return prisma.volumeLogistico.update({
-    where: { id: volumeId },
-    data: d
+  return withPlanningSuitcase(lojaId, malaId, async (tx) => {
+    const volume = await tx.volumeLogistico.findFirst({
+      where: { id: volumeId, malaId, lojaId }
+    });
+    if (!volume) throw new AppError(404, "not_found");
+    return tx.volumeLogistico.update({ where: { id: volumeId }, data: d });
   });
 }
 
@@ -396,26 +525,27 @@ export async function deleteVolume(
   malaId: string,
   volumeId: string
 ) {
-  const m = await prisma.mala.findFirst({
-    where: { id: malaId, lojaId }
+  return withPlanningSuitcase(lojaId, malaId, async (tx) => {
+    const volume = await tx.volumeLogistico.findFirst({
+      where: { id: volumeId, malaId, lojaId }
+    });
+    if (!volume) throw new AppError(404, "not_found");
+    return tx.volumeLogistico.delete({ where: { id: volumeId } });
   });
-  if (!m) throw new AppError(404, "not_found");
-  if (m.status !== "PLANNING") throw new AppError(409, "conflict");
-  const v = await prisma.volumeLogistico.findFirst({
-    where: { id: volumeId, malaId, lojaId }
-  });
-  if (!v) throw new AppError(404, "not_found");
-  return prisma.volumeLogistico.delete({ where: { id: volumeId } });
 }
 
 export async function deallocate(lojaId: string, alocacaoId: string) {
   const a = await prisma.alocacaoMala.findFirst({
-    where: { id: alocacaoId, lojaId },
-    include: { mala: true }
+    where: { id: alocacaoId, lojaId }
   });
   if (!a) throw new AppError(404, "not_found");
-  if (a.mala.status !== "PLANNING") throw new AppError(409, "conflict");
-  return prisma.alocacaoMala.delete({ where: { id: alocacaoId } });
+  return withPlanningSuitcase(lojaId, a.malaId, async (tx) => {
+    const allocation = await tx.alocacaoMala.findFirst({
+      where: { id: alocacaoId, malaId: a.malaId, lojaId }
+    });
+    if (!allocation) throw new AppError(404, "not_found");
+    return tx.alocacaoMala.delete({ where: { id: alocacaoId } });
+  });
 }
 
 export async function confirmParaguai(

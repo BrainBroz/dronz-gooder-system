@@ -25,6 +25,7 @@ export type UnifiedPurchaseOverview = {
   unassigned: number;
   partiallyAssigned: number;
   fullyAssigned: number;
+  awaitingMaterialization: number;
   materialized: number;
   pending: number;
   conflicts: number;
@@ -114,6 +115,10 @@ export type PurchaseMaterialization = {
   pedidoCompraId: string;
   createdAt: string;
   pedidoCompra: { id: string; numeroPedido: string; status: string };
+};
+
+export type PurchaseMaterializationResult = {
+  pedidoCompra: { itens: Array<{ quantidade: number }> };
 };
 
 export type PurchaseHistoryEntry = {

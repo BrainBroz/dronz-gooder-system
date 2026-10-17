@@ -6,6 +6,8 @@ import {
   type AuthenticatedRequest
 } from "../../middlewares/auth";
 import {
+  buyerCandidateListSchema,
+  buyerDecisionSchema,
   createConnectionSchema,
   listConnectionsSchema,
   syncConnectionSchema,
@@ -42,6 +44,63 @@ const identity = (request: AuthenticatedRequest) => {
 
 const idempotencyKey = (request: AuthenticatedRequest) =>
   z.string().min(8).max(200).parse(request.headers["idempotency-key"]);
+
+marketplaceIntegrationsRouter.get(
+  "/buyer-candidates",
+  requirePermission("BUYER_INGESTION_VISUALIZAR"),
+  wrap(async (request, response) => {
+    response.json(await service.listBuyerCandidates(
+      identity(request), buyerCandidateListSchema.parse(request.query)
+    ));
+  })
+);
+
+marketplaceIntegrationsRouter.get(
+  "/buyer-candidates/:candidateId",
+  requirePermission("BUYER_INGESTION_VISUALIZAR"),
+  wrap(async (request, response) => {
+    response.json(await service.buyerCandidateDetail(
+      identity(request), z.string().cuid().parse(request.params.candidateId)
+    ));
+  })
+);
+
+marketplaceIntegrationsRouter.get(
+  "/buyer-candidates/:candidateId/evidence/:evidenceId",
+  requirePermission("BUYER_INGESTION_VISUALIZAR"),
+  wrap(async (request, response) => {
+    response.json(await service.buyerCandidateEvidenceDetail(
+      identity(request),
+      z.string().cuid().parse(request.params.candidateId),
+      z.string().cuid().parse(request.params.evidenceId)
+    ));
+  })
+);
+
+marketplaceIntegrationsRouter.get(
+  "/buyer-candidates/:candidateId/conflicts",
+  requirePermission("BUYER_INGESTION_VISUALIZAR"),
+  wrap(async (request, response) => {
+    response.json(await service.buyerCandidateConflicts(
+      identity(request),
+      z.string().cuid().parse(request.params.candidateId),
+      syncHistorySchema.parse(request.query)
+    ));
+  })
+);
+
+marketplaceIntegrationsRouter.post(
+  "/buyer-candidates/:candidateId/decision",
+  requirePermission("BUYER_INGESTION_VISUALIZAR"),
+  wrap(async (request, response) => {
+    response.json(await service.decideBuyerCandidate(
+      identity(request),
+      z.string().cuid().parse(request.params.candidateId),
+      buyerDecisionSchema.parse(request.body),
+      idempotencyKey(request)
+    ));
+  })
+);
 
 marketplaceIntegrationsRouter.post(
   "/connections",

@@ -55,6 +55,19 @@ async function arrive(value: Awaited<ReturnType<typeof createOperationalFixture>
 }
 
 describe("UI-3C backend", () => {
+  it("explica pedido não confirmado sem alegar que Miami já foi concluído", async () => {
+    const { app, headers } = await session();
+    const data = await fixture();
+    await prisma.pedidoCompra.update({ where: { id: data.order.id }, data: { status: "DRAFT" } });
+    const detail = await request(app).get(`/operations/miami/items/${data.item.id}`).set(headers());
+    expect(detail.status).toBe(200);
+    expect(detail.body.allowedActions).toEqual([]);
+    expect(detail.body.blockedReasons).toEqual([{
+      code: "ORDER_NOT_READY_FOR_MIAMI",
+      message: "Pedido ainda não está apto ao recebimento em Miami."
+    }]);
+  });
+
   it("expõe overview tenant-safe e sem campos financeiros no read model Miami", async () => {
     const { app, store, headers } = await session();
     const data = await fixture();

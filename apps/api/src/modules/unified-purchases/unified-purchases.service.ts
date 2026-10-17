@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   EstadoCompraImportada,
+  EstadoCandidatoCompra,
   OrigemCompraExterna,
   OrigemMapeamentoExterno,
   PlataformaCompraExterna,
@@ -34,7 +35,7 @@ import type {
 
 type AccountInput = z.infer<typeof accountSchema>;
 type MerchantInput = z.infer<typeof merchantSchema>;
-type ImportInput = z.infer<typeof importPurchaseSchema>;
+export type ImportInput = z.infer<typeof importPurchaseSchema>;
 type ManualInput = z.infer<typeof manualPurchaseSchema>;
 type AssignmentInput = z.infer<typeof assignmentSchema>;
 type ProductMappingInput = z.infer<typeof productMappingSchema>;
@@ -98,6 +99,14 @@ const itemEligibility = (item: {
   quantidadeCancelada: number;
   quantidadeReembolsada: number;
 }) => item.quantidade - item.quantidadeCancelada - item.quantidadeReembolsada;
+
+const buyerReviewRequired = (purchase: {
+  conexaoMarketplaceId: string | null;
+  buyerCandidate: { status: EstadoCandidatoCompra } | null;
+}) =>
+  purchase.buyerCandidate?.status !== undefined
+    ? purchase.buyerCandidate.status !== "APROVADA"
+    : purchase.conexaoMarketplaceId !== null;
 
 export async function createExternalAccount(
   identity: AuthIdentity,
@@ -217,11 +226,11 @@ export async function upsertMerchant(
   });
 }
 
-async function createImportedPurchase(
+export async function createImportedPurchase(
   tx: Prisma.TransactionClient,
-  input: ImportInput,
-  payloadHash: string
+  input: ImportInput
 ) {
+  const payloadHash = hash(input);
   const account = await tx.contaExterna.findUnique({
     where: { id: input.contaExternaId }
   });
@@ -371,7 +380,40 @@ export async function importPurchase(
     key,
     payload: input,
     execute: async (tx, correlationId) => {
-      const result = await createImportedPurchase(tx, input, payloadHash);
+      await tx.$queryRaw`SELECT id FROM "ContaExterna" WHERE id = ${input.contaExternaId} FOR UPDATE`;
+      const result = await createImportedPurchase(tx, input);
+      if (input.plataforma === "AMAZON" || input.plataforma === "EBAY") {
+        const candidate = await tx.buyerPurchaseCandidate.findUnique({
+          where: {
+            provider_contaExternaId_externalOrderIdNormalized: {
+              provider: input.plataforma,
+              contaExternaId: input.contaExternaId,
+              externalOrderIdNormalized: normalizedOrderId
+            }
+          },
+          select: { id: true, compraImportadaId: true }
+        });
+        if (candidate && !candidate.compraImportadaId) {
+          await tx.buyerPurchaseCandidate.update({
+            where: { id: candidate.id },
+            data: {
+              compraImportadaId: result.purchase.id,
+              version: { increment: 1 }
+            }
+          });
+          await audit(tx, {
+            usuarioId: identity.user.id,
+            permissionCode: "COMPRAS_IMPORTADAS_IMPORTAR",
+            action: "BUYER_LEGACY_PURCHASE_LINKED",
+            entity: "BuyerPurchaseCandidate",
+            entityId: candidate.id,
+            correlationId,
+            idempotencyKey: key,
+            after: { compraImportadaId: result.purchase.id },
+            origin: ORIGIN
+          });
+        }
+      }
       await audit(tx, {
         usuarioId: identity.user.id,
         permissionCode: "COMPRAS_IMPORTADAS_IMPORTAR",
@@ -511,10 +553,15 @@ export async function setAssignment(
         where: { id: itemId },
         include: {
           atribuicoes: true,
-          compraImportada: { include: { conexaoMarketplace: true } }
+          compraImportada: { include: {
+            conexaoMarketplace: true,
+            buyerCandidate: { select: { status: true } }
+          } }
         }
       });
       if (!item) throw new AppError(404, "not_found");
+      if (buyerReviewRequired(item.compraImportada))
+        throw new AppError(409, "buyer_evidence_review_required");
       const connection = item.compraImportada.conexaoMarketplace;
       if (
         connection?.escopo === "STORE_DEDICATED" &&
@@ -546,12 +593,33 @@ export async function setAssignment(
       const current = item.atribuicoes.find(
         (assignment) => assignment.lojaId === lojaId
       );
-      if (current && input.quantidade < current.quantidadeMaterializada)
+      const completedStore = await tx.materializacaoCompra.findUnique({
+        where: {
+          compraImportadaId_lojaId: {
+            compraImportadaId: item.compraImportadaId,
+            lojaId
+          }
+        },
+        select: { id: true }
+      });
+      const isLegacyCorrection = Boolean(
+        completedStore &&
+        current &&
+        current.quantidade > current.quantidadeMaterializada &&
+        input.quantidade === current.quantidadeMaterializada &&
+        input.motivo
+      );
+      if (
+        (completedStore || current?.quantidadeMaterializada) &&
+        (!current ||
+          (input.quantidade !== current.quantidade &&
+            !isLegacyCorrection))
+      )
         throw new AppError(409, "already_materialized");
       const other = item.atribuicoes
         .filter((assignment) => assignment.lojaId !== lojaId)
         .reduce((sum, assignment) => sum + assignment.quantidade, 0);
-      if (other + input.quantidade > itemEligibility(item))
+      if (!isLegacyCorrection && other + input.quantidade > itemEligibility(item))
         throw new AppError(409, "store_assignment_overflow");
       const assignment = await tx.atribuicaoCompraItem.upsert({
         where: { itemExternoId_lojaId: { itemExternoId: itemId, lojaId } },
@@ -797,6 +865,7 @@ export async function materialize(
         where: { id: purchaseId },
         include: {
           merchantExterno: true,
+          buyerCandidate: { select: { status: true } },
           conflitos: { where: { status: "ABERTO" } },
           itens: {
             include: {
@@ -812,6 +881,8 @@ export async function materialize(
       if (!purchase) throw new AppError(404, "not_found");
       if (purchase.version !== input.expectedPurchaseVersion)
         throw new AppError(409, "concurrent_modification");
+      if (buyerReviewRequired(purchase))
+        throw new AppError(409, "buyer_evidence_review_required");
       if (purchase.moeda !== "USD")
         throw new AppError(409, "currency_conversion_required");
       if (purchase.conflitos.length)
@@ -955,6 +1026,50 @@ function actionsFor(identity: AuthIdentity): UnifiedPurchaseAction[] {
   return actions;
 }
 
+function hasPendingMaterialization(purchase: {
+  materializacoes: { lojaId: string }[];
+  itens: {
+    atribuicoes: {
+      lojaId: string;
+      quantidade: number;
+      quantidadeMaterializada: number;
+    }[];
+  }[];
+}) {
+  const completedStores = new Set(
+    purchase.materializacoes.map((entry) => entry.lojaId)
+  );
+  return purchase.itens.some((item) =>
+    item.atribuicoes.some(
+      (assignment) =>
+        !completedStores.has(assignment.lojaId) &&
+        assignment.quantidade > assignment.quantidadeMaterializada
+    )
+  );
+}
+
+function hasCompletedStoreExcess(purchase: {
+  materializacoes: { lojaId: string }[];
+  itens: {
+    atribuicoes: {
+      lojaId: string;
+      quantidade: number;
+      quantidadeMaterializada: number;
+    }[];
+  }[];
+}) {
+  const completedStores = new Set(
+    purchase.materializacoes.map((entry) => entry.lojaId)
+  );
+  return purchase.itens.some((item) =>
+    item.atribuicoes.some(
+      (assignment) =>
+        completedStores.has(assignment.lojaId) &&
+        assignment.quantidade > assignment.quantidadeMaterializada
+    )
+  );
+}
+
 export async function listPurchases(
   identity: AuthIdentity,
   input: ListInput
@@ -992,8 +1107,10 @@ export async function listPurchases(
       include: {
         contaExterna: true,
         merchantExterno: true,
+        buyerCandidate: { select: { status: true } },
         conflitos: { where: { status: "ABERTO" } },
-        itens: { include: { atribuicoes: true } }
+        itens: { include: { atribuicoes: true } },
+        materializacoes: { select: { lojaId: true } }
       }
     })
   ]);
@@ -1029,6 +1146,17 @@ export async function listPurchases(
             }
           ]
         : [];
+      if (hasCompletedStoreExcess(purchase))
+        blockedReasons.push({
+          code: "ALREADY_MATERIALIZED",
+          message: "Atribuição excede a quantidade já materializada. Corrija o saldo com motivo."
+        });
+      const buyerReviewPending = buyerReviewRequired(purchase);
+      if (buyerReviewPending)
+        blockedReasons.push({
+          code: "BUYER_EVIDENCE_REVIEW_REQUIRED",
+          message: "A evidência da compra exige revisão antes de atribuir ou materializar."
+        });
       return {
         id: purchase.id,
         provider: purchase.plataforma,
@@ -1054,11 +1182,12 @@ export async function listPurchases(
           pending: quantities.total - quantities.assigned
         },
         conflictCount: purchase.conflitos.length,
-        allowedActions: blockedReasons.length
-          ? actionsFor(identity).filter(
-              (action) => action !== "MATERIALIZE_STORE_ALLOCATION"
-            )
-          : actionsFor(identity),
+        allowedActions: actionsFor(identity).filter((action) =>
+          !(buyerReviewPending && action === "ASSIGN_TO_STORE") &&
+          !(action === "MATERIALIZE_STORE_ALLOCATION" &&
+            (purchase.conflitos.length || buyerReviewPending ||
+              !hasPendingMaterialization(purchase)))
+        ),
         blockedReasons
       };
     })
@@ -1076,11 +1205,16 @@ export async function overview(identity: AuthIdentity) {
           quantidadeReembolsada: true,
           mapeamentos: { where: { status: "ATIVO" }, select: { id: true } },
           atribuicoes: {
-            select: { quantidade: true, quantidadeMaterializada: true }
+            select: {
+              lojaId: true,
+              quantidade: true,
+              quantidadeMaterializada: true
+            }
           }
         }
       },
-      conflitos: { where: { status: "ABERTO" }, select: { id: true } }
+      conflitos: { where: { status: "ABERTO" }, select: { id: true } },
+      materializacoes: { select: { lojaId: true } }
     }
   });
   const result = {
@@ -1089,6 +1223,7 @@ export async function overview(identity: AuthIdentity) {
     unassigned: 0,
     partiallyAssigned: 0,
     fullyAssigned: 0,
+    awaitingMaterialization: 0,
     materialized: 0,
     pending: 0,
     conflicts: 0,
@@ -1115,6 +1250,16 @@ export async function overview(identity: AuthIdentity) {
       else if (assigned < eligible) result.partiallyAssigned += 1;
       else result.fullyAssigned += 1;
       if (materialized > 0) result.materialized += 1;
+      if (
+        (hasPendingMaterialization({
+          materializacoes: purchase.materializacoes,
+          itens: [item]
+        }) || hasCompletedStoreExcess({
+          materializacoes: purchase.materializacoes,
+          itens: [item]
+        }))
+      )
+        result.awaitingMaterialization += 1;
       result.pending += Math.max(0, eligible - assigned);
       if (!item.mapeamentos.length) result.mappingsPending += 1;
     }
@@ -1128,6 +1273,7 @@ export async function purchaseDetail(identity: AuthIdentity, id: string) {
     include: {
       contaExterna: true,
       merchantExterno: true,
+      buyerCandidate: { select: { status: true } },
       itens: {
         include: {
           merchantExterno: true,
@@ -1149,19 +1295,45 @@ export async function purchaseDetail(identity: AuthIdentity, id: string) {
   });
   if (!purchase) throw new AppError(404, "not_found");
   const history = await historyForPurchase(id);
+  const blockedReasons: UnifiedPurchaseBlockedReason[] = [];
+  if (purchase.conflitos.some((conflict) => conflict.status === "ABERTO"))
+    blockedReasons.push({
+      code: "EXTERNAL_ORDER_CONFLICT",
+      message: "Compra possui conflito aberto."
+    });
+  const buyerReviewPending = buyerReviewRequired(purchase);
+  if (buyerReviewPending)
+    blockedReasons.push({
+      code: "BUYER_EVIDENCE_REVIEW_REQUIRED",
+      message: "A evidência da compra exige revisão antes de atribuir ou materializar."
+    });
+  if (hasCompletedStoreExcess(purchase))
+    blockedReasons.push({
+      code: "ALREADY_MATERIALIZED",
+      message: "Atribuição excede a quantidade já materializada. Corrija o saldo com motivo."
+    });
   return {
     ...purchase,
-    allowedActions: actionsFor(identity),
-    blockedReasons: purchase.conflitos.some(
-      (conflict) => conflict.status === "ABERTO"
-    )
-      ? [
-          {
-            code: "EXTERNAL_ORDER_CONFLICT",
-            message: "Compra possui conflito aberto."
-          }
-        ]
-      : [],
+    allowedActions: actionsFor(identity).filter((action) => {
+      if (action === "ASSIGN_TO_STORE") return !buyerReviewPending;
+      if (action === "MATERIALIZE_STORE_ALLOCATION")
+        return (
+          !buyerReviewPending && !purchase.conflitos.some(
+            (conflict) => conflict.status === "ABERTO"
+          ) && hasPendingMaterialization(purchase)
+        );
+      if (action === "SET_SUPPLIER_MAPPING")
+        return purchase.itens.some(
+          (item) =>
+            itemEligibility(item) >
+            item.atribuicoes.reduce(
+              (sum, assignment) => sum + assignment.quantidadeMaterializada,
+              0
+            )
+        );
+      return true;
+    }),
+    blockedReasons,
     history
   };
 }

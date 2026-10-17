@@ -5,19 +5,29 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Divider,
   Drawer,
   IconButton,
   Stack,
+  TextField,
   Typography
 } from "@mui/material";
-import { useUnifiedPurchaseDetail } from "../../hooks/useUnifiedPurchases";
+import {
+  newIdempotencyKey,
+  useUnifiedPurchaseDetail,
+  useUnifiedPurchaseMutations
+} from "../../hooks/useUnifiedPurchases";
 import { PurchaseTimeline } from "./PurchaseTimeline";
 import { BlockedReasonChip } from "./BlockedReasonChip";
 import { ItemMappingDrawer } from "./ItemMappingDrawer";
 import { ItemAssignmentDrawer } from "./ItemAssignmentDrawer";
 import { MaterializationConfirmDialog } from "./MaterializationConfirmDialog";
 import { ConflictResolutionDrawer } from "./ConflictResolutionDrawer";
+import { SupplierMappingForm } from "../unified-purchases/SupplierMappingForm";
 import type { MaterializationSummary } from "./types";
 import type { UnifiedPurchaseDetail } from "../../types/unified-purchases";
 
@@ -26,6 +36,8 @@ type DrawerState = {
   itemId?: string;
   conflictId?: string;
   storeId?: string;
+  summary?: MaterializationSummary;
+  purchaseId?: string;
 };
 
 function nextItemAction(item: { mapeamentos: unknown[]; atribuicoes: unknown[] }) {
@@ -42,8 +54,10 @@ function nextItemAction(item: { mapeamentos: unknown[]; atribuicoes: unknown[] }
  */
 function materializationSummaries(detail: UnifiedPurchaseDetail): MaterializationSummary[] {
   const byStore = new Map<string, MaterializationSummary>();
+  const completedStores = new Set(detail.materializacoes.map((entry) => entry.lojaId));
   for (const item of detail.itens) {
     for (const assignment of item.atribuicoes) {
+      if (completedStores.has(assignment.lojaId)) continue;
       const materialized = item.itensMaterializados.find(
         (m) => m.lojaId === assignment.lojaId
       );
@@ -72,15 +86,63 @@ export function PurchaseDetailDrawer({
 }) {
   const detailQuery = useUnifiedPurchaseDetail(purchaseId);
   const detail = detailQuery.data;
+  const mutations = useUnifiedPurchaseMutations();
   const [drawerState, setDrawerState] = React.useState<DrawerState>({ type: "none" });
+  const [correction, setCorrection] = React.useState<{ itemId: string; storeId: string } | null>(null);
+  const [correctionReason, setCorrectionReason] = React.useState("");
+  const [correctionError, setCorrectionError] = React.useState("");
+  const correctionItem = detail?.itens.find((item) => item.id === correction?.itemId);
+  const correctionAssignment = correctionItem?.atribuicoes.find(
+    (assignment) => assignment.lojaId === correction?.storeId
+  );
+  const canCorrect = Boolean(
+    detail?.allowedActions.includes(
+      correctionAssignment?.quantidadeMaterializada ? "ASSIGN_TO_STORE" : "REMOVE_ASSIGNMENT"
+    ) &&
+    detail.blockedReasons.some((reason) => reason.code === "ALREADY_MATERIALIZED") &&
+    detail.materializacoes.some((entry) => entry.lojaId === correction?.storeId) &&
+    correctionAssignment &&
+    correctionAssignment.quantidade > correctionAssignment.quantidadeMaterializada
+  );
   const materializationByStore = React.useMemo(
     () => (detail ? materializationSummaries(detail) : []),
     [detail]
   );
+  const completedStoreIds = new Set(detail?.materializacoes.map((entry) => entry.lojaId));
 
   const closeDrawer = () => setDrawerState({ type: "none" });
   const handleMutationSuccess = () => {
     void detailQuery.refetch();
+  };
+  const correctLegacyAssignment = async () => {
+    if (!detail || !correctionItem || !correctionAssignment || !canCorrect || correctionReason.trim().length < 3)
+      return;
+    setCorrectionError("");
+    try {
+      const input = {
+        purchaseId: detail.id,
+        itemId: correctionItem.id,
+        storeId: correctionAssignment.lojaId,
+        idempotencyKey: newIdempotencyKey()
+      };
+      if (correctionAssignment.quantidadeMaterializada > 0)
+        await mutations.setAssignment.mutateAsync({
+          ...input,
+          payload: {
+            quantidade: correctionAssignment.quantidadeMaterializada,
+            expectedVersion: correctionItem.version,
+            motivo: correctionReason.trim()
+          }
+        });
+      else
+        await mutations.removeAssignment.mutateAsync({ ...input, motivo: correctionReason.trim() });
+      setCorrection(null);
+      setCorrectionReason("");
+      void detailQuery.refetch();
+    } catch {
+      setCorrectionError("A correção não foi concluída. Atualize os dados e tente novamente.");
+      void detailQuery.refetch();
+    }
   };
 
   return (
@@ -136,6 +198,11 @@ export function PurchaseDetailDrawer({
             <Stack gap={1.5}>
               {detail.itens.map((item) => {
                 const pendingAction = nextItemAction(item);
+                const excessAssignments = item.atribuicoes.filter(
+                  (assignment) =>
+                    completedStoreIds.has(assignment.lojaId) &&
+                    assignment.quantidade > assignment.quantidadeMaterializada
+                );
                 return (
                   <Box
                     key={item.id}
@@ -174,6 +241,19 @@ export function PurchaseDetailDrawer({
                             {pendingAction}
                           </Button>
                         )}
+                      {detail.blockedReasons.some((reason) => reason.code === "ALREADY_MATERIALIZED") &&
+                        excessAssignments.map((assignment) => (
+                          detail.allowedActions.includes(assignment.quantidadeMaterializada ? "ASSIGN_TO_STORE" : "REMOVE_ASSIGNMENT") && <Button
+                            key={assignment.id}
+                            size="small"
+                            onClick={() => {
+                              setCorrection({ itemId: item.id, storeId: assignment.lojaId });
+                              setCorrectionError("");
+                            }}
+                          >
+                            Corrigir saldo {assignment.loja.nome}
+                          </Button>
+                        ))}
                     </Stack>
                     <Stack direction="row" gap={0.5} flexWrap="wrap" mt={1}>
                       {item.mapeamentos.length === 0 ? (
@@ -217,6 +297,10 @@ export function PurchaseDetailDrawer({
             <Typography component="h3" variant="subtitle1" fontWeight={700}>
               Ações Operacionais
             </Typography>
+            {detail.merchantExternoId && detail.allowedActions.includes("SET_SUPPLIER_MAPPING") && (
+              <SupplierMappingForm key={`${detail.id}:${detail.merchantExternoId}`}
+                purchaseId={detail.id} merchantId={detail.merchantExternoId} />
+            )}
             {detail.allowedActions.includes("MATERIALIZE_STORE_ALLOCATION") ? (
               <Stack gap={1}>
                 {materializationByStore.map((summary) => (
@@ -227,7 +311,9 @@ export function PurchaseDetailDrawer({
                     onClick={() =>
                       setDrawerState({
                         type: "materialize",
-                        storeId: summary.storeId
+                        purchaseId: detail.id,
+                        storeId: summary.storeId,
+                        summary
                       })
                     }
                     fullWidth
@@ -351,17 +437,18 @@ export function PurchaseDetailDrawer({
             />
           )}
 
-          {drawerState.type === "materialize" && drawerState.storeId && (
+          {drawerState.type === "materialize" && drawerState.purchaseId === detail.id && drawerState.storeId && drawerState.summary && (
             <MaterializationConfirmDialog
+              key={`${detail.id}:${drawerState.storeId}`}
               purchaseId={purchaseId!}
               storeId={drawerState.storeId}
-              summary={
-                materializationByStore.find((s) => s.storeId === drawerState.storeId)!
-              }
+              summary={materializationByStore.find((s) => s.storeId === drawerState.storeId) ?? drawerState.summary}
+              canMaterialize={detail.allowedActions.includes("MATERIALIZE_STORE_ALLOCATION") && materializationByStore.some((s) => s.storeId === drawerState.storeId)}
               purchaseVersion={detail.version}
               open={true}
               onClose={closeDrawer}
               onSuccess={handleMutationSuccess}
+              onRefresh={handleMutationSuccess}
             />
           )}
 
@@ -374,6 +461,39 @@ export function PurchaseDetailDrawer({
               onSuccess={handleMutationSuccess}
             />
           )}
+          <Dialog
+            open={Boolean(correction && canCorrect)}
+            onClose={() => {
+              if (!mutations.setAssignment.isPending && !mutations.removeAssignment.isPending)
+                setCorrection(null);
+            }}
+          >
+            <DialogTitle>Corrigir atribuição não materializada</DialogTitle>
+            <DialogContent>
+              <Stack gap={2} pt={1}>
+                <Typography variant="body2">
+                  {correctionAssignment?.loja.nome}: {correctionAssignment?.quantidade} → {correctionAssignment?.quantidadeMaterializada} unidades. O pedido já materializado não será alterado.
+                </Typography>
+                <TextField
+                  label="Motivo da correção"
+                  value={correctionReason}
+                  onChange={(event) => setCorrectionReason(event.target.value)}
+                  inputProps={{ maxLength: 500 }}
+                  fullWidth
+                />
+                {correctionError && <Alert severity="error">{correctionError}</Alert>}
+              </Stack>
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setCorrection(null)} disabled={mutations.setAssignment.isPending || mutations.removeAssignment.isPending}>Cancelar</Button>
+              <Button
+                onClick={() => void correctLegacyAssignment()}
+                disabled={!canCorrect || correctionReason.trim().length < 3 || mutations.setAssignment.isPending || mutations.removeAssignment.isPending}
+              >
+                Confirmar correção
+              </Button>
+            </DialogActions>
+          </Dialog>
         </Stack>
       )}
     </Drawer>

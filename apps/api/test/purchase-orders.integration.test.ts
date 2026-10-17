@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { PrismaClient } from "@prisma/client";
 process.env.DATABASE_URL =
@@ -11,8 +11,10 @@ process.env.JWT_ACCESS_EXPIRES_IN = "15m";
 process.env.JWT_REFRESH_EXPIRES_IN = "30d";
 const prisma = new PrismaClient();
 let createApp: typeof import("../src/app").createApp;
+let appPrisma: typeof import("../src/lib/prisma").prisma;
 beforeAll(async () => {
   ({ createApp } = await import("../src/app"));
+  ({ prisma: appPrisma } = await import("../src/lib/prisma"));
 });
 beforeEach(async () => {
   await prisma.pedidoCompraItem.deleteMany({
@@ -171,6 +173,31 @@ describe("suppliers and purchase orders", () => {
           .send({ status: "PLACED" })
       ).status
     ).toBe(200);
+    const placedList = await request(app)
+      .get("/purchase-orders")
+      .set(h(token, d.id));
+    const placedOrder = placedList.body.items.find((item: { id: string }) => item.id === o.body.id);
+    expect(placedOrder.allowedStatusTransitions).toContain("CONFIRMED");
+    expect(
+      (await request(app).get("/purchase-orders").set(h(token, g.id))).body.items
+        .some((item: { id: string }) => item.id === o.body.id)
+    ).toBe(false);
+    expect(
+      (await request(app)
+        .patch(`/purchase-orders/${o.body.id}/status`)
+        .set(h(token, d.id))
+        .send({ status: "CONFIRMED" })).status
+    ).toBe(200);
+    const confirmed = await request(app)
+      .get(`/purchase-orders/${o.body.id}`)
+      .set(h(token, d.id));
+    expect(confirmed.body.status).toBe("CONFIRMED");
+    expect(confirmed.body.allowedStatusTransitions).not.toContain("PLACED");
+    const miami = await request(app)
+      .get("/operations/miami/candidates")
+      .set(h(token, d.id));
+    expect(miami.status).toBe(200);
+    expect(miami.body.some((item: { pedido: { id: string } }) => item.pedido.id === o.body.id)).toBe(true);
     expect(
       (
         await request(app)
@@ -178,5 +205,80 @@ describe("suppliers and purchase orders", () => {
           .set(h(token, g.id))
       ).status
     ).toBe(404);
+  });
+
+  it("aceita uma única transição quando pedidos concorrentes partem do mesmo estado", async () => {
+    const { app, token, d } = await session();
+    const supplier = (await request(app)
+      .post("/suppliers")
+      .set(h(token, d.id))
+      .send({ nome: "Test Concurrent Supplier" })).body;
+    const product = await prisma.produto.findFirstOrThrow({ where: { lojaId: d.id } });
+    const order = await request(app)
+      .post("/purchase-orders")
+      .set(h(token, d.id))
+      .send({
+        fornecedorId: supplier.id,
+        numeroPedido: "TEST-CONCURRENT",
+        dataCompra: "2026-01-01",
+        itens: [{ produtoId: product.id, quantidade: 1, precoUnitario: 10 }]
+      });
+    expect(order.status).toBe(201);
+
+    const findFirst = appPrisma.pedidoCompra.findFirst;
+    let reads = 0;
+    let releaseReads = () => {};
+    const bothRead = new Promise<void>((resolve) => { releaseReads = resolve; });
+    const readSpy = vi.spyOn(appPrisma.pedidoCompra, "findFirst").mockImplementation(async (...args) => {
+      const result = await findFirst(...args);
+      if (args[0]?.where?.id === order.body.id && reads < 2) {
+        expect(result?.status).toBe("DRAFT");
+        reads += 1;
+        if (reads === 2) releaseReads();
+        await bothRead;
+      }
+      return result;
+    });
+    try {
+      const attempts = await Promise.all(Array.from({ length: 2 }, () =>
+        request(app)
+          .patch(`/purchase-orders/${order.body.id}/status`)
+          .set(h(token, d.id))
+          .send({ status: "PLACED" })
+      ));
+      expect(reads).toBe(2);
+      expect(attempts.filter((attempt) => attempt.status === 200)).toHaveLength(1);
+      expect(attempts.filter((attempt) => attempt.status === 409)).toHaveLength(1);
+      const finalOrder = await request(app)
+        .get(`/purchase-orders/${order.body.id}`)
+        .set(h(token, d.id));
+      expect(finalOrder.status).toBe(200);
+      expect(finalOrder.body.status).toBe("PLACED");
+    } finally {
+      readSpy.mockRestore();
+    }
+  });
+
+  it("pagina pedidos com ordem estável quando a data de compra é igual", async () => {
+    const { app, token, d } = await session();
+    const supplier = (await request(app)
+      .post("/suppliers")
+      .set(h(token, d.id))
+      .send({ nome: "Test Paging Supplier" })).body;
+    const created = await prisma.pedidoCompra.createManyAndReturn({
+      data: Array.from({ length: 3 }, (_, index) => ({
+        lojaId: d.id,
+        fornecedorId: supplier.id,
+        numeroPedido: `TEST-PAGE-${index}`,
+        dataCompra: new Date("2026-01-01")
+      }))
+    });
+    const pages = await Promise.all([1, 2].map((page) => request(app)
+      .get("/purchase-orders")
+      .query({ fornecedorId: supplier.id, page, limit: 2 })
+      .set(h(token, d.id))));
+    expect(pages.map((response) => response.status)).toEqual([200, 200]);
+    const ids = pages.flatMap((response) => response.body.items.map((item: { id: string }) => item.id));
+    expect(ids).toEqual(created.map((item) => item.id).sort().reverse());
   });
 });

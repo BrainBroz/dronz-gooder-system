@@ -61,14 +61,22 @@ export async function create(
         status: "IN_PROGRESS"
       }
     });
-    for (const a of bag.alocacoes)
+    const expectedByItem = new Map<string, { produtoId: string; quantidade: number }>();
+    for (const allocation of bag.alocacoes) {
+      const current = expectedByItem.get(allocation.pedidoCompraItemId);
+      expectedByItem.set(allocation.pedidoCompraItemId, {
+        produtoId: allocation.item.produtoId,
+        quantidade: (current?.quantidade ?? 0) + allocation.quantidade
+      });
+    }
+    for (const [pedidoCompraItemId, expected] of expectedByItem)
       await tx.recebimentoItem.create({
         data: {
           lojaId,
           recebimentoId: r.id,
-          pedidoCompraItemId: a.pedidoCompraItemId,
-          produtoId: a.item.produtoId,
-          quantidadeEsperada: a.quantidade
+          pedidoCompraItemId,
+          produtoId: expected.produtoId,
+          quantidadeEsperada: expected.quantidade
         }
       });
     await audit(tx, {

@@ -210,23 +210,30 @@ export function LoginPage() {
 }
 
 export function Shell({ children }: { children: React.ReactNode }) {
-  const { user, stores, activeStoreId, setActiveStoreId, clear } =
+  const { user, stores, activeStoreId, setActiveStoreId, clear, permissions } =
     useAuthStore();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
-  const navigationItems = [
+  // Só esconde atalhos: a autorização continua sendo decidida pela API.
+  const allNavigationItems: [string, string, string[]?][] = [
     ["Operação", "/operacao"],
     ["Checkpoints", "/checkpoints"],
-    ["Categorias", "/categorias"],
-    ["Produtos", "/produtos"],
-    ["Fornecedores", "/fornecedores"],
-    ["Compras", "/compras"],
-    ["Pedidos Operacionais", "/pedidos"],
+    ["Categorias", "/categorias", ["CATALOGO_VISUALIZAR"]],
+    ["Produtos", "/produtos", ["CATALOGO_VISUALIZAR"]],
+    ["Fornecedores", "/fornecedores", ["CATALOGO_VISUALIZAR"]],
+    ["Compras", "/compras", ["COMPRAS_IMPORTADAS_VISUALIZAR"]],
+    ["Pedidos Operacionais", "/pedidos", ["PEDIDOS_COMPRA_VISUALIZAR"]],
     ["Logística", "/logistica"],
-    ["Estoque", "/estoque"],
-    ["Financeiro", "/financeiro"],
-    ["Relatórios", "/relatorios"]
-  ] as const;
+    ["Estoque", "/estoque", ["ESTOQUE_VISUALIZAR", "RECEBIMENTO_VISUALIZAR"]],
+    ["Financeiro", "/financeiro", ["FINANCEIRO_VISUALIZAR"]],
+    ["Relatórios", "/relatorios", ["ANALYTICS_VISUALIZAR"]]
+  ];
+  const navigationItems = allNavigationItems.filter(
+    ([, , required]) =>
+      !required ||
+      permissions.includes("SYSTEM_ADMIN") ||
+      required.some((code) => permissions.includes(code))
+  );
   const navigateFromMenu = (path: string) => {
     setMobileMenuOpen(false);
     navigate(path);

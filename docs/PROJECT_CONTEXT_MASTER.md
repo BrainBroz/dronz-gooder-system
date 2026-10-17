@@ -15,6 +15,12 @@ Em caso de conflito, prevalecem, nesta ordem:
 
 ## 2. Objetivo do sistema
 
+### Estado verificado em 2026-10-16
+
+A baseline integrada atual é `caa148c` (merge da PR #4). Ela contém a fundação de marketplace e fila de compras da PR #2 (`9c6f087`), o gate local opcional da PR #3 (`d6a7714`) e o drawer de compra manual/externa da PR #4. Esses commits não implementam o pipeline Buyer Ingestion, adapters reais ou tracking automático. O contrato de reconstrução de UX está parcialmente implementado em Compras; não declarar toda a experiência operacional entregue.
+
+A execução local foi atualizada para essa baseline preservando arquivos não rastreados. No checkout de correção `codex/baseline-local-readiness`, o drawer recupera o mapping merchant–fornecedor e distingue pendência de concorrência. A prova manual pela UI criou e materializou uma compra fictícia de duas unidades, sem criar estoque. A tela de Pedidos Operacionais passou a consumir as transições permitidas devolvidas pelo backend; o pedido avançou por `DRAFT → PLACED → CONFIRMED` e apareceu como candidato em Miami. A jornada manual até estoque permanece não homologada: nenhuma mercadoria física de teste foi recebida. Resultados, alertas de dependências e limites de publicação estão em [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md). Não há publicação externa nesta etapa.
+
 O sistema coordena a operação internacional de Dronz e Gooder: compras, atribuição por loja, pedidos operacionais, logística, recebimento, entrada definitiva, estoque, custos e análise. A automação deve preservar revisão humana, rastreabilidade, auditoria e isolamento rigoroso por loja.
 
 As lojas iniciais são `dronz` e `gooder`. Uma remessa física pode transportar itens das duas lojas, mas cada item conserva seu próprio `lojaId`; patrimônio, estoque, autorização e operação não são misturados.
@@ -162,7 +168,7 @@ Não implementado:
 | 9 — redirecionamento operacional | `afff787`           | prioriza eBay Buyer e Amazon por e-mail sem iniciar adapters              | APROVADO PARA GATE EBAY |
 | Gate eBay Buyer                  | este commit         | comprova OAuth Production, `GetOrders` buyer, tracking, paginação e quota | PRONTO PARA ADAPTER APÓS BATCH 10 |
 
-As auditorias independentes dos Batches 7 e 8 foram aprovadas. A baseline funcional mais recente é `8644188`; os Batches 8.1, 8.2 e 9 alteram somente documentação e não modificam comportamento. O Batch 8.2 supera apenas a conclusão incorreta de que não havia fonte oficial para compras buyer do eBay. O Batch 9 supera o roadmap provider-first e define primeiro o contrato multicanal comum.
+As auditorias independentes dos Batches 7 e 8 foram aprovadas. A baseline funcional histórica do Batch 8 é `8644188`; a integração atual é `caa148c`, descrita na seção 2. Os Batches 8.1, 8.2 e 9 alteram somente documentação e não modificam comportamento. O Batch 8.2 supera apenas a conclusão incorreta de que não havia fonte oficial para compras buyer do eBay. O Batch 9 supera o roadmap provider-first e define primeiro o contrato multicanal comum.
 
 ## 10. Convenções de implementação
 
@@ -275,7 +281,8 @@ Continuam abertas e bloqueiam somente seus batches: vigência de cotação (`E-2
 
 ## 13. Riscos residuais conhecidos
 
-- A reconstrução de UX está somente contratada, não implementada. `FIX-0`, `UX-0` e as fases seguintes exigem autorização e commits independentes.
+- A reconstrução de UX está parcialmente implementada: `FIX-0`, `UX-0` e a fila de Compras (`UX-1B` a `UX-1E`) estão no `main`; Base Miami, Envios, Paraguai/Brasil, Estoque e demais áreas (`UX-4` a `UX-9`) seguem contratadas e exigem autorização por batch.
+- `FIX-1`/`FIX-2` (branch `claude/integrity-rbac`): movimentação de estoque, pagamentos, estornos, câmbio e custos passaram a usar `idempotentMutation` com bloqueio de linha e auditoria; pagamento em moeda diferente da do pedido é rejeitado; os módulos operacionais legados exigem capacidades próprias (seção de autorização de `domain-contracts.md`). A filtragem econômica campo a campo (F-10) continua gap, exceto na busca de pedido por número.
 - A Home transversal depende de `BE-HOME`; até sua implementação, cada visão deve declarar os domínios e o instante de referência cobertos.
 - Identidade física unitária, posição operacional genérica, compensação pós-materialização, reserva persistente com ator/timestamp, fonte textual de câmbio e filtragem econômica por permissão são gaps de backend ou schema, não capacidades atuais.
 - As três projeções do contrato de UX não podem ser colapsadas no frontend. Materialização comercial não prova localização física e reembolso econômico não move mercadoria automaticamente.
@@ -287,7 +294,7 @@ Continuam abertas e bloqueiam somente seus batches: vigência de cotação (`E-2
 - O Gate 9.1 confirmou apenas capacidades documentadas: o onboarding Amazon Business não foi iniciado, nenhum papel ou credential foi comprovado e nenhuma chamada real foi executada. `ORDERS` e `ORDER_ITEMS` são o núcleo mínimo; remessas, tracking, documentos, reconciliação e User Management são progressivos e não bloqueiam esse núcleo quando indisponíveis.
 - O Gate 9.2 fornece o runbook operacional e permanece válido para a futura retomada Amazon. Somente o adapter Amazon fica bloqueado até Analytics, LWA, consentimento, secret manager e acesso produtivo sanitizado a pedidos e itens.
 - Para os Batches 11–13, permanecem abertas as decisões de contas eBay, caixas autorizadas, retenção de e-mail, pesos/faixas de confiança, tolerância monetária, rateio de encargos, arredondamento, eventual fechamento mensal e planilha histórica. Cada uma bloqueia apenas a implementação que dependa diretamente dela.
-- O serviço atual trata mudança incompatível no payload de uma compra já importada como conflito. O contrato buyer determina evidências versionadas e reconciliação, mas essa evolução ainda não está implementada.
+- Na continuação local do Batch 10, a sincronização registra evidências versionadas e candidatos sem importar a compra. Aprovação/rejeição humana versionada, auditada e idempotente foi implementada; nova evidência após aprovação mantém a compra intacta e marca o candidato com divergência. Conflitos de evidência são persistidos por tipo, com referência às versões comparadas e consulta paginada/auditada; vínculos conflitantes legados são preservados sem inferir resolução. Compras importadas com a mesma identidade são vinculadas ao candidato sem aprovação retroativa e não podem ser atribuídas nem materializadas enquanto a revisão estiver pendente. Falha de evidência mantém o cursor no início da página para replay seguro. Conciliação multicanal e a política humana de resolução permanecem pendentes, de modo que o Batch 10 ainda não está aprovado para adapters reais.
 - O futuro tracking precisa normalizar múltiplos pacotes/códigos e eventos fora de ordem sem acoplamento ao provider; a baseline atual não possui esse motor.
 - Contratos antigos de Relatórios ainda usam estruturas genéricas em alguns pontos; sua evolução exige batch próprio para não alterar respostas existentes.
 - Existem casts legados em rotas e analytics da API; removê-los exige tipagem dos contratos afetados e testes específicos.
