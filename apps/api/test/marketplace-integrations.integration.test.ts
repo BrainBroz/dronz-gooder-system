@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { PrismaClient } from "@prisma/client";
@@ -514,6 +515,59 @@ describe("marketplace integration foundation", () => {
     expect(candidate.status).toBe("AGUARDANDO_APROVACAO");
     expect(await prisma.buyerReconciliationConflict.count({
       where: { candidateId: candidate.id }
+    })).toBe(0);
+    expect(await prisma.buyerEvidence.count({
+      where: { externalEvidenceId: externalOrderId }
+    })).toBe(2);
+    const approved = await approveCandidate(fixture, externalOrderId);
+    expect((await sync(order(externalOrderId, {
+      orderedAt: "2026-07-13T10:00:00Z",
+      updatedAt: "2026-07-13T11:00:00Z"
+    }), "batch8-same-instant-3")).status).toBe("SUCCEEDED");
+    expect(await prisma.buyerPurchaseCandidate.findUniqueOrThrow({
+      where: { id: candidate.id }
+    })).toMatchObject({ status: "APROVADA", version: approved.version });
+    expect(await prisma.buyerEvidence.count({
+      where: { externalEvidenceId: externalOrderId }
+    })).toBe(2);
+    expect(await prisma.buyerReconciliationConflict.count({
+      where: { candidateId: candidate.id }
+    })).toBe(0);
+  });
+
+  it("não bloqueia compra aprovada por grafia de data legada equivalente", async () => {
+    const fixture = await connectionFixture("EBAY", "SHARED", "legacy-date-format");
+    const identity = await getAuthenticatedUser(fixture.userId);
+    const externalOrderId = "batch8-legacy-date-format";
+    const source = order(externalOrderId);
+    expect((await syncConnection(identity, fixture.connectionId, { replay: true },
+      "batch8-legacy-date-initial",
+      disabledRegistry(new FakeAdapter("EBAY", [{ orders: [source] }]))
+    )).status).toBe("SUCCEEDED");
+    const approved = await approveCandidate(fixture, externalOrderId);
+    const evidence = await prisma.buyerEvidence.findFirstOrThrow({
+      where: { externalEvidenceId: externalOrderId }
+    });
+    const legacy = { ...source, orderedAt: "2026-07-13T10:00:00Z" };
+    await prisma.buyerEvidence.update({
+      where: { id: evidence.id },
+      data: {
+        normalizedPayload: legacy,
+        payloadHash: createHash("sha256").update(JSON.stringify(legacy)).digest("hex")
+      }
+    });
+    expect((await syncConnection(identity, fixture.connectionId, { replay: true },
+      "batch8-legacy-date-replay",
+      disabledRegistry(new FakeAdapter("EBAY", [{ orders: [source] }]))
+    )).status).toBe("SUCCEEDED");
+    expect(await prisma.buyerPurchaseCandidate.findUniqueOrThrow({
+      where: { id: approved.id }
+    })).toMatchObject({ status: "APROVADA", version: approved.version });
+    expect(await prisma.buyerEvidence.count({
+      where: { externalEvidenceId: externalOrderId }
+    })).toBe(1);
+    expect(await prisma.buyerReconciliationConflict.count({
+      where: { candidateId: approved.id }
     })).toBe(0);
   });
 

@@ -235,6 +235,8 @@ Enquanto um candidato vinculado não estiver aprovado, a atribuição por loja t
 
 Uma primeira evidência cujo item use moeda diferente da moeda do pedido entra como `COM_DIVERGENCIA`, com conflito `CURRENCY` e sem ação de aprovação. O POST de aprovação revalida a moeda antes de criar a compra. Isso não converte valores nem presume que diferenças de moeda sejam seguras.
 
+Datas ISO são normalizadas para o mesmo instante antes do hash de evidência. Um replay com grafia de data equivalente não cria nova evidência nem bloqueia uma compra aprovada; a comparação com a evidência corrente também preserva esse comportamento para snapshots gravados antes da normalização.
+
 ## 9. RBAC, read models e auditoria
 
 Permissões comuns:

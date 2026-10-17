@@ -12,6 +12,7 @@ import type { NormalizedMarketplaceOrder } from "./marketplace-integrations.type
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const normalizeId = (value: string) => value.trim().normalize("NFC");
+const iso = (value: string) => new Date(value).toISOString();
 const byJson = <T>(left: T, right: T) => {
   const a = JSON.stringify(left);
   const b = JSON.stringify(right);
@@ -24,14 +25,22 @@ function canonicalOrder(order: NormalizedMarketplaceOrder) {
   )) as NormalizedMarketplaceOrder;
   return {
     ...unicodeNormalized,
+    orderedAt: iso(unicodeNormalized.orderedAt),
+    updatedAt: iso(unicodeNormalized.updatedAt),
     items: [...unicodeNormalized.items].sort(byJson),
     shipments: unicodeNormalized.shipments
       .map((shipment) => ({
         ...shipment,
+        shippedAt: shipment.shippedAt ? iso(shipment.shippedAt) : undefined,
+        updatedAt: iso(shipment.updatedAt),
         packages: shipment.packages
           .map((externalPackage) => ({
             ...externalPackage,
-            trackings: [...externalPackage.trackings].sort(byJson)
+            trackings: externalPackage.trackings.map((tracking) => ({
+              ...tracking,
+              createdAt: tracking.createdAt ? iso(tracking.createdAt) : undefined,
+              updatedAt: iso(tracking.updatedAt)
+            })).sort(byJson)
           }))
           .sort(byJson)
       }))
@@ -128,6 +137,19 @@ export async function recordMarketplaceEvidence(input: {
           return { ...replay, candidateId: candidate.id, created: false };
         }
 
+        const prior = await tx.buyerPurchaseCandidate.findUnique({
+          where: { provider_contaExternaId_externalOrderIdNormalized: candidateIdentity },
+          include: { currentEvidence: {
+            select: { version: true, sourceOccurredAt: true, normalizedPayload: true }
+          } }
+        });
+        const previous = prior && normalizedMarketplaceOrderSchema.safeParse(
+          prior.currentEvidence.normalizedPayload
+        );
+        if (prior && previous?.success && JSON.stringify(canonicalOrder(previous.data)) === payload)
+          return { id: prior.currentEvidenceId, version: prior.currentEvidence.version,
+            candidateId: prior.id, created: false };
+
         const latest = await tx.buyerEvidence.findFirst({
           where: { sourceIdentity, externalEvidenceId },
           orderBy: { version: "desc" },
@@ -181,21 +203,12 @@ export async function recordMarketplaceEvidence(input: {
           },
           select: { id: true, version: true }
         });
-        const prior = await tx.buyerPurchaseCandidate.findUnique({
-          where: { provider_contaExternaId_externalOrderIdNormalized: candidateIdentity },
-          include: { currentEvidence: {
-            select: { sourceOccurredAt: true, normalizedPayload: true }
-          } }
-        });
         if (prior?.compraImportadaId && prior.compraImportadaId !== legacyPurchase?.id)
           await tx.$queryRaw`SELECT id FROM "CompraImportada" WHERE id = ${prior.compraImportadaId} FOR UPDATE`;
         const linkedPurchaseId = prior?.compraImportadaId ?? legacyPurchase?.id ?? null;
         const incomingTime = new Date(input.order.updatedAt).getTime();
         const currentTime = prior?.currentEvidence.sourceOccurredAt.getTime() ?? -Infinity;
         const sameTime = currentTime === incomingTime;
-        const previous = prior && normalizedMarketplaceOrderSchema.safeParse(
-          prior.currentEvidence.normalizedPayload
-        );
         const conflictTypes: TipoConflitoEvidenciaCompra[] = !prior ? []
           : previous && previous.success
             ? materialConflictTypes(canonicalOrder(previous.data), normalized)
