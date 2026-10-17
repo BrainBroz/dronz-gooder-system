@@ -494,6 +494,29 @@ describe("marketplace integration foundation", () => {
     expect(approval.status).toBe(409);
   });
 
+  it("não cria conflito por datas ISO equivalentes", async () => {
+    const fixture = await connectionFixture("EBAY", "SHARED", "same-instant");
+    const identity = await getAuthenticatedUser(fixture.userId);
+    const externalOrderId = "batch8-same-instant";
+    const sync = (payload: Order, key: string) => syncConnection(
+      identity, fixture.connectionId, { replay: true }, key,
+      disabledRegistry(new FakeAdapter("EBAY", [{ orders: [payload] }]))
+    );
+    expect((await sync(order(externalOrderId), "batch8-same-instant-1")).status)
+      .toBe("SUCCEEDED");
+    expect((await sync(order(externalOrderId, {
+      orderedAt: "2026-07-13T10:00:00Z",
+      updatedAt: "2026-07-13T12:00:00.000Z"
+    }), "batch8-same-instant-2")).status).toBe("SUCCEEDED");
+    const candidate = await prisma.buyerPurchaseCandidate.findFirstOrThrow({
+      where: { externalOrderIdNormalized: externalOrderId }
+    });
+    expect(candidate.status).toBe("AGUARDANDO_APROVACAO");
+    expect(await prisma.buyerReconciliationConflict.count({
+      where: { candidateId: candidate.id }
+    })).toBe(0);
+  });
+
   it("marca quantidade e moeda divergentes antes da aprovação sem perder evidências", async () => {
     for (const kind of ["quantity", "currency"] as const) {
       const fixture = await connectionFixture("EBAY", "SHARED", `buyer-divergence-${kind}`);
@@ -873,6 +896,26 @@ describe("marketplace integration foundation", () => {
     });
     expect(await prisma.buyerApprovalDecision.count({ where: { candidateId: candidate.id } }))
       .toBe(0);
+    const detail = await request(fixture.app)
+      .get(`/imported-purchases/${imported.body.id}`).set(bearer(fixture.token));
+    expect(detail.body.allowedActions).not.toContain("ASSIGN_TO_STORE");
+    expect(detail.body.allowedActions).not.toContain("MATERIALIZE_STORE_ALLOCATION");
+    const list = await request(fixture.app)
+      .get("/imported-purchases").set(bearer(fixture.token));
+    expect(list.body.items.find((entry: { id: string }) => entry.id === imported.body.id)
+      .allowedActions).not.toContain("ASSIGN_TO_STORE");
+    const importedItem = await prisma.compraImportadaItem.findFirstOrThrow({
+      where: { compraImportadaId: imported.body.id }
+    });
+    const assign = await request(fixture.app)
+      .put(`/imported-purchases/items/${importedItem.id}/assignments/${fixture.dronz.id}`)
+      .set(bearer(fixture.token))
+      .set("idempotency-key", "batch8-buyer-late-legacy-assign")
+      .send({ quantidade: 1, expectedVersion: importedItem.version });
+    expect(assign.status).toBe(409);
+    expect(assign.body.error).toBe("buyer_evidence_review_required");
+    expect(await prisma.atribuicaoCompraItem.count({ where: { itemExternoId: importedItem.id } }))
+      .toBe(0);
     const blocked = await request(fixture.app)
       .post(`/imported-purchases/${imported.body.id}/materializations/${fixture.dronz.id}`)
       .set(bearer(fixture.token))
@@ -928,6 +971,16 @@ describe("marketplace integration foundation", () => {
       conexaoMarketplaceId: fixture.connectionId
     });
     expect(purchase.itens).toHaveLength(1);
+    const approvedDetail = await request(fixture.app)
+      .get(`/imported-purchases/${purchase.id}`).set(bearer(fixture.token));
+    expect(approvedDetail.body.allowedActions).toContain("ASSIGN_TO_STORE");
+    const assigned = await request(fixture.app)
+      .put(`/imported-purchases/items/${purchase.itens[0].id}/assignments/${fixture.dronz.id}`)
+      .set(bearer(fixture.token))
+      .set("idempotency-key", "batch8-buyer-approved-assign")
+      .send({ quantidade: 2, expectedVersion: purchase.itens[0].version });
+    expect(assigned.status).toBe(200);
+    expect(assigned.body).toMatchObject({ lojaId: fixture.dronz.id, quantidade: 2 });
     expect(await prisma.buyerApprovalDecision.count({
       where: { candidateId: candidate.id, decision: "APROVAR" }
     })).toBe(1);
@@ -1269,6 +1322,50 @@ describe("marketplace integration foundation", () => {
     } finally {
       setAuditFailureForTests();
     }
+  });
+
+  it("não avança o cursor além de uma página com evidência não persistida", async () => {
+    const fixture = await connectionFixture("EBAY", "SHARED", "cursor-retry");
+    const identity = await getAuthenticatedUser(fixture.userId);
+    const firstId = "batch8-cursor-first";
+    const failedId = "batch8-cursor-failed";
+    const laterId = "batch8-cursor-later";
+    const adapter = new FakeAdapter("EBAY", [
+      { orders: [order(firstId)], nextCursor: "cursor-page-2" },
+      { orders: [order(failedId)], nextCursor: "cursor-page-3" },
+      { orders: [order(laterId)] }
+    ]);
+    setAuditFailureForTests((entry) => entry.action === "BUYER_EVIDENCE_RECORDED" &&
+      JSON.stringify(entry.after).includes(failedId));
+    try {
+      const partial = await syncConnection(identity, fixture.connectionId,
+        { replay: false }, "batch8-cursor-partial", disabledRegistry(adapter));
+      expect(partial).toMatchObject({
+        status: "PARTIALLY_SUCCEEDED", falhas: 1, cursorFinal: "cursor-page-2"
+      });
+      expect(adapter.calls.map((call) => call.cursor))
+        .toEqual([undefined, "cursor-page-2"]);
+      expect(await prisma.conexaoMarketplace.findUniqueOrThrow({
+        where: { id: fixture.connectionId }, select: { cursorSincronizacao: true }
+      })).toEqual({ cursorSincronizacao: "cursor-page-2" });
+      expect(await prisma.buyerEvidence.count({
+        where: { externalOrderIdNormalized: { in: [failedId, laterId] } }
+      })).toBe(0);
+    } finally {
+      setAuditFailureForTests();
+    }
+    const retry = new FakeAdapter("EBAY", [
+      { orders: [order(failedId)], nextCursor: "cursor-page-3" },
+      { orders: [order(laterId)] }
+    ]);
+    const recovered = await syncConnection(identity, fixture.connectionId,
+      { replay: false }, "batch8-cursor-recovered", disabledRegistry(retry));
+    expect(recovered.status).toBe("SUCCEEDED");
+    expect(retry.calls.map((call) => call.cursor))
+      .toEqual(["cursor-page-2", "cursor-page-3"]);
+    expect(await prisma.buyerEvidence.count({
+      where: { externalOrderIdNormalized: { in: [firstId, failedId, laterId] } }
+    })).toBe(3);
   });
 
   it("reverte evidência e conflito se a auditoria da divergência falhar", async () => {

@@ -44,7 +44,8 @@ function materialConflictTypes(
   current: NormalizedMarketplaceOrder
 ): TipoConflitoEvidenciaCompra[] {
   const types: TipoConflitoEvidenciaCompra[] = [];
-  if (previous.orderedAt !== current.orderedAt) types.push("ORDER_DATE");
+  if (Date.parse(previous.orderedAt) !== Date.parse(current.orderedAt))
+    types.push("ORDER_DATE");
   if (previous.cancelled !== current.cancelled) types.push("CANCELLATION_CHANGED");
   if (previous.externalStatus !== current.externalStatus) types.push("EXTERNAL_STATUS");
   if (previous.currency !== current.currency ||

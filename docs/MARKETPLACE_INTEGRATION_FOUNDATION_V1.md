@@ -231,6 +231,8 @@ Conflitos de evidências antes da aprovação ficam em `BuyerReconciliationConfl
 
 Quando uma compra operacional já existe com a mesma identidade provider/conta/pedido, sincronização e importação vinculam o candidato à compra sem criar aprovação retroativa. O vínculo retira a ação de materializar do read model e é revalidado no POST. A migration `20261017022000_link_legacy_buyer_candidates` faz o mesmo para pares persistidos antes desta correção, incrementando a versão do candidato sem mudar seu estado; a migração não inventa ator nem decisão humana.
 
+Enquanto um candidato vinculado não estiver aprovado, a atribuição por loja também fica ausente dos read models e é rejeitada no POST. Se qualquer evidência de uma página falhar depois das tentativas limitadas para conflito transitório, a sincronização termina parcialmente e mantém o cursor no início dessa página. A próxima execução reprocessa a página; evidências já gravadas são deduplicadas pelo hash. Datas ISO equivalentes são comparadas como instantes, sem criar divergência material artificial.
+
 ## 9. RBAC, read models e auditoria
 
 Permissões comuns:

@@ -951,24 +951,33 @@ async function executePages(
     } catch (error) {
       throw translateMarketplaceAdapterError(error);
     }
+    let pageFailed = false;
     for (const order of page.orders) {
       counts.processed += 1;
       try {
-        const result = await importNormalizedOrder(
-          identity,
-          connection,
-          order,
-          correlationId,
-          idempotencyKey
-        );
+        let result: Awaited<ReturnType<typeof importNormalizedOrder>>;
+        for (let attempt = 0; ; attempt += 1) {
+          try {
+            result = await importNormalizedOrder(
+              identity, connection, order, correlationId, idempotencyKey
+            );
+            break;
+          } catch (error) {
+            if (attempt < 2 && error instanceof AppError &&
+                error.code === "concurrent_modification") continue;
+            throw error;
+          }
+        }
         if (result.created) counts.created += 1;
         else counts.updated += 1;
       } catch (error) {
+        pageFailed = true;
         if (error instanceof AppError && error.status === 409)
           counts.conflicts += 1;
         else counts.failures += 1;
       }
     }
+    if (pageFailed) return { counts, cursor: lastCursor };
     cursor = page.nextCursor;
     if (cursor) lastCursor = cursor;
     pageCount += 1;

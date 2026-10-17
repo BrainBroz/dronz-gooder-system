@@ -544,10 +544,16 @@ export async function setAssignment(
         where: { id: itemId },
         include: {
           atribuicoes: true,
-          compraImportada: { include: { conexaoMarketplace: true } }
+          compraImportada: { include: {
+            conexaoMarketplace: true,
+            buyerCandidate: { select: { status: true } }
+          } }
         }
       });
       if (!item) throw new AppError(404, "not_found");
+      if (item.compraImportada.buyerCandidate?.status !== undefined &&
+          item.compraImportada.buyerCandidate.status !== "APROVADA")
+        throw new AppError(409, "buyer_evidence_review_required");
       const connection = item.compraImportada.conexaoMarketplace;
       if (
         connection?.escopo === "STORE_DEDICATED" &&
@@ -1143,7 +1149,7 @@ export async function listPurchases(
       if (buyerReviewPending)
         blockedReasons.push({
           code: "BUYER_EVIDENCE_REVIEW_REQUIRED",
-          message: "A evidência da compra exige revisão antes de materializar."
+          message: "A evidência da compra exige revisão antes de atribuir ou materializar."
         });
       return {
         id: purchase.id,
@@ -1170,13 +1176,12 @@ export async function listPurchases(
           pending: quantities.total - quantities.assigned
         },
         conflictCount: purchase.conflitos.length,
-        allowedActions:
-          purchase.conflitos.length || buyerReviewPending ||
-          !hasPendingMaterialization(purchase)
-            ? actionsFor(identity).filter(
-                (action) => action !== "MATERIALIZE_STORE_ALLOCATION"
-              )
-            : actionsFor(identity),
+        allowedActions: actionsFor(identity).filter((action) =>
+          !(buyerReviewPending && action === "ASSIGN_TO_STORE") &&
+          !(action === "MATERIALIZE_STORE_ALLOCATION" &&
+            (purchase.conflitos.length || buyerReviewPending ||
+              !hasPendingMaterialization(purchase)))
+        ),
         blockedReasons
       };
     })
@@ -1295,7 +1300,7 @@ export async function purchaseDetail(identity: AuthIdentity, id: string) {
   if (buyerReviewPending)
     blockedReasons.push({
       code: "BUYER_EVIDENCE_REVIEW_REQUIRED",
-      message: "A evidência da compra exige revisão antes de materializar."
+      message: "A evidência da compra exige revisão antes de atribuir ou materializar."
     });
   if (hasCompletedStoreExcess(purchase))
     blockedReasons.push({
@@ -1305,6 +1310,7 @@ export async function purchaseDetail(identity: AuthIdentity, id: string) {
   return {
     ...purchase,
     allowedActions: actionsFor(identity).filter((action) => {
+      if (action === "ASSIGN_TO_STORE") return !buyerReviewPending;
       if (action === "MATERIALIZE_STORE_ALLOCATION")
         return (
           !buyerReviewPending && !purchase.conflitos.some(
