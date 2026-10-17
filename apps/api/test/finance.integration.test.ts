@@ -11,11 +11,13 @@ process.env.JWT_ACCESS_EXPIRES_IN = "15m";
 process.env.JWT_REFRESH_EXPIRES_IN = "30d";
 const prisma = new PrismaClient();
 const createdQuoteIds: string[] = [];
+const createdExpenseIds: string[] = [];
 let createApp: typeof import("../src/app").createApp;
 beforeAll(async () => {
   ({ createApp } = await import("../src/app"));
 });
 afterAll(async () => {
+  await prisma.despesa.deleteMany({ where: { id: { in: createdExpenseIds } } });
   await prisma.cotacaoCambio.deleteMany({ where: { id: { in: createdQuoteIds } } });
   const orders = await prisma.pedidoCompra.findMany({
     where: { numeroPedido: { startsWith: "FIN-" } },
@@ -65,6 +67,23 @@ async function setup() {
   return { app, d, g, h, order: order.body };
 }
 describe("purchase finance", () => {
+  it("persiste despesa tenantada conforme o schema da baseline", async () => {
+    const store = await prisma.loja.findUniqueOrThrow({ where: { slug: "dronz" } });
+    const expense = await prisma.despesa.create({
+      data: {
+        lojaId: store.id,
+        categoria: "OPERACIONAL",
+        descricao: "Validação da migration de despesas",
+        valor: "12.34",
+        dataDespesa: new Date("2026-10-16T12:00:00.000Z")
+      }
+    });
+    createdExpenseIds.push(expense.id);
+    expect(await prisma.despesa.findUniqueOrThrow({ where: { id: expense.id } }))
+      .toMatchObject({ lojaId: store.id, categoria: "OPERACIONAL" });
+    expect(expense.valor.toString()).toBe("12.34");
+  });
+
   it("registra cotação com valor de mercado e margem sem alterar o valor efetivo", async () => {
     const app = createApp();
     const login = await request(app).post("/auth/login")
