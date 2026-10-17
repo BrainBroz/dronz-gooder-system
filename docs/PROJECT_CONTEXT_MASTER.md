@@ -281,7 +281,8 @@ Continuam abertas e bloqueiam somente seus batches: vigência de cotação (`E-2
 
 ## 13. Riscos residuais conhecidos
 
-- A reconstrução de UX está somente contratada, não implementada. `FIX-0`, `UX-0` e as fases seguintes exigem autorização e commits independentes.
+- A reconstrução de UX está parcialmente implementada: `FIX-0`, `UX-0` e a fila de Compras (`UX-1B` a `UX-1E`) estão no `main`; Base Miami, Envios, Paraguai/Brasil, Estoque e demais áreas (`UX-4` a `UX-9`) seguem contratadas e exigem autorização por batch.
+- `FIX-1`/`FIX-2` (branch `claude/integrity-rbac`): movimentação de estoque, pagamentos, estornos, câmbio e custos passaram a usar `idempotentMutation` com bloqueio de linha e auditoria; pagamento em moeda diferente da do pedido é rejeitado; os módulos operacionais legados exigem capacidades próprias (seção de autorização de `domain-contracts.md`). A filtragem econômica campo a campo (F-10) continua gap, exceto na busca de pedido por número.
 - A Home transversal depende de `BE-HOME`; até sua implementação, cada visão deve declarar os domínios e o instante de referência cobertos.
 - Identidade física unitária, posição operacional genérica, compensação pós-materialização, reserva persistente com ator/timestamp, fonte textual de câmbio e filtragem econômica por permissão são gaps de backend ou schema, não capacidades atuais.
 - As três projeções do contrato de UX não podem ser colapsadas no frontend. Materialização comercial não prova localização física e reembolso econômico não move mercadoria automaticamente.
