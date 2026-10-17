@@ -43,6 +43,8 @@ A primeira evidência com moeda do item diferente da moeda do pedido agora abre 
 
 A criação de mala adquire o mesmo lock da transição de viagem e revalida o estado dentro da transação. Assim, chegada e criação concorrentes não deixam uma nova mala sem o checkpoint exigido. O cancelamento de viagem com itens alocados continua bloqueado até desalocação; a recuperação de mala já fechada ainda depende de decisão operacional.
 
+O backfill antigo de candidatos Buyer priorizava versão de ingestão e podia deixar um snapshot ativo atrasado à frente de cancelamento mais recente. A migration corretiva `20261017023000_repair_legacy_buyer_projection` reordena apenas candidatos legados ainda não decididos nem modificados, registra divergência quando necessário e preserva compras/decisões existentes. Banco limpo com 31 migrations e upgrade do caso cancelamento → ativo atrasado foram validados no banco de testes. Aprovações feitas antes da correção exigem auditoria específica; não houve reversão automática de operação existente.
+
 - Configure `WEB_ORIGIN` com a origem HTTPS exata da aplicação web; CORS não aceita wildcard com credenciais.
 - Gere valores fortes e distintos para `JWT_ACCESS_SECRET` e `JWT_REFRESH_SECRET` em um gerenciador de segredos.
 - Em `NODE_ENV=production`, o refresh token usa cookie `HttpOnly`, `SameSite=Lax`, `Secure` e `Path=/`; o token bruto não integra respostas nem storage do navegador.

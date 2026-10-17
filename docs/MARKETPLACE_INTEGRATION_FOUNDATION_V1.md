@@ -239,6 +239,8 @@ Datas ISO são normalizadas para o mesmo instante antes do hash de evidência. U
 
 IDs oficiais de linha repetidos no mesmo pedido são rejeitados antes da persistência; a página de sincronização fica parcial para correção na fonte e repetição controlada. Candidatos legados que já contenham essa duplicidade não oferecem `APPROVE`, e o POST revalida a restrição.
 
+A migration aditiva `20261017023000_repair_legacy_buyer_projection` reavalia apenas candidatos intocados do backfill inicial: escolhe a evidência pelo instante externo (cancelamento vence empate), bloqueia divergências materiais conservadoramente e registra conflitos legados sem fabricar decisão humana. Candidatos já decididos, com compra vinculada, conflito existente ou ingestão posterior não são reescritos. Caso algum deles tenha sido aprovado antes desta correção com evidência obsoleta, exige auditoria operacional específica; a migration não desfaz pedidos ou estoque.
+
 ## 9. RBAC, read models e auditoria
 
 Permissões comuns:
