@@ -212,15 +212,15 @@ export async function createSuitcase(
   lojaId: string,
   d: { viagemId: string; codigo: string; limitePesoKg?: number }
 ) {
-  const t = await prisma.viagem.findFirst({
-    where: {
-      id: d.viagemId,
-      lojaId,
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Viagem" WHERE id = ${d.viagemId} AND "lojaId" = ${lojaId} FOR UPDATE`;
+    const trip = await tx.viagem.findFirst({ where: {
+      id: d.viagemId, lojaId,
       status: { notIn: ["CANCELLED", "ARRIVED_BRAZIL"] }
-    }
+    } });
+    if (!trip) throw new AppError(404, "not_found");
+    return tx.mala.create({ data: { ...d, lojaId } });
   });
-  if (!t) throw new AppError(404, "not_found");
-  return prisma.mala.create({ data: { ...d, lojaId } });
 }
 export async function addVolume(
   lojaId: string,

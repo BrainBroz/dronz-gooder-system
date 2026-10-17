@@ -135,6 +135,50 @@ describe("international logistics", () => {
       .toBe("CLOSED_FOR_ALLOCATION");
   });
 
+  it("serializa criação de mala e chegada para não admitir mala sem checkpoint", async () => {
+    const { app, t, d } = await s();
+    fixture = await paraguayTripInTransit(d.id);
+    const { trip, bag } = fixture;
+    await prisma.mala.update({ where: { id: bag.id }, data: { status: "CANCELLED" } });
+    let locked!: () => void;
+    let release!: () => void;
+    const lockReady = new Promise<void>((resolve) => { locked = resolve; });
+    const releaseLock = new Promise<void>((resolve) => { release = resolve; });
+    const arrival = prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Viagem" WHERE id = ${trip.id} FOR UPDATE`;
+      locked();
+      await releaseLock;
+      await tx.viagem.update({
+        where: { id: trip.id }, data: { status: "ARRIVED_BRAZIL" }
+      });
+    });
+    await lockReady;
+    const creation = request(app).post("/logistics/suitcases").set(h(t, d.id))
+      .send({ viagemId: trip.id, codigo: `RACE-${trip.id}` }).then((response) => response);
+    try {
+      let waiting = false;
+      for (let attempt = 0; attempt < 300 && !waiting; attempt++) {
+        const rows = await prisma.$queryRaw<Array<{ count: bigint }>>`
+          SELECT count(*) FROM pg_stat_activity
+          WHERE datname = current_database() AND wait_event_type = 'Lock'
+            AND (query LIKE '%"Viagem"%' OR query LIKE '%"Mala"%')
+        `;
+        waiting = rows[0].count > 0n;
+      }
+      expect(waiting).toBe(true);
+    } finally {
+      release();
+      await arrival;
+    }
+    expect((await creation).status).toBe(404);
+    const current = await prisma.viagem.findUniqueOrThrow({ where: { id: trip.id } });
+    const activeBags = await prisma.mala.count({
+      where: { viagemId: trip.id, status: { not: "CANCELLED" } }
+    });
+    expect(current.status).toBe("ARRIVED_BRAZIL");
+    expect(activeBags).toBe(0);
+  });
+
   it("bloqueia cancelamento até desalocar e não aceita alocação após cancelar", async () => {
     const { app, t, d } = await s();
     fixture = await createOperationalFixture(prisma, d.id);
