@@ -1082,6 +1082,7 @@ model PedidoCompra {
   @@index([lojaId, fornecedorId])
   @@index([lojaId, dataCompra])
   @@index([compraImportadaId])
+  @@index([statusAtribuicao])
 }
 
 model PedidoCompraItem {
@@ -1616,8 +1617,9 @@ model CustoPedidoItem {
 }
 
 enum SimulacaoRisco {
-  DECLARANDO
-  NAO_DECLARANDO
+  SEM_RISCO
+  SIMULACAO
+  EFETIVADA
 }
 
 model SimulacaoViagem {
@@ -1697,7 +1699,7 @@ model SimulacaoViagemParametro {
 model AtribuicaoItem {
   id                 String   @id @default(cuid())
   compraImportadaId  String?
-  pedidoCompraItemId String?
+  pedidoCompraItemId String
   lojaId             String
   quantidade         Int
   atribuidoPorId     String
@@ -1707,11 +1709,10 @@ model AtribuicaoItem {
   updatedAt          DateTime @updatedAt
 
   compraImportada  CompraImportada?  @relation(fields: [compraImportadaId], references: [id], onDelete: Cascade)
-  pedidoCompraItem PedidoCompraItem? @relation(fields: [pedidoCompraItemId, lojaId], references: [id, lojaId], onDelete: SetNull)
+  pedidoCompraItem PedidoCompraItem @relation(fields: [pedidoCompraItemId, lojaId], references: [id, lojaId], onDelete: Cascade)
   loja             Loja              @relation(fields: [lojaId], references: [id], onDelete: Restrict)
   atribuidoPor     Usuario           @relation(fields: [atribuidoPorId], references: [id], onDelete: Restrict)
 
-  @@unique([compraImportadaId, lojaId])
   @@unique([pedidoCompraItemId, lojaId])
   @@index([lojaId, atribuidoEm])
   @@index([compraImportadaId])
