@@ -1661,6 +1661,43 @@ describe("marketplace integration foundation", () => {
     })).toBe(3);
   });
 
+  it("isola o cursor incremental de replay histórico parcial ou completo", async () => {
+    const fixture = await connectionFixture("EBAY", "SHARED", "replay-cursor");
+    const identity = await getAuthenticatedUser(fixture.userId);
+    const externalOrderId = "batch8-replay-cursor-order";
+    await prisma.conexaoMarketplace.update({
+      where: { id: fixture.connectionId },
+      data: { cursorSincronizacao: "incremental-page-3" }
+    });
+    const savedCursor = async () => (await prisma.conexaoMarketplace.findUniqueOrThrow({
+      where: { id: fixture.connectionId }, select: { cursorSincronizacao: true }
+    })).cursorSincronizacao;
+    setAuditFailureForTests((entry) => entry.action === "BUYER_EVIDENCE_RECORDED" &&
+      JSON.stringify(entry.after).includes(externalOrderId));
+    try {
+      const failed = new FakeAdapter("EBAY", [{ orders: [order(externalOrderId)] }]);
+      const partial = await syncConnection(identity, fixture.connectionId,
+        { replay: true }, "batch8-replay-cursor-partial", disabledRegistry(failed));
+      expect(partial).toMatchObject({ status: "PARTIALLY_SUCCEEDED", falhas: 1 });
+      expect(failed.calls.map((call) => call.cursor)).toEqual([undefined]);
+      expect(await savedCursor()).toBe("incremental-page-3");
+      expect(await prisma.buyerEvidence.count({
+        where: { externalOrderIdNormalized: externalOrderId }
+      })).toBe(0);
+    } finally {
+      setAuditFailureForTests();
+    }
+    const replay = new FakeAdapter("EBAY", [
+      { orders: [order(externalOrderId)], nextCursor: "replay-page-2" },
+      { orders: [] }
+    ]);
+    const recovered = await syncConnection(identity, fixture.connectionId,
+      { replay: true }, "batch8-replay-cursor-complete", disabledRegistry(replay));
+    expect(recovered).toMatchObject({ status: "SUCCEEDED", cursorFinal: "replay-page-2" });
+    expect(replay.calls.map((call) => call.cursor)).toEqual([undefined, "replay-page-2"]);
+    expect(await savedCursor()).toBe("incremental-page-3");
+  });
+
   it("reverte evidência e conflito se a auditoria da divergência falhar", async () => {
     const fixture = await connectionFixture("EBAY", "SHARED", "conflict-audit");
     const identity = await getAuthenticatedUser(fixture.userId);

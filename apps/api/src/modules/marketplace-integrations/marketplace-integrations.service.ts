@@ -1098,7 +1098,7 @@ export async function syncConnection(
         await tx.conexaoMarketplace.update({
           where: { id: connection.id },
           data: {
-            cursorSincronizacao: result.cursor,
+            cursorSincronizacao: input.replay ? undefined : (result.cursor ?? null),
             ultimaSincronizacaoEm: new Date(),
             ultimoErroSanitizado: null,
             version: { increment: 1 }
