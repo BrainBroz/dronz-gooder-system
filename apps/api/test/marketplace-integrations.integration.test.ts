@@ -605,6 +605,50 @@ describe("marketplace integration foundation", () => {
     })).toBe(0);
   });
 
+  it("rejeita linhas oficiais duplicadas e não oferece aprovação a candidato legado", async () => {
+    const fixture = await connectionFixture("EBAY", "SHARED", "duplicate-lines");
+    const identity = await getAuthenticatedUser(fixture.userId);
+    const externalOrderId = "batch8-duplicate-lines";
+    const source = order(externalOrderId);
+    const duplicate = order(externalOrderId, {
+      items: [source.items[0], { ...source.items[0], title: "Outra linha" }]
+    });
+    const rejected = await syncConnection(identity, fixture.connectionId,
+      { replay: true }, "batch8-duplicate-lines-sync",
+      disabledRegistry(new FakeAdapter("EBAY", [{ orders: [duplicate] }])));
+    expect(rejected).toMatchObject({ status: "PARTIALLY_SUCCEEDED", conflitos: 1 });
+    expect(await prisma.buyerEvidence.count({
+      where: { externalEvidenceId: externalOrderId }
+    })).toBe(0);
+
+    expect((await syncConnection(identity, fixture.connectionId, { replay: true },
+      "batch8-duplicate-lines-valid",
+      disabledRegistry(new FakeAdapter("EBAY", [{ orders: [source] }]))
+    )).status).toBe("SUCCEEDED");
+    const candidate = await prisma.buyerPurchaseCandidate.findFirstOrThrow({
+      where: { externalOrderIdNormalized: externalOrderId }
+    });
+    await prisma.buyerEvidence.update({
+      where: { id: candidate.currentEvidenceId },
+      data: { normalizedPayload: duplicate }
+    });
+    const detail = await request(fixture.app)
+      .get(`/integrations/marketplaces/buyer-candidates/${candidate.id}`)
+      .set(bearer(fixture.token));
+    expect(detail.status).toBe(200);
+    expect(detail.body.allowedActions).not.toContain("APPROVE");
+    expect(detail.body.blockedReasons).toContain("DUPLICATE_EXTERNAL_LINE_ID");
+    const approval = await request(fixture.app)
+      .post(`/integrations/marketplaces/buyer-candidates/${candidate.id}/decision`)
+      .set(bearer(fixture.token))
+      .set("idempotency-key", "batch8-duplicate-lines-approve")
+      .send({ decision: "APROVAR", expectedVersion: candidate.version });
+    expect(approval.status).toBe(409);
+    expect(await prisma.compraImportada.count({
+      where: { externalOrderIdNormalizado: externalOrderId }
+    })).toBe(0);
+  });
+
   it("marca quantidade e moeda divergentes antes da aprovação sem perder evidências", async () => {
     for (const kind of ["quantity", "currency"] as const) {
       const fixture = await connectionFixture("EBAY", "SHARED", `buyer-divergence-${kind}`);

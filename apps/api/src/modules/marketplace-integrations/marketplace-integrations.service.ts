@@ -20,7 +20,7 @@ import {
   marketplaceAdapterRegistry,
   translateMarketplaceAdapterError
 } from "./marketplace-integrations.adapters";
-import { recordMarketplaceEvidence } from "./buyer-evidence.service";
+import { hasDuplicateOfficialLineId, recordMarketplaceEvidence } from "./buyer-evidence.service";
 import {
   capabilitySchema,
   marketplaceOrderPageSchema,
@@ -343,6 +343,8 @@ function candidateReadModel(
   identity: AuthIdentity,
   candidate: CandidateWithCurrent
 ): BuyerCandidateReadModel {
+  const order = normalizedMarketplaceOrderSchema.parse(candidate.currentEvidence.normalizedPayload);
+  const duplicateLineId = hasDuplicateOfficialLineId(order);
   const blockedReasons: BuyerCandidateReadModel["blockedReasons"] = [];
   if (candidate.compraImportadaId && candidate.status !== "APROVADA")
     blockedReasons.push(candidate.status === "COM_DIVERGENCIA"
@@ -353,10 +355,11 @@ function candidateReadModel(
     blockedReasons.push("MATERIAL_DIVERGENCE");
   else if (candidate.status !== "AGUARDANDO_APROVACAO")
     blockedReasons.push("ALREADY_DECIDED");
+  if (duplicateLineId) blockedReasons.push("DUPLICATE_EXTERNAL_LINE_ID");
   const allowedActions: BuyerCandidateReadModel["allowedActions"] = ["VIEW"];
   if (!candidate.compraImportadaId &&
       ["AGUARDANDO_APROVACAO", "COM_DIVERGENCIA"].includes(candidate.status)) {
-    if (candidate.status === "AGUARDANDO_APROVACAO" &&
+    if (candidate.status === "AGUARDANDO_APROVACAO" && !duplicateLineId &&
         hasPermission(identity, "BUYER_INGESTION_APROVAR"))
       allowedActions.push("APPROVE");
     if (hasPermission(identity, "BUYER_INGESTION_REJEITAR"))
@@ -373,7 +376,7 @@ function candidateReadModel(
     status: candidate.status,
     version: candidate.version,
     purchaseId: candidate.compraImportadaId,
-    order: normalizedMarketplaceOrderSchema.parse(candidate.currentEvidence.normalizedPayload),
+    order,
     currentEvidence: {
       id: candidate.currentEvidence.id,
       version: candidate.currentEvidence.version,
@@ -650,6 +653,8 @@ export async function decideBuyerCandidate(
         const order = normalizedMarketplaceOrderSchema.parse(
           candidate.currentEvidence.normalizedPayload
         );
+        if (hasDuplicateOfficialLineId(order))
+          throw new AppError(409, "buyer_duplicate_external_line_id");
         if (order.items.some((item) =>
           item.currency.toUpperCase() !== order.currency.toUpperCase()))
           throw new AppError(409, "buyer_currency_mismatch");

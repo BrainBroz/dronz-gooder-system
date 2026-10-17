@@ -13,6 +13,11 @@ import type { NormalizedMarketplaceOrder } from "./marketplace-integrations.type
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const normalizeId = (value: string) => value.trim().normalize("NFC");
 const iso = (value: string) => new Date(value).toISOString();
+export const hasDuplicateOfficialLineId = (order: NormalizedMarketplaceOrder) => {
+  const ids = order.items.flatMap((item) =>
+    item.externalLineId ? [normalizeId(item.externalLineId)] : []);
+  return new Set(ids).size !== ids.length;
+};
 const byJson = <T>(left: T, right: T) => {
   const a = JSON.stringify(left);
   const b = JSON.stringify(right);
@@ -92,6 +97,8 @@ export async function recordMarketplaceEvidence(input: {
   idempotencyKey?: string;
 }) {
   const normalized = canonicalOrder(input.order);
+  if (hasDuplicateOfficialLineId(normalized))
+    throw new AppError(409, "buyer_duplicate_external_line_id");
   const payload = JSON.stringify(normalized);
   const payloadHash = digest(payload);
   const externalEvidenceId = normalizeId(input.order.externalOrderId);

@@ -237,6 +237,8 @@ Uma primeira evidência cujo item use moeda diferente da moeda do pedido entra c
 
 Datas ISO são normalizadas para o mesmo instante antes do hash de evidência. Um replay com grafia de data equivalente não cria nova evidência nem bloqueia uma compra aprovada; a comparação com a evidência corrente também preserva esse comportamento para snapshots gravados antes da normalização.
 
+IDs oficiais de linha repetidos no mesmo pedido são rejeitados antes da persistência; a página de sincronização fica parcial para correção na fonte e repetição controlada. Candidatos legados que já contenham essa duplicidade não oferecem `APPROVE`, e o POST revalida a restrição.
+
 ## 9. RBAC, read models e auditoria
 
 Permissões comuns:
