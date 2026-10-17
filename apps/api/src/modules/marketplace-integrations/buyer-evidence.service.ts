@@ -53,6 +53,17 @@ function canonicalOrder(order: NormalizedMarketplaceOrder) {
   };
 }
 
+function shipmentEventTime(order: NormalizedMarketplaceOrder) {
+  let latest = -Infinity;
+  for (const shipment of order.shipments) {
+    latest = Math.max(latest, Date.parse(shipment.updatedAt));
+    for (const externalPackage of shipment.packages)
+      for (const tracking of externalPackage.trackings)
+        latest = Math.max(latest, Date.parse(tracking.updatedAt));
+  }
+  return latest;
+}
+
 function materialConflictTypes(
   previous: NormalizedMarketplaceOrder,
   current: NormalizedMarketplaceOrder
@@ -84,6 +95,8 @@ function materialConflictTypes(
     if (JSON.stringify(quantities(previous)) !== JSON.stringify(quantities(current)))
       types.push("QUANTITY");
   }
+  if (JSON.stringify(previous.shipments) !== JSON.stringify(current.shipments))
+    types.push("SHIPMENTS");
   return types;
 }
 
@@ -147,7 +160,8 @@ export async function recordMarketplaceEvidence(input: {
         const prior = await tx.buyerPurchaseCandidate.findUnique({
           where: { provider_contaExternaId_externalOrderIdNormalized: candidateIdentity },
           include: { currentEvidence: {
-            select: { version: true, sourceOccurredAt: true, normalizedPayload: true }
+            select: { version: true, sourceOccurredAt: true, normalizedPayload: true,
+              payloadHash: true }
           } }
         });
         const previous = prior && normalizedMarketplaceOrderSchema.safeParse(
@@ -213,8 +227,10 @@ export async function recordMarketplaceEvidence(input: {
         if (prior?.compraImportadaId && prior.compraImportadaId !== legacyPurchase?.id)
           await tx.$queryRaw`SELECT id FROM "CompraImportada" WHERE id = ${prior.compraImportadaId} FOR UPDATE`;
         const linkedPurchaseId = prior?.compraImportadaId ?? legacyPurchase?.id ?? null;
-        const incomingTime = new Date(input.order.updatedAt).getTime();
-        const currentTime = prior?.currentEvidence.sourceOccurredAt.getTime() ?? -Infinity;
+        const incomingTime = Date.parse(normalized.updatedAt);
+        const currentTime = previous?.success
+          ? Date.parse(previous.data.updatedAt)
+          : prior?.currentEvidence.sourceOccurredAt.getTime() ?? -Infinity;
         const sameTime = currentTime === incomingTime;
         const conflictTypes: TipoConflitoEvidenciaCompra[] = !prior ? []
           : previous && previous.success
@@ -224,8 +240,17 @@ export async function recordMarketplaceEvidence(input: {
           item.currency.toUpperCase() !== normalized.currency.toUpperCase()) &&
           !conflictTypes.includes("CURRENCY"))
           conflictTypes.push("CURRENCY");
+        const currentCancelled = previous?.success
+          ? previous.data.cancelled : prior?.status === "CANCELADA";
+        const incomingShipmentTime = shipmentEventTime(normalized);
+        const currentShipmentTime = previous?.success
+          ? shipmentEventTime(previous.data) : -Infinity;
         const promote = incomingTime > currentTime ||
-          (sameTime && (input.order.cancelled || prior?.status !== "CANCELADA"));
+          (sameTime && (normalized.cancelled !== currentCancelled
+            ? normalized.cancelled
+            : incomingShipmentTime !== currentShipmentTime
+              ? incomingShipmentTime > currentShipmentTime
+              : payloadHash > (prior?.currentEvidence.payloadHash ?? "")));
         if (prior?.compraImportadaId && promote && !conflictTypes.length)
           conflictTypes.push("POST_APPROVAL_EVIDENCE");
         const materialChange = conflictTypes.length > 0;
