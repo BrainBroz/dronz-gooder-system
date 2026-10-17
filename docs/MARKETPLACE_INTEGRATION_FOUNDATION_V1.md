@@ -241,6 +241,8 @@ IDs oficiais de linha repetidos no mesmo pedido são rejeitados antes da persist
 
 A migration aditiva `20261017023000_repair_legacy_buyer_projection` reavalia apenas candidatos intocados do backfill inicial: escolhe a evidência pelo instante externo (cancelamento vence empate), bloqueia divergências materiais conservadoramente e registra conflitos legados sem fabricar decisão humana. Candidatos já decididos, com compra vinculada, conflito existente ou ingestão posterior não são reescritos. Caso algum deles tenha sido aprovado antes desta correção com evidência obsoleta, exige auditoria operacional específica; a migration não desfaz pedidos ou estoque.
 
+A migration seguinte, `20261017024000_reconcile_equivalent_legacy_dates`, remove apenas conflitos criados pela correção anterior quando os campos materiais são idênticos e as grafias ISO de `orderedAt` representam o mesmo instante. Decisões humanas e divergências reais permanecem intocadas.
+
 ## 9. RBAC, read models e auditoria
 
 Permissões comuns:

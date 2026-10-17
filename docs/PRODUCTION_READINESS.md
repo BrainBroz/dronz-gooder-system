@@ -45,6 +45,8 @@ A criação de mala adquire o mesmo lock da transição de viagem e revalida o e
 
 O backfill antigo de candidatos Buyer priorizava versão de ingestão e podia deixar um snapshot ativo atrasado à frente de cancelamento mais recente. A migration corretiva `20261017023000_repair_legacy_buyer_projection` reordena apenas candidatos legados ainda não decididos nem modificados, registra divergência quando necessário e preserva compras/decisões existentes. Banco limpo com 31 migrations e upgrade do caso cancelamento → ativo atrasado foram validados no banco de testes. Aprovações feitas antes da correção exigem auditoria específica; não houve reversão automática de operação existente.
 
+A migration `20261017024000_reconcile_equivalent_legacy_dates` desfaz exclusivamente o falso conflito criado pela correção anterior quando duas grafias de `orderedAt` representam o mesmo instante e os demais campos materiais são idênticos. Upgrade desse caso e instalação limpa de 32 migrations foram validados no banco de testes; candidatos com divergência real não são liberados por essa correção.
+
 - Configure `WEB_ORIGIN` com a origem HTTPS exata da aplicação web; CORS não aceita wildcard com credenciais.
 - Gere valores fortes e distintos para `JWT_ACCESS_SECRET` e `JWT_REFRESH_SECRET` em um gerenciador de segredos.
 - Em `NODE_ENV=production`, o refresh token usa cookie `HttpOnly`, `SameSite=Lax`, `Secure` e `Path=/`; o token bruto não integra respostas nem storage do navegador.
