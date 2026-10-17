@@ -39,6 +39,8 @@ Compras externas já importadas são vinculadas ao candidato correspondente por 
 
 A proteção de aprovação foi estendida à atribuição por loja de compras vinculadas a candidatos pendentes, tanto no read model quanto no POST. A sincronização não avança o cursor além de uma página cuja evidência falhou: a página é repetida na execução seguinte, com deduplicação das evidências já persistidas. Datas ISO do mesmo instante não geram conflito de pedido. Esses três casos possuem regressões de API; adaptadores reais continuam desabilitados.
 
+A primeira evidência com moeda do item diferente da moeda do pedido agora abre conflito `CURRENCY` e não permite aprovação; o POST também revalida essa invariável. A política de recuperação de replay histórico parcial permanece pendente: replay ignora o cursor incremental e pode exigir repetição explícita da mesma janela para recuperar uma página falha.
+
 - Configure `WEB_ORIGIN` com a origem HTTPS exata da aplicação web; CORS não aceita wildcard com credenciais.
 - Gere valores fortes e distintos para `JWT_ACCESS_SECRET` e `JWT_REFRESH_SECRET` em um gerenciador de segredos.
 - Em `NODE_ENV=production`, o refresh token usa cookie `HttpOnly`, `SameSite=Lax`, `Secure` e `Path=/`; o token bruto não integra respostas nem storage do navegador.

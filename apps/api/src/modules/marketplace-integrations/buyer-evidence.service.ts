@@ -48,9 +48,9 @@ function materialConflictTypes(
     types.push("ORDER_DATE");
   if (previous.cancelled !== current.cancelled) types.push("CANCELLATION_CHANGED");
   if (previous.externalStatus !== current.externalStatus) types.push("EXTERNAL_STATUS");
-  if (previous.currency !== current.currency ||
-      JSON.stringify(previous.items.map((item) => item.currency).sort()) !==
-      JSON.stringify(current.items.map((item) => item.currency).sort()))
+  if (previous.currency.toUpperCase() !== current.currency.toUpperCase() ||
+      JSON.stringify(previous.items.map((item) => item.currency.toUpperCase()).sort()) !==
+      JSON.stringify(current.items.map((item) => item.currency.toUpperCase()).sort()))
     types.push("CURRENCY");
   if (previous.total !== current.total ||
       JSON.stringify(previous.items.map((item) => item.unitPrice).sort()) !==
@@ -200,6 +200,10 @@ export async function recordMarketplaceEvidence(input: {
           : previous && previous.success
             ? materialConflictTypes(canonicalOrder(previous.data), normalized)
             : ["INVALID_PRIOR_EVIDENCE"];
+        if (normalized.items.some((item) =>
+          item.currency.toUpperCase() !== normalized.currency.toUpperCase()) &&
+          !conflictTypes.includes("CURRENCY"))
+          conflictTypes.push("CURRENCY");
         const promote = incomingTime > currentTime ||
           (sameTime && (input.order.cancelled || prior?.status !== "CANCELADA"));
         if (prior?.compraImportadaId && promote && !conflictTypes.length)
@@ -228,7 +232,8 @@ export async function recordMarketplaceEvidence(input: {
                 ...candidateIdentity,
                 currentEvidenceId: evidence.id,
                 ...(linkedPurchaseId ? { compraImportadaId: linkedPurchaseId } : {}),
-                status: input.order.cancelled ? "CANCELADA" : "AGUARDANDO_APROVACAO"
+                status: input.order.cancelled ? "CANCELADA"
+                  : conflictTypes.length ? "COM_DIVERGENCIA" : "AGUARDANDO_APROVACAO"
               }
             });
         await tx.buyerEvidenceLink.create({

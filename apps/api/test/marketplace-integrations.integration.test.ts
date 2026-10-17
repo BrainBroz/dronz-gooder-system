@@ -517,6 +517,40 @@ describe("marketplace integration foundation", () => {
     })).toBe(0);
   });
 
+  it("bloqueia aprovação da primeira evidência com moedas divergentes", async () => {
+    const fixture = await connectionFixture("EBAY", "SHARED", "mixed-currency");
+    const identity = await getAuthenticatedUser(fixture.userId);
+    const externalOrderId = "batch8-mixed-currency";
+    const source = order(externalOrderId);
+    const mixed = order(externalOrderId, {
+      items: [{ ...source.items[0], currency: "BRL" }]
+    });
+    expect((await syncConnection(identity, fixture.connectionId, { replay: true },
+      "batch8-mixed-currency-sync",
+      disabledRegistry(new FakeAdapter("EBAY", [{ orders: [mixed] }]))
+    )).status).toBe("SUCCEEDED");
+    const candidate = await prisma.buyerPurchaseCandidate.findFirstOrThrow({
+      where: { externalOrderIdNormalized: externalOrderId }
+    });
+    expect(candidate.status).toBe("COM_DIVERGENCIA");
+    expect(await prisma.buyerReconciliationConflict.findFirstOrThrow({
+      where: { candidateId: candidate.id }
+    })).toMatchObject({ type: "CURRENCY", referenceEvidenceId: null });
+    const detail = await request(fixture.app)
+      .get(`/integrations/marketplaces/buyer-candidates/${candidate.id}`)
+      .set(bearer(fixture.token));
+    expect(detail.body.allowedActions).not.toContain("APPROVE");
+    const approval = await request(fixture.app)
+      .post(`/integrations/marketplaces/buyer-candidates/${candidate.id}/decision`)
+      .set(bearer(fixture.token))
+      .set("idempotency-key", "batch8-mixed-currency-approve")
+      .send({ decision: "APROVAR", expectedVersion: candidate.version });
+    expect(approval.status).toBe(409);
+    expect(await prisma.compraImportada.count({
+      where: { externalOrderIdNormalizado: externalOrderId }
+    })).toBe(0);
+  });
+
   it("marca quantidade e moeda divergentes antes da aprovação sem perder evidências", async () => {
     for (const kind of ["quantity", "currency"] as const) {
       const fixture = await connectionFixture("EBAY", "SHARED", `buyer-divergence-${kind}`);
@@ -525,7 +559,8 @@ describe("marketplace integration foundation", () => {
       const original = order(externalOrderId);
       const changed = order(externalOrderId, kind === "quantity"
         ? { items: [{ ...original.items[0], quantity: 4 }] }
-        : { currency: "BRL", updatedAt: "2026-07-14T11:00:00.000Z" });
+        : { currency: "BRL", items: [{ ...original.items[0], currency: "BRL" }],
+          updatedAt: "2026-07-14T11:00:00.000Z" });
       for (const [payload, key] of [
         [original, `batch8-${kind}-first`],
         [changed, `batch8-${kind}-second`]
@@ -546,7 +581,7 @@ describe("marketplace integration foundation", () => {
         where: { candidateId: candidate.id }
       });
       expect(conflicts.map((conflict) => conflict.type).sort())
-        .toEqual(kind === "quantity" ? ["ITEMS", "QUANTITY"] : ["CURRENCY"]);
+        .toEqual(kind === "quantity" ? ["ITEMS", "QUANTITY"] : ["CURRENCY", "ITEMS"]);
       for (const conflict of conflicts) {
         expect(conflict).toMatchObject({
           status: "ABERTO",
@@ -577,7 +612,7 @@ describe("marketplace integration foundation", () => {
       });
       expect(conflictAudit.afterData).toMatchObject({
         evidenceId: candidate.evidenceLinks[1].evidenceId,
-        types: kind === "quantity" ? ["ITEMS", "QUANTITY"] : ["CURRENCY"]
+        types: kind === "quantity" ? ["ITEMS", "QUANTITY"] : ["CURRENCY", "ITEMS"]
       });
       expect(JSON.stringify(conflictAudit.afterData)).not.toContain(externalOrderId);
       expect(await prisma.auditLog.count({

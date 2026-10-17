@@ -650,6 +650,9 @@ export async function decideBuyerCandidate(
         const order = normalizedMarketplaceOrderSchema.parse(
           candidate.currentEvidence.normalizedPayload
         );
+        if (order.items.some((item) =>
+          item.currency.toUpperCase() !== order.currency.toUpperCase()))
+          throw new AppError(409, "buyer_currency_mismatch");
         if (order.cancelled) throw new AppError(409, "buyer_candidate_cancelled");
         const legacy = await tx.compraImportada.findUnique({
           where: {

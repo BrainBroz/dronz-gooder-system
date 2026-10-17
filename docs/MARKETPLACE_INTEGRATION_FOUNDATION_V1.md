@@ -231,7 +231,9 @@ Conflitos de evidências antes da aprovação ficam em `BuyerReconciliationConfl
 
 Quando uma compra operacional já existe com a mesma identidade provider/conta/pedido, sincronização e importação vinculam o candidato à compra sem criar aprovação retroativa. O vínculo retira a ação de materializar do read model e é revalidado no POST. A migration `20261017022000_link_legacy_buyer_candidates` faz o mesmo para pares persistidos antes desta correção, incrementando a versão do candidato sem mudar seu estado; a migração não inventa ator nem decisão humana.
 
-Enquanto um candidato vinculado não estiver aprovado, a atribuição por loja também fica ausente dos read models e é rejeitada no POST. Se qualquer evidência de uma página falhar depois das tentativas limitadas para conflito transitório, a sincronização termina parcialmente e mantém o cursor no início dessa página. A próxima execução reprocessa a página; evidências já gravadas são deduplicadas pelo hash. Datas ISO equivalentes são comparadas como instantes, sem criar divergência material artificial.
+Enquanto um candidato vinculado não estiver aprovado, a atribuição por loja também fica ausente dos read models e é rejeitada no POST. Se qualquer evidência de uma página falhar depois das tentativas limitadas para conflito transitório, a sincronização termina parcialmente e mantém o cursor no início dessa página. Na sincronização incremental, a próxima execução reprocessa a página; evidências já gravadas são deduplicadas pelo hash. Replay histórico usa janela própria e precisa ser repetido explicitamente enquanto a política operacional de recuperação não estiver definida. Datas ISO equivalentes são comparadas como instantes, sem criar divergência material artificial.
+
+Uma primeira evidência cujo item use moeda diferente da moeda do pedido entra como `COM_DIVERGENCIA`, com conflito `CURRENCY` e sem ação de aprovação. O POST de aprovação revalida a moeda antes de criar a compra. Isso não converte valores nem presume que diferenças de moeda sejam seguras.
 
 ## 9. RBAC, read models e auditoria
 
