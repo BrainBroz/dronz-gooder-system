@@ -227,6 +227,8 @@ A fundação do Batch 8 sincronizava diretamente com `importPurchase`. A correç
 
 Cancelamentos/reembolsos já chegam no contrato inicial. A aprovação de candidato cancelado é bloqueada. Conciliação multicanal, classificação humana do legado e resolução operacional de divergências ainda não estão concluídas; nenhum adapter real deve ser habilitado nesta etapa.
 
+Conflitos de evidências antes da aprovação ficam em `BuyerReconciliationConflict`, separados de `ConflitoCompra`, que exige uma compra já importada. Cada registro tipado aponta para o candidato e as versões de evidência comparadas, sem copiar payloads. A detecção e o `AuditLog` participam da mesma transação da evidência; a consulta `/buyer-candidates/:candidateId/conflicts` é paginada e auditada. As migrations `20261017020000_buyer_reconciliation_conflicts` e `20261017021000_buyer_conflict_event_types` são aditivas; vínculos legados `CONFLICTING` entram como `LEGACY_UNCLASSIFIED`, sem resolução presumida. Ainda não existe comando para resolver esses conflitos: a regra humana de escolha da evidência permanece pendente.
+
 ## 9. RBAC, read models e auditoria
 
 Permissões comuns:

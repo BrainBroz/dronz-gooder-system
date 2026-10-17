@@ -35,6 +35,7 @@ import type {
 } from "./marketplace-integrations.schemas";
 import type {
   BuyerCandidateReadModel,
+  BuyerConflictReadModel,
   BuyerEvidenceDetailReadModel,
   MarketplaceAdapterRegistry,
   MarketplaceBlockedReason,
@@ -509,6 +510,49 @@ export async function buyerCandidateEvidenceDetail(
       origin: ORIGIN
     });
     return result;
+  });
+}
+
+export async function buyerCandidateConflicts(
+  identity: AuthIdentity,
+  candidateId: string,
+  input: { page: number; limit: number }
+) {
+  if (!hasPermission(identity, "BUYER_INGESTION_VISUALIZAR"))
+    throw new AppError(403, "insufficient_permission");
+  return prisma.$transaction(async (tx) => {
+    const candidate = await tx.buyerPurchaseCandidate.findUnique({
+      where: { id: candidateId }, select: { id: true }
+    });
+    if (!candidate) throw new AppError(404, "not_found");
+    const [conflicts, total] = await Promise.all([
+      tx.buyerReconciliationConflict.findMany({
+        where: { candidateId },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        skip: (input.page - 1) * input.limit,
+        take: input.limit
+      }),
+      tx.buyerReconciliationConflict.count({ where: { candidateId } })
+    ]);
+    await audit(tx, {
+      usuarioId: identity.user.id,
+      permissionCode: "BUYER_INGESTION_VISUALIZAR",
+      action: "BUYER_CONFLICTS_LISTED",
+      entity: "BuyerPurchaseCandidate",
+      entityId: candidateId,
+      correlationId: randomUUID(),
+      after: { page: input.page, limit: input.limit, total },
+      origin: ORIGIN
+    });
+    const items: BuyerConflictReadModel[] = conflicts.map((conflict) => ({
+      id: conflict.id,
+      type: conflict.type,
+      status: conflict.status,
+      referenceEvidenceId: conflict.referenceEvidenceId,
+      evidenceId: conflict.evidenceId,
+      createdAt: conflict.createdAt.toISOString()
+    }));
+    return { items, page: input.page, limit: input.limit, total };
   });
 }
 

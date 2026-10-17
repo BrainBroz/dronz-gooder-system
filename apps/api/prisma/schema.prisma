@@ -429,6 +429,25 @@ enum TipoVinculoEvidenciaCompra {
   REJECTED
 }
 
+enum TipoConflitoEvidenciaCompra {
+  ORDER_DATE
+  CURRENCY
+  TOTAL
+  MERCHANT
+  ITEMS
+  QUANTITY
+  CANCELLATION_CHANGED
+  EXTERNAL_STATUS
+  POST_APPROVAL_EVIDENCE
+  INVALID_PRIOR_EVIDENCE
+  LEGACY_UNCLASSIFIED
+}
+
+enum StatusConflitoEvidenciaCompra {
+  ABERTO
+  RESOLVIDO
+}
+
 enum StatusMerchantExterno {
   ATIVO
   INATIVO
@@ -594,12 +613,14 @@ model BuyerEvidence {
   correlationId             String
   createdAt                 DateTime                     @default(now())
 
-  contaExterna         ContaExterna?            @relation(fields: [contaExternaId], references: [id], onDelete: Restrict)
-  conexaoMarketplace   ConexaoMarketplace?      @relation(fields: [conexaoMarketplaceId], references: [id], onDelete: Restrict)
+  contaExterna         ContaExterna?                 @relation(fields: [contaExternaId], references: [id], onDelete: Restrict)
+  conexaoMarketplace   ConexaoMarketplace?           @relation(fields: [conexaoMarketplaceId], references: [id], onDelete: Restrict)
   items                BuyerEvidenceItem[]
   candidateLinks       BuyerEvidenceLink[]
-  currentForCandidates BuyerPurchaseCandidate[] @relation("CurrentBuyerEvidence")
+  currentForCandidates BuyerPurchaseCandidate[]      @relation("CurrentBuyerEvidence")
   approvalDecisions    BuyerApprovalDecision[]
+  conflictReferences   BuyerReconciliationConflict[] @relation("BuyerConflictReference")
+  conflictEvidence     BuyerReconciliationConflict[] @relation("BuyerConflictEvidence")
 
   @@unique([sourceIdentity, externalEvidenceId, payloadHash])
   @@unique([sourceIdentity, externalEvidenceId, version])
@@ -620,11 +641,12 @@ model BuyerPurchaseCandidate {
   createdAt                 DateTime              @default(now())
   updatedAt                 DateTime              @updatedAt
 
-  contaExterna    ContaExterna            @relation(fields: [contaExternaId], references: [id], onDelete: Restrict)
-  currentEvidence BuyerEvidence           @relation("CurrentBuyerEvidence", fields: [currentEvidenceId], references: [id], onDelete: Restrict)
-  compraImportada CompraImportada?        @relation(fields: [compraImportadaId], references: [id], onDelete: Restrict)
+  contaExterna    ContaExterna                  @relation(fields: [contaExternaId], references: [id], onDelete: Restrict)
+  currentEvidence BuyerEvidence                 @relation("CurrentBuyerEvidence", fields: [currentEvidenceId], references: [id], onDelete: Restrict)
+  compraImportada CompraImportada?              @relation(fields: [compraImportadaId], references: [id], onDelete: Restrict)
   evidenceLinks   BuyerEvidenceLink[]
   decisions       BuyerApprovalDecision[]
+  conflicts       BuyerReconciliationConflict[]
 
   @@unique([provider, contaExternaId, externalOrderIdNormalized], map: "BuyerPurchaseCandidate_provider_contaExternaId_order_key")
   @@index([status, updatedAt])
@@ -642,6 +664,24 @@ model BuyerEvidenceLink {
 
   @@unique([candidateId, evidenceId])
   @@index([evidenceId])
+}
+
+model BuyerReconciliationConflict {
+  id                  String                        @id @default(cuid())
+  candidateId         String
+  referenceEvidenceId String?
+  evidenceId          String
+  type                TipoConflitoEvidenciaCompra
+  status              StatusConflitoEvidenciaCompra @default(ABERTO)
+  createdAt           DateTime                      @default(now())
+
+  candidate         BuyerPurchaseCandidate @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+  referenceEvidence BuyerEvidence?         @relation("BuyerConflictReference", fields: [referenceEvidenceId], references: [id], onDelete: Restrict)
+  evidence          BuyerEvidence          @relation("BuyerConflictEvidence", fields: [evidenceId], references: [id], onDelete: Restrict)
+
+  @@unique([candidateId, evidenceId, type])
+  @@index([candidateId, status, createdAt])
+  @@index([referenceEvidenceId])
 }
 
 model BuyerApprovalDecision {

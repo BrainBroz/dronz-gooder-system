@@ -116,6 +116,9 @@ async function cleanup() {
   await prisma.buyerApprovalDecision.deleteMany({
     where: { candidate: candidateWhere }
   });
+  await prisma.buyerReconciliationConflict.deleteMany({
+    where: { candidate: candidateWhere }
+  });
   await prisma.buyerEvidenceLink.deleteMany({
     where: { candidate: candidateWhere }
   });
@@ -516,6 +519,47 @@ describe("marketplace integration foundation", () => {
       expect(candidate.status).toBe("COM_DIVERGENCIA");
       expect(candidate.evidenceLinks.map((link) => link.type))
         .toEqual(["MATCHED", "CONFLICTING"]);
+      const conflicts = await prisma.buyerReconciliationConflict.findMany({
+        where: { candidateId: candidate.id }
+      });
+      expect(conflicts.map((conflict) => conflict.type).sort())
+        .toEqual(kind === "quantity" ? ["ITEMS", "QUANTITY"] : ["CURRENCY"]);
+      for (const conflict of conflicts) {
+        expect(conflict).toMatchObject({
+          status: "ABERTO",
+          referenceEvidenceId: candidate.evidenceLinks[0].evidenceId,
+          evidenceId: candidate.evidenceLinks[1].evidenceId
+        });
+      }
+      const conflictPage = await request(fixture.app)
+        .get(`/integrations/marketplaces/buyer-candidates/${candidate.id}/conflicts`)
+        .query({ page: 1, limit: 1 })
+        .set(bearer(fixture.token));
+      expect(conflictPage.status).toBe(200);
+      expect(conflictPage.body).toMatchObject({
+        page: 1, limit: 1, total: conflicts.length
+      });
+      expect(conflictPage.body.items).toHaveLength(1);
+      if (conflicts.length > 1) {
+        const secondPage = await request(fixture.app)
+          .get(`/integrations/marketplaces/buyer-candidates/${candidate.id}/conflicts`)
+          .query({ page: 2, limit: 1 })
+          .set(bearer(fixture.token));
+        expect(secondPage.status).toBe(200);
+        expect(secondPage.body.items).toHaveLength(1);
+        expect(secondPage.body.items[0].id).not.toBe(conflictPage.body.items[0].id);
+      }
+      const conflictAudit = await prisma.auditLog.findFirstOrThrow({
+        where: { action: "BUYER_CONFLICT_DETECTED", entityId: candidate.id }
+      });
+      expect(conflictAudit.afterData).toMatchObject({
+        evidenceId: candidate.evidenceLinks[1].evidenceId,
+        types: kind === "quantity" ? ["ITEMS", "QUANTITY"] : ["CURRENCY"]
+      });
+      expect(JSON.stringify(conflictAudit.afterData)).not.toContain(externalOrderId);
+      expect(await prisma.auditLog.count({
+        where: { action: "BUYER_CONFLICTS_LISTED", entityId: candidate.id }
+      })).toBe(conflicts.length > 1 ? 2 : 1);
       const evidenceDetails = await Promise.all(candidate.evidenceLinks.map((link) =>
         request(fixture.app)
           .get(`/integrations/marketplaces/buyer-candidates/${candidate.id}/evidence/${link.evidenceId}`)
@@ -572,6 +616,9 @@ describe("marketplace integration foundation", () => {
         where: { id: candidate.id }
       });
       expect(afterFollowUp.status).toBe("REJEITADA");
+      expect(await prisma.buyerReconciliationConflict.count({
+        where: { candidateId: candidate.id }
+      })).toBe(conflicts.length);
       const reopenedApproval = await request(fixture.app)
         .post(`/integrations/marketplaces/buyer-candidates/${candidate.id}/decision`)
         .set(bearer(fixture.token))
@@ -611,6 +658,13 @@ describe("marketplace integration foundation", () => {
     expect(candidate.status).toBe("COM_DIVERGENCIA");
     expect(candidate.evidenceLinks.map((link) => link.type).sort())
       .toEqual(["CONFLICTING", "MATCHED"]);
+    const recordedConflicts = await prisma.buyerReconciliationConflict.findMany({
+      where: { candidateId: candidate.id }
+    });
+    expect(recordedConflicts.map((conflict) => conflict.type).sort())
+      .toEqual(["ITEMS", "QUANTITY"]);
+    expect(recordedConflicts.every((conflict) =>
+      conflict.referenceEvidenceId === before.currentEvidenceId)).toBe(true);
     const detail = await request(fixture.app)
       .get(`/integrations/marketplaces/buyer-candidates/${candidate.id}`)
       .set(bearer(fixture.token));
@@ -647,10 +701,13 @@ describe("marketplace integration foundation", () => {
       where: { externalOrderIdNormalized: externalOrderId },
       include: { currentEvidence: true, evidenceLinks: true }
     });
-    expect(candidate).toMatchObject({ status: "CANCELADA", version: 1 });
+    expect(candidate).toMatchObject({ status: "CANCELADA", version: 2 });
     expect(candidate.currentEvidence.sourceOccurredAt.toISOString())
       .toBe("2026-07-14T12:00:00.000Z");
     expect(candidate.evidenceLinks).toHaveLength(2);
+    expect(await prisma.buyerReconciliationConflict.findFirstOrThrow({
+      where: { candidateId: candidate.id }
+    })).toMatchObject({ type: "CANCELLATION_CHANGED", status: "ABERTO" });
     const detail = await request(fixture.app)
       .get(`/integrations/marketplaces/buyer-candidates/${candidate.id}`)
       .set(bearer(fixture.token));
@@ -659,7 +716,7 @@ describe("marketplace integration foundation", () => {
       .post(`/integrations/marketplaces/buyer-candidates/${candidate.id}/decision`)
       .set(bearer(fixture.token))
       .set("idempotency-key", "batch8-late-approve")
-      .send({ decision: "APROVAR", expectedVersion: 1 });
+      .send({ decision: "APROVAR", expectedVersion: candidate.version });
     expect(approval.status).toBe(409);
     expect(await prisma.compraImportada.count({
       where: { externalOrderIdNormalizado: externalOrderId }
@@ -926,13 +983,16 @@ describe("marketplace integration foundation", () => {
     const evidence = await request(fixture.app)
       .get(`/integrations/marketplaces/buyer-candidates/${candidate.id}/evidence/${candidate.currentEvidenceId}`)
       .set(bearer(token));
+    const conflicts = await request(fixture.app)
+      .get(`/integrations/marketplaces/buyer-candidates/${candidate.id}/conflicts`)
+      .set(bearer(token));
     const approve = await request(fixture.app)
       .post(`/integrations/marketplaces/buyer-candidates/${candidate.id}/decision`)
       .set(bearer(token))
       .set("idempotency-key", "batch8-buyer-rbac-approve")
       .send({ decision: "APROVAR", expectedVersion: 1 });
-    expect([list.status, detail.status, evidence.status, approve.status])
-      .toEqual([403, 403, 403, 403]);
+    expect([list.status, detail.status, evidence.status, conflicts.status, approve.status])
+      .toEqual([403, 403, 403, 403, 403]);
     expect(await prisma.buyerApprovalDecision.count({
       where: { candidateId: candidate.id }
     })).toBe(0);
@@ -1135,6 +1195,43 @@ describe("marketplace integration foundation", () => {
       expect(await prisma.compraImportada.count({
         where: { conexaoMarketplaceId: fixture.connectionId }
       })).toBe(0);
+    } finally {
+      setAuditFailureForTests();
+    }
+  });
+
+  it("reverte evidência e conflito se a auditoria da divergência falhar", async () => {
+    const fixture = await connectionFixture("EBAY", "SHARED", "conflict-audit");
+    const identity = await getAuthenticatedUser(fixture.userId);
+    const externalOrderId = "batch8-conflict-audit";
+    const original = order(externalOrderId);
+    const first = await syncConnection(identity, fixture.connectionId,
+      { replay: true }, "batch8-conflict-audit-first",
+      disabledRegistry(new FakeAdapter("EBAY", [{ orders: [original] }])));
+    expect(first.status).toBe("SUCCEEDED");
+    const candidate = await prisma.buyerPurchaseCandidate.findFirstOrThrow({
+      where: { externalOrderIdNormalized: externalOrderId }
+    });
+    setAuditFailureForTests((entry) => entry.action === "BUYER_CONFLICT_DETECTED");
+    try {
+      const changed = order(externalOrderId, {
+        updatedAt: "2026-07-14T11:00:00.000Z",
+        items: [{ ...original.items[0], quantity: 4 }]
+      });
+      const second = await syncConnection(identity, fixture.connectionId,
+        { replay: true }, "batch8-conflict-audit-second",
+        disabledRegistry(new FakeAdapter("EBAY", [{ orders: [changed] }])));
+      expect(second.status).toBe("PARTIALLY_SUCCEEDED");
+      expect(second.falhas).toBe(1);
+      expect(await prisma.buyerReconciliationConflict.count({
+        where: { candidateId: candidate.id }
+      })).toBe(0);
+      expect(await prisma.buyerEvidence.count({
+        where: { externalOrderIdNormalized: externalOrderId }
+      })).toBe(1);
+      expect(await prisma.buyerPurchaseCandidate.findUniqueOrThrow({
+        where: { id: candidate.id }, select: { status: true, version: true }
+      })).toEqual({ status: "AGUARDANDO_APROVACAO", version: 1 });
     } finally {
       setAuditFailureForTests();
     }
@@ -1901,6 +1998,9 @@ describe("evidência de tracking após aprovação humana", () => {
     });
     expect(candidate.status).toBe("COM_DIVERGENCIA");
     expect(candidate.evidenceLinks).toHaveLength(2);
+    expect(await prisma.buyerReconciliationConflict.findFirstOrThrow({
+      where: { candidateId: candidate.id }
+    })).toMatchObject({ type: "POST_APPROVAL_EVIDENCE", status: "ABERTO" });
     const detail = await request(fixture.app)
       .get(`/integrations/marketplaces/buyer-candidates/${candidate.id}`)
       .set(bearer(fixture.token));

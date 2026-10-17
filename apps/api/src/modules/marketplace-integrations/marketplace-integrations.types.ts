@@ -1,6 +1,8 @@
 import type {
   ClassificacaoEvidenciaCompra,
   FonteEvidenciaCompra,
+  StatusConflitoEvidenciaCompra,
+  TipoConflitoEvidenciaCompra,
   TipoVinculoEvidenciaCompra
 } from "@prisma/client";
 
@@ -130,6 +132,15 @@ export type BuyerEvidenceDetailReadModel = {
   sourceOccurredAt: string;
   recordedAt: string;
   order: NormalizedMarketplaceOrder;
+};
+
+export type BuyerConflictReadModel = {
+  id: string;
+  type: TipoConflitoEvidenciaCompra;
+  status: StatusConflitoEvidenciaCompra;
+  referenceEvidenceId: string | null;
+  evidenceId: string;
+  createdAt: string;
 };
 
 export type MarketplaceConnectionContext = {

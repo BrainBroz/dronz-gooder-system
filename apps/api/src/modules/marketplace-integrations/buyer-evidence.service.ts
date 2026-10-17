@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
-import { Prisma, type MarketplaceProvider } from "@prisma/client";
+import {
+  Prisma,
+  type MarketplaceProvider,
+  type TipoConflitoEvidenciaCompra
+} from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { AppError } from "../../lib/app-error";
 import { audit } from "../operations/operations.persistence";
@@ -35,14 +39,37 @@ function canonicalOrder(order: NormalizedMarketplaceOrder) {
   };
 }
 
-function materialSnapshot(order: NormalizedMarketplaceOrder) {
-  return JSON.stringify({
-    orderedAt: order.orderedAt,
-    currency: order.currency,
-    total: order.total ?? null,
-    merchant: order.merchant ?? null,
-    items: order.items
-  });
+function materialConflictTypes(
+  previous: NormalizedMarketplaceOrder,
+  current: NormalizedMarketplaceOrder
+): TipoConflitoEvidenciaCompra[] {
+  const types: TipoConflitoEvidenciaCompra[] = [];
+  if (previous.orderedAt !== current.orderedAt) types.push("ORDER_DATE");
+  if (previous.cancelled !== current.cancelled) types.push("CANCELLATION_CHANGED");
+  if (previous.externalStatus !== current.externalStatus) types.push("EXTERNAL_STATUS");
+  if (previous.currency !== current.currency ||
+      JSON.stringify(previous.items.map((item) => item.currency).sort()) !==
+      JSON.stringify(current.items.map((item) => item.currency).sort()))
+    types.push("CURRENCY");
+  if (previous.total !== current.total ||
+      JSON.stringify(previous.items.map((item) => item.unitPrice).sort()) !==
+      JSON.stringify(current.items.map((item) => item.unitPrice).sort()))
+    types.push("TOTAL");
+  if (JSON.stringify(previous.merchant ?? null) !==
+      JSON.stringify(current.merchant ?? null)) types.push("MERCHANT");
+  if (JSON.stringify(previous.items) !== JSON.stringify(current.items)) {
+    types.push("ITEMS");
+    const quantities = (order: NormalizedMarketplaceOrder) => order.items
+      .map((item) => ({
+        quantity: item.quantity,
+        cancelled: item.cancelledQuantity,
+        refunded: item.refundedQuantity
+      }))
+      .sort(byJson);
+    if (JSON.stringify(quantities(previous)) !== JSON.stringify(quantities(current)))
+      types.push("QUANTITY");
+  }
+  return types;
 }
 
 export async function recordMarketplaceEvidence(input: {
@@ -155,10 +182,15 @@ export async function recordMarketplaceEvidence(input: {
         const previous = prior && normalizedMarketplaceOrderSchema.safeParse(
           prior.currentEvidence.normalizedPayload
         );
-        const materialChange = !!prior && (!previous || !previous.success ||
-          materialSnapshot(canonicalOrder(previous.data)) !== materialSnapshot(normalized));
+        const conflictTypes: TipoConflitoEvidenciaCompra[] = !prior ? []
+          : previous && previous.success
+            ? materialConflictTypes(canonicalOrder(previous.data), normalized)
+            : ["INVALID_PRIOR_EVIDENCE"];
         const promote = incomingTime > currentTime ||
           (sameTime && (input.order.cancelled || prior?.status !== "CANCELADA"));
+        if (prior?.compraImportadaId && promote && !conflictTypes.length)
+          conflictTypes.push("POST_APPROVAL_EVIDENCE");
+        const materialChange = conflictTypes.length > 0;
         const conflict = materialChange || prior?.status === "COM_DIVERGENCIA";
         const candidate = prior
           ? promote || materialChange ? await tx.buyerPurchaseCandidate.update({
@@ -190,6 +222,28 @@ export async function recordMarketplaceEvidence(input: {
               ? "CONFLICTING" : "MATCHED"
           }
         });
+        if (conflictTypes.length) {
+          await tx.buyerReconciliationConflict.createMany({
+            data: conflictTypes.map((type) => ({
+              candidateId: candidate.id,
+              referenceEvidenceId: prior?.currentEvidenceId,
+              evidenceId: evidence.id,
+              type
+            }))
+          });
+          await audit(tx, {
+            usuarioId: input.actorId,
+            permissionCode: "INTEGRACAO_MARKETPLACE_SINCRONIZAR",
+            action: "BUYER_CONFLICT_DETECTED",
+            entity: "BuyerPurchaseCandidate",
+            entityId: candidate.id,
+            correlationId: input.correlationId,
+            idempotencyKey: input.idempotencyKey,
+            before: { referenceEvidenceId: prior?.currentEvidenceId },
+            after: { evidenceId: evidence.id, types: conflictTypes },
+            origin: "API_MARKETPLACE_INTEGRATIONS"
+          });
+        }
         await audit(tx, {
           usuarioId: input.actorId,
           permissionCode: "INTEGRACAO_MARKETPLACE_SINCRONIZAR",
