@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   EstadoCompraImportada,
+  EstadoCandidatoCompra,
   OrigemCompraExterna,
   OrigemMapeamentoExterno,
   PlataformaCompraExterna,
@@ -98,6 +99,14 @@ const itemEligibility = (item: {
   quantidadeCancelada: number;
   quantidadeReembolsada: number;
 }) => item.quantidade - item.quantidadeCancelada - item.quantidadeReembolsada;
+
+const buyerReviewRequired = (purchase: {
+  conexaoMarketplaceId: string | null;
+  buyerCandidate: { status: EstadoCandidatoCompra } | null;
+}) =>
+  purchase.buyerCandidate?.status !== undefined
+    ? purchase.buyerCandidate.status !== "APROVADA"
+    : purchase.conexaoMarketplaceId !== null;
 
 export async function createExternalAccount(
   identity: AuthIdentity,
@@ -551,8 +560,7 @@ export async function setAssignment(
         }
       });
       if (!item) throw new AppError(404, "not_found");
-      if (item.compraImportada.buyerCandidate?.status !== undefined &&
-          item.compraImportada.buyerCandidate.status !== "APROVADA")
+      if (buyerReviewRequired(item.compraImportada))
         throw new AppError(409, "buyer_evidence_review_required");
       const connection = item.compraImportada.conexaoMarketplace;
       if (
@@ -873,8 +881,7 @@ export async function materialize(
       if (!purchase) throw new AppError(404, "not_found");
       if (purchase.version !== input.expectedPurchaseVersion)
         throw new AppError(409, "concurrent_modification");
-      if (purchase.buyerCandidate?.status !== undefined &&
-          purchase.buyerCandidate.status !== "APROVADA")
+      if (buyerReviewRequired(purchase))
         throw new AppError(409, "buyer_evidence_review_required");
       if (purchase.moeda !== "USD")
         throw new AppError(409, "currency_conversion_required");
@@ -1144,8 +1151,7 @@ export async function listPurchases(
           code: "ALREADY_MATERIALIZED",
           message: "Atribuição excede a quantidade já materializada. Corrija o saldo com motivo."
         });
-      const buyerReviewPending = !!purchase.buyerCandidate &&
-        purchase.buyerCandidate.status !== "APROVADA";
+      const buyerReviewPending = buyerReviewRequired(purchase);
       if (buyerReviewPending)
         blockedReasons.push({
           code: "BUYER_EVIDENCE_REVIEW_REQUIRED",
@@ -1295,8 +1301,7 @@ export async function purchaseDetail(identity: AuthIdentity, id: string) {
       code: "EXTERNAL_ORDER_CONFLICT",
       message: "Compra possui conflito aberto."
     });
-  const buyerReviewPending = !!purchase.buyerCandidate &&
-    purchase.buyerCandidate.status !== "APROVADA";
+  const buyerReviewPending = buyerReviewRequired(purchase);
   if (buyerReviewPending)
     blockedReasons.push({
       code: "BUYER_EVIDENCE_REVIEW_REQUIRED",

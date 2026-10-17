@@ -1033,6 +1033,10 @@ describe("marketplace integration foundation", () => {
       where: { id: fixture.connectionId }
     });
     const externalOrderId = "batch8-buyer-legacy";
+    const merchant = await prisma.merchantExterno.create({ data: {
+      plataforma: "EBAY", externalMerchantId: `merchant-${externalOrderId}`,
+      nomeOriginal: "Loja Externa", nomeNormalizado: "loja externa"
+    } });
     const legacy = await prisma.compraImportada.create({
       data: {
         numeroPedido: externalOrderId,
@@ -1040,9 +1044,65 @@ describe("marketplace integration foundation", () => {
         plataforma: "EBAY",
         contaExternaId: connection.contaExternaId,
         externalOrderIdNormalizado: externalOrderId,
-        conexaoMarketplaceId: connection.id
+        conexaoMarketplaceId: connection.id,
+        merchantExternoId: merchant.id,
+        itens: { create: {
+          quantidade: 1, identityFingerprint: "legacy-line", identityStrategy: "FINGERPRINT",
+          titulo: "Produto externo", precoUnitario: 10, merchantExternoId: merchant.id
+        } }
       }
     });
+    const item = await prisma.compraImportadaItem.findFirstOrThrow({
+      where: { compraImportadaId: legacy.id }
+    });
+    const product = await prisma.produto.findFirstOrThrow({
+      where: { lojaId: fixture.dronz.id, ativo: true }
+    });
+    const supplier = await prisma.fornecedor.findFirstOrThrow({
+      where: { lojaId: fixture.dronz.id, ativo: true }
+    });
+    await prisma.atribuicaoCompraItem.create({ data: {
+      itemExternoId: item.id, lojaId: fixture.dronz.id,
+      quantidade: 1, atribuidoPorId: fixture.userId
+    } });
+    await prisma.mapeamentoItemProduto.create({ data: {
+      itemExternoId: item.id, lojaId: fixture.dronz.id,
+      produtoId: product.id, revisadoPorId: fixture.userId
+    } });
+    await prisma.mapeamentoMerchantFornecedor.create({ data: {
+      merchantExternoId: merchant.id, lojaId: fixture.dronz.id,
+      fornecedorId: supplier.id, revisadoPorId: fixture.userId
+    } });
+    const beforeSync = await request(fixture.app)
+      .get(`/imported-purchases/${legacy.id}`).set(bearer(fixture.token));
+    expect(beforeSync.body.allowedActions).not.toContain("ASSIGN_TO_STORE");
+    expect(beforeSync.body.allowedActions).not.toContain("MATERIALIZE_STORE_ALLOCATION");
+    expect(beforeSync.body.blockedReasons).toContainEqual(expect.objectContaining({
+      code: "BUYER_EVIDENCE_REVIEW_REQUIRED"
+    }));
+    const listBeforeSync = await request(fixture.app)
+      .get("/imported-purchases").set(bearer(fixture.token));
+    const listed = listBeforeSync.body.items.find(
+      (entry: { id: string }) => entry.id === legacy.id
+    );
+    expect(listed.allowedActions).not.toContain("ASSIGN_TO_STORE");
+    expect(listed.allowedActions).not.toContain("MATERIALIZE_STORE_ALLOCATION");
+    const assignBeforeSync = await request(fixture.app)
+      .put(`/imported-purchases/items/${item.id}/assignments/${fixture.dronz.id}`)
+      .set(bearer(fixture.token))
+      .set("idempotency-key", "batch8-legacy-assign-before-sync")
+      .send({ quantidade: 1, expectedVersion: item.version });
+    expect(assignBeforeSync.status).toBe(409);
+    expect(assignBeforeSync.body.error).toBe("buyer_evidence_review_required");
+    const materializeBeforeSync = await request(fixture.app)
+      .post(`/imported-purchases/${legacy.id}/materializations/${fixture.dronz.id}`)
+      .set(bearer(fixture.token))
+      .set("idempotency-key", "batch8-legacy-materialize-before-sync")
+      .send({ expectedPurchaseVersion: legacy.version });
+    expect(materializeBeforeSync.status).toBe(409);
+    expect(materializeBeforeSync.body.error).toBe("buyer_evidence_review_required");
+    expect(await prisma.pedidoCompra.count({ where: { compraImportadaId: legacy.id } }))
+      .toBe(0);
     const identity = await getAuthenticatedUser(fixture.userId);
     await syncConnection(identity, fixture.connectionId, { replay: false },
       "batch8-buyer-legacy-sync",
