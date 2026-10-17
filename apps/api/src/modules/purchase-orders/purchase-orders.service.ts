@@ -195,15 +195,30 @@ export async function removeItem(lojaId: string, id: string, itemId: string) {
     return recalc(tx, id);
   });
 }
-export async function searchByNumero(lojaId: string, numero: string) {
+export async function searchByNumero(
+  lojaId: string,
+  numero: string,
+  includeValues = true
+) {
+  const hide = !includeValues;
   return prisma.pedidoCompra.findMany({
     where: {
       lojaId,
       numeroPedido: { contains: numero, mode: "insensitive" }
     },
+    omit: hide
+      ? { descontoPedido: true, frete: true, imposto: true, subtotal: true, total: true }
+      : undefined,
     include: {
       fornecedor: true,
-      itens: { include: { produto: true } }
+      itens: {
+        omit: hide
+          ? { precoUnitario: true, descontoItem: true, totalItem: true }
+          : undefined,
+        include: {
+          produto: { omit: hide ? { precoVenda: true, markup: true } : undefined }
+        }
+      }
     },
     orderBy: { dataCompra: "desc" },
     take: 20

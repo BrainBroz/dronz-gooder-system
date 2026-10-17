@@ -35,12 +35,22 @@ export function requireStore(req: AuthenticatedRequest, res: Response, next: Nex
   next();
 }
 
+export function hasPermission(req: AuthenticatedRequest, ...codes: string[]) {
+  const granted = new Set(req.identity?.permissoes.map((permission) => permission.code));
+  return granted.has("SYSTEM_ADMIN") || codes.some((code) => granted.has(code));
+}
+
 export function requirePermission(...codes: string[]) {
   return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    const granted = new Set(req.identity?.permissoes.map((permission) => permission.code));
-    if (!granted.has("SYSTEM_ADMIN") && !codes.some((code) => granted.has(code))) {
+    if (!hasPermission(req, ...codes)) {
       return res.status(403).json({ error: "insufficient_permission" });
     }
     next();
   };
+}
+
+// Leitura (GET) e escrita exigem capacidades distintas nas rotas seguintes do router.
+export function requireReadWrite(read: string[], write: string[]) {
+  return (req: AuthenticatedRequest, res: Response, next: NextFunction) =>
+    requirePermission(...(req.method === "GET" ? read : write))(req, res, next);
 }

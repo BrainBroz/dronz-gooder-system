@@ -2,12 +2,17 @@ import { Router, type NextFunction, type Response } from "express";
 import { z } from "zod";
 import {
   requireAuth,
+  requirePermission,
   requireStore,
   type AuthenticatedRequest
 } from "../../middlewares/auth";
 import * as s from "./analytics.service";
 export const analyticsRouter = Router();
-analyticsRouter.use(requireAuth, requireStore);
+analyticsRouter.use(
+  requireAuth,
+  requireStore,
+  requirePermission("ANALYTICS_VISUALIZAR")
+);
 const run =
   (fn: (r: AuthenticatedRequest) => Promise<unknown>) =>
   async (r: AuthenticatedRequest, x: Response, n: NextFunction) => {
