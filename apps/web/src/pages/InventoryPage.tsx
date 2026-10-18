@@ -4,6 +4,7 @@ import { useForm } from "react-hook-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ContentCard } from "../components/ui/ContentCard";
 import { PageContainer } from "../components/ui/PageContainer";
+import { LotsPanel } from "../components/LotsPanel";
 import { PageHeader } from "../components/ui/PageHeader";
 import { MutationStatus } from "../components/ui/MutationStatus";
 import { api } from "../api/client";
@@ -339,6 +340,14 @@ function InventoryContent() {
             successMessage="Item confirmado."
           />
         </ContentCard>
+        <LotsPanel
+          products={(stock.data ?? []).map(
+            (row: { produtoId: string; produto: { nome: string } }) => ({
+              produtoId: row.produtoId,
+              nome: row.produto.nome
+            })
+          )}
+        />
       </Stack>
     </PageContainer>
   );

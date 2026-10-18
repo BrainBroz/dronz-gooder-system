@@ -303,6 +303,7 @@ export async function lotsFor(db: Db, lojaId: string, produtoIds: string[]) {
         where: { revertidaEm: null },
         select: { quantidade: true }
       },
+      reconciliacoesLote: { select: { quantidade: true } },
       pedidoItem: {
         include: {
           pedido: { select: { moeda: true, numeroPedido: true } },
@@ -318,12 +319,14 @@ export async function lotsFor(db: Db, lojaId: string, produtoIds: string[]) {
     ...lot,
     restante:
       lot.quantidade -
-      lot.baixasComoLote.reduce((sum, baixa) => sum + baixa.quantidade, 0)
+      lot.baixasComoLote.reduce((sum, baixa) => sum + baixa.quantidade, 0) -
+      // PD-03: saídas antigas atribuídas a este lote na reconciliação.
+      lot.reconciliacoesLote.reduce((sum, r) => sum + r.quantidade, 0)
   }));
 }
 export type Lot = Awaited<ReturnType<typeof lotsFor>>[number];
 
-async function lotBalances(
+export async function lotBalances(
   db: Db,
   lojaId: string,
   produtoIds: string[],

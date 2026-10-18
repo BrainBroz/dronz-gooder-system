@@ -75,7 +75,15 @@ const KNOWN_ERROR_MESSAGES: Record<string, string> = {
   receivable_has_receipts:
     "A venda já teve recebimento; registre o reembolso no financeiro antes do estorno.",
   return_exceeds_sold: "A devolução ultrapassa a quantidade vendida.",
-  return_already_checked: "Esta devolução já foi conferida."
+  return_already_checked: "Esta devolução já foi conferida.",
+  stock_lots_require_reconciliation:
+    "Os lotes deste produto precisam de reconciliação no Estoque antes da venda.",
+  lots_already_reconciled: "Não há saídas sem lote para reconciliar.",
+  outflow_without_prior_lot: "Há saída anterior a qualquer entrada; investigue antes de reconciliar.",
+  lots_still_unbalanced: "Mesmo reconciliados, os lotes não batem com o físico; investigue os ajustes.",
+  lot_already_linked: "Este lote já está ligado a um item de compra.",
+  lot_exceeds_purchase_item: "O item de compra não tem unidades suficientes para este lote.",
+  product_mismatch: "O item de compra é de outro produto."
 };
 const STATUS_FALLBACK_MESSAGES: Record<number, string> = {
   400: "Dados inválidos. Verifique os campos e tente novamente.",
