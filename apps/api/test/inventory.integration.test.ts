@@ -287,8 +287,11 @@ describe("receiving and inventory", () => {
     expect(
       (await move("RELEASE_RESERVATION", "RESERVATION_RELEASE")).status
     ).toBe(200);
-    expect((await move("EXIT", "SALE", 2)).status).toBe(200);
-    expect((await move("EXIT", "SALE", 2)).status).toBe(409);
+    expect((await move("EXIT", "SALE", 2)).body.error).toBe(
+      "sale_requires_sales_module"
+    );
+    expect((await move("EXIT", "LOSS", 2)).status).toBe(200);
+    expect((await move("EXIT", "LOSS", 2)).status).toBe(409);
     expect(
       (await move("ADJUSTMENT_POSITIVE", "MANUAL_CORRECTION", 1)).status
     ).toBe(400);

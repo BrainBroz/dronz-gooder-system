@@ -70,6 +70,11 @@ const FinancePage = React.lazy(() =>
     default: module.FinancePage
   }))
 );
+const SalesPage = React.lazy(() =>
+  import("./pages/SalesPage").then((module) => ({
+    default: module.SalesPage
+  }))
+);
 const MonthlyPanelPage = React.lazy(() =>
   import("./pages/MonthlyPanelPage").then((module) => ({
     default: module.MonthlyPanelPage
@@ -249,6 +254,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     ["Logística", "/logistica"],
     ["Posições", "/posicoes"],
     ["Estoque", "/estoque", ["ESTOQUE_VISUALIZAR", "RECEBIMENTO_VISUALIZAR"]],
+    ["Vendas", "/vendas", ["VENDA_VISUALIZAR"]],
     ["Financeiro", "/financeiro", ["FINANCEIRO_VISUALIZAR"]],
     ["Relatórios", "/relatorios", ["ANALYTICS_VISUALIZAR"]]
   ];
@@ -484,6 +490,16 @@ export function AppRoutes() {
                 <AuthGate>
                   <Shell>
                     <ReportsPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/vendas"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <SalesPage />
                   </Shell>
                 </AuthGate>
               }

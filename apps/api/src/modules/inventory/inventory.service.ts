@@ -40,6 +40,9 @@ export async function move(
   key?: string
 ) {
   if (d.quantidade < 1) throw new AppError(400, "bad_request");
+  // Venda baixa estoque só pelo módulo Vendas (B17), junto com lote, custo e auditoria.
+  if (d.motivo === "SALE")
+    throw new AppError(409, "sale_requires_sales_module");
   if (
     ["ADJUSTMENT_POSITIVE", "ADJUSTMENT_NEGATIVE"].includes(d.tipo) &&
     !d.observacoes

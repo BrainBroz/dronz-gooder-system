@@ -42,6 +42,10 @@ model Loja {
   pagamentosFatura              PagamentoFatura[]
   transacoesFonte               TransacaoFinanceiraFonte[]
   conciliacoesFinanceiras       ConciliacaoFinanceira[]
+  vendas                        Venda[]
+  vendaItens                    VendaItem[]
+  baixasVenda                   BaixaVenda[]
+  recebiveisVenda               RecebivelVenda[]
   pagamentos                    Pagamento[]
   custosPedido                  CustoPedido[]
   handoffsVolume                HandoffVolume[]
@@ -78,6 +82,8 @@ model Usuario {
   movimentacoesEstoque           MovimentacaoEstoque[]
   cotacoesCambio                 CotacaoCambio[]
   conciliacoesRevisadas          ConciliacaoFinanceira[]
+  vendasCriadas                  Venda[]                        @relation("VendaCriadaPor")
+  vendasConfirmadas              Venda[]                        @relation("VendaConfirmadaPor")
   simulacoesViagemCriadas        SimulacaoViagem[]
   atribuicoes                    AtribuicaoItem[]
   contasExternasCriadas          ContaExterna[]
@@ -296,6 +302,7 @@ model Produto {
   recebimentoItens     RecebimentoItem[]
   movimentacoesEstoque MovimentacaoEstoque[]
   mapeamentosExternos  MapeamentoItemProduto[]
+  vendaItens           VendaItem[]
 
   @@unique([lojaId, slug])
   @@unique([id, lojaId])
@@ -1129,6 +1136,7 @@ model PedidoCompraItem {
   custosRateados          CustoPedidoItem[]
   atribuicoes             AtribuicaoItem[]
   materializacaoOrigem    MaterializacaoCompraItem?
+  lotesEstoque            MovimentacaoEstoque[]
 
   @@unique([pedidoCompraId, produtoId])
   @@unique([id, lojaId])
@@ -1534,6 +1542,8 @@ model MovimentacaoEstoque {
   responsavelId       String
   observacoes         String?
   movimentoOriginalId String?
+  // Lote de origem (B17): ENTRY ligada ao item de compra, base do custo específico (X-10).
+  pedidoCompraItemId  String?
   createdAt           DateTime                  @default(now())
   loja                Loja                      @relation(fields: [lojaId], references: [id], onDelete: Restrict)
   produto             Produto                   @relation(fields: [produtoId, lojaId], references: [id, lojaId], onDelete: Restrict)
@@ -1542,6 +1552,9 @@ model MovimentacaoEstoque {
   responsavel         Usuario                   @relation(fields: [responsavelId], references: [id], onDelete: Restrict)
   movimentoOriginal   MovimentacaoEstoque?      @relation("MovimentoCompensacao", fields: [movimentoOriginalId, lojaId], references: [id, lojaId], onDelete: Restrict)
   compensacoes        MovimentacaoEstoque[]     @relation("MovimentoCompensacao")
+  pedidoItem          PedidoCompraItem?         @relation(fields: [pedidoCompraItemId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  baixasComoLote      BaixaVenda[]              @relation("BaixaLote")
+  baixasComoSaida     BaixaVenda[]              @relation("BaixaSaida")
 
   @@unique([id, lojaId])
   @@index([lojaId, produtoId, createdAt])
@@ -2110,4 +2123,114 @@ enum ResolucaoConflitoEvidencia {
   ACEITAR_EVIDENCIA
   MANTER_REFERENCIA
   CIENTE
+}
+
+// Batch 17: vendas e baixa patrimonial. Só estoque Brasil disponível (físico − reservado) é vendável.
+enum CanalVenda {
+  MERCADO_LIVRE
+  SHOPEE
+  SITE_PROPRIO
+  OUTRO
+}
+
+enum StatusVenda {
+  RASCUNHO
+  CONFIRMADA
+  CANCELADA
+}
+
+enum StatusRecebivelVenda {
+  PENDENTE
+  PARCIAL
+  RECEBIDO
+}
+
+model Venda {
+  id                String          @id @default(cuid())
+  lojaId            String
+  canal             CanalVenda
+  referenciaExterna String?
+  dataVenda         DateTime
+  moeda             String
+  estado            StatusVenda     @default(RASCUNHO)
+  observacao        String?
+  criadoPorId       String
+  confirmadoPorId   String?
+  confirmadoEm      DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  loja              Loja            @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  criadoPor         Usuario         @relation("VendaCriadaPor", fields: [criadoPorId], references: [id], onDelete: Restrict)
+  confirmadoPor     Usuario?        @relation("VendaConfirmadaPor", fields: [confirmadoPorId], references: [id], onDelete: Restrict)
+  itens             VendaItem[]
+  recebivel         RecebivelVenda?
+
+  @@unique([id, lojaId])
+  @@unique([lojaId, canal, referenciaExterna])
+  @@index([lojaId, dataVenda])
+  @@index([lojaId, estado])
+}
+
+// Encargos são valores informados por item (snapshot); nenhum percentual é presumido pelo canal (X-08).
+model VendaItem {
+  id              String       @id @default(cuid())
+  lojaId          String
+  vendaId         String
+  produtoId       String
+  quantidade      Int
+  precoUnitario   Decimal      @db.Decimal(18, 2)
+  desconto        Decimal      @default(0) @db.Decimal(18, 2)
+  taxaMarketplace Decimal      @default(0) @db.Decimal(18, 2)
+  notaFiscal      Decimal      @default(0) @db.Decimal(18, 2)
+  frete           Decimal      @default(0) @db.Decimal(18, 2)
+  createdAt       DateTime     @default(now())
+  loja            Loja         @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  venda           Venda        @relation(fields: [vendaId, lojaId], references: [id, lojaId], onDelete: Cascade)
+  produto         Produto      @relation(fields: [produtoId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  baixas          BaixaVenda[]
+
+  @@unique([id, lojaId])
+  @@index([lojaId, produtoId])
+}
+
+// Uma linha de venda pode consumir vários lotes; custo é snapshot no instante da confirmação.
+model BaixaVenda {
+  id                      String              @id @default(cuid())
+  lojaId                  String
+  vendaItemId             String
+  movimentoEntradaId      String
+  movimentoSaidaId        String
+  quantidade              Int
+  custoUnitario           Decimal?            @db.Decimal(18, 2)
+  moedaCusto              String?
+  custoUnitarioConvertido Decimal?            @db.Decimal(18, 2)
+  cotacaoCambioId         String?
+  politica                String
+  createdAt               DateTime            @default(now())
+  loja                    Loja                @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  item                    VendaItem           @relation(fields: [vendaItemId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  lote                    MovimentacaoEstoque @relation("BaixaLote", fields: [movimentoEntradaId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  saida                   MovimentacaoEstoque @relation("BaixaSaida", fields: [movimentoSaidaId, lojaId], references: [id, lojaId], onDelete: Restrict)
+
+  @@index([lojaId, movimentoEntradaId])
+  @@index([vendaItemId])
+}
+
+model RecebivelVenda {
+  id               String               @id @default(cuid())
+  lojaId           String
+  vendaId          String               @unique
+  moeda            String
+  valorPrevisto    Decimal              @db.Decimal(18, 2)
+  valorRecebido    Decimal              @default(0) @db.Decimal(18, 2)
+  dataPrevista     DateTime?
+  dataRecebida     DateTime?
+  status           StatusRecebivelVenda @default(PENDENTE)
+  transacaoFonteId String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  loja             Loja                 @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  venda            Venda                @relation(fields: [vendaId, lojaId], references: [id, lojaId], onDelete: Restrict)
+
+  @@unique([vendaId, lojaId])
 }

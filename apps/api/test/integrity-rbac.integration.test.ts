@@ -163,7 +163,7 @@ describe("integridade transacional sob concorrência real (chamadas paralelas ao
         move(data.order.lojaId, data.admin.id, {
           produtoId: data.product.id,
           tipo: "EXIT",
-          motivo: "SALE",
+          motivo: "LOSS",
           quantidade: 1
         })
       )
@@ -398,7 +398,7 @@ describe("autorização por capacidade nos módulos operacionais", () => {
       .send({
         produtoId: data.product.id,
         tipo: "EXIT",
-        motivo: "SALE",
+        motivo: "LOSS",
         quantidade: 1
       });
     expect(exit.status).toBe(200);
