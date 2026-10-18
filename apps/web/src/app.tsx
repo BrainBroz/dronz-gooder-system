@@ -70,6 +70,11 @@ const FinancePage = React.lazy(() =>
     default: module.FinancePage
   }))
 );
+const PositionsPage = React.lazy(() =>
+  import("./pages/PositionsPage").then((module) => ({
+    default: module.PositionsPage
+  }))
+);
 const OperationsPage = React.lazy(() =>
   import("./pages/OperationsPage").then((module) => ({
     default: module.OperationsPage
@@ -224,6 +229,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     ["Compras", "/compras", ["COMPRAS_IMPORTADAS_VISUALIZAR"]],
     ["Pedidos Operacionais", "/pedidos", ["PEDIDOS_COMPRA_VISUALIZAR"]],
     ["Logística", "/logistica"],
+    ["Posições", "/posicoes"],
     ["Estoque", "/estoque", ["ESTOQUE_VISUALIZAR", "RECEBIMENTO_VISUALIZAR"]],
     ["Financeiro", "/financeiro", ["FINANCEIRO_VISUALIZAR"]],
     ["Relatórios", "/relatorios", ["ANALYTICS_VISUALIZAR"]]
@@ -451,6 +457,16 @@ export function AppRoutes() {
                 <AuthGate>
                   <Shell>
                     <ReportsPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/posicoes"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <PositionsPage />
                   </Shell>
                 </AuthGate>
               }

@@ -70,7 +70,10 @@ async function main() {
     "CATALOGO_GERENCIAR",
     "ANALYTICS_VISUALIZAR",
     "SIMULACAO_VISUALIZAR",
-    "SIMULACAO_GERENCIAR"
+    "SIMULACAO_GERENCIAR",
+    "LOGISTICA_POSICOES_VISUALIZAR",
+    "LOGISTICA_POSICOES_GERENCIAR",
+    "LOGISTICA_POSICOES_TODAS"
   ] as const;
   const permissions = await Promise.all(
     permissionCodes.map((code) =>
@@ -115,7 +118,9 @@ async function main() {
     "RECEBIMENTO_VISUALIZAR",
     "RECEBIMENTO_CONFIRMAR",
     "ENTRADA_DEFINITIVA_VISUALIZAR",
-    "ENTRADA_DEFINITIVA_CONFIRMAR"
+    "ENTRADA_DEFINITIVA_CONFIRMAR",
+    "LOGISTICA_POSICOES_VISUALIZAR",
+    "LOGISTICA_POSICOES_TODAS"
   ] as const) {
     const permission = permissions.find((entry) => entry.code === code)!;
     await prisma.perfilPermissao.upsert({

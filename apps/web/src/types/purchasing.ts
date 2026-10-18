@@ -6,5 +6,6 @@ export type PurchaseOrder = {
   allowedStatusTransitions: string[];
   subtotal: string;
   total: string;
+  destinoPosicaoId: string;
   fornecedor: Supplier;
 };

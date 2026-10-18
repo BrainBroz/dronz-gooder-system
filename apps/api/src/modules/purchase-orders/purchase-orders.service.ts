@@ -1,7 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { Prisma, PedidoCompraStatus } from "@prisma/client";
 import type { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { AppError } from "../../lib/app-error";
+import { audit } from "../operations/operations.persistence";
 import type { itemSchema, itemUpdateSchema, orderCreateSchema, orderUpdateSchema } from "./purchase-orders.schemas";
 type OrderCreate = z.infer<typeof orderCreateSchema>;
 type OrderUpdate = z.infer<typeof orderUpdateSchema>;
@@ -229,4 +231,35 @@ export async function remove(lojaId: string, id: string) {
   const o = await get(lojaId, id);
   if (o.status !== "DRAFT") throw new AppError(409, "conflict");
   await prisma.pedidoCompra.delete({ where: { id: o.id } });
+}
+
+// D-15: destino padrão do pedido, alterável com auditoria somente antes do primeiro recebimento.
+export async function setDestination(
+  lojaId: string,
+  userId: string,
+  id: string,
+  posicaoId: string
+) {
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "PedidoCompra" WHERE id = ${id} AND "lojaId" = ${lojaId} FOR UPDATE`;
+    const order = await tx.pedidoCompra.findFirst({ where: { id, lojaId } });
+    if (!order) throw new AppError(404, "not_found");
+    const position = await tx.posicaoOperacional.findUnique({ where: { id: posicaoId } });
+    if (!position) throw new AppError(404, "position_not_found");
+    if (position.status === "ENCERRADA" || position.status === "CANCELADA")
+      throw new AppError(409, "position_closed");
+    if (await tx.recebimentoMiami.count({ where: { lojaId, item: { pedidoCompraId: id } } }))
+      throw new AppError(409, "already_received");
+    const updated = await tx.pedidoCompra.update({
+      where: { id },
+      data: { destinoPosicaoId: posicaoId }
+    });
+    await audit(tx, {
+      usuarioId: userId, lojaId, permissionCode: "PEDIDOS_COMPRA_GERENCIAR",
+      action: "SET_ORDER_DESTINATION", entity: "PedidoCompra", entityId: id,
+      correlationId: randomUUID(), origin: "API_PURCHASE_ORDERS",
+      before: { destinoPosicaoId: order.destinoPosicaoId }, after: { destinoPosicaoId: posicaoId }
+    });
+    return updated;
+  });
 }

@@ -10,7 +10,7 @@ import { PageHeader } from "../components/ui/PageHeader";
 import { MutationStatus } from "../components/ui/MutationStatus";
 import { api } from "../api/client";
 import { authHeader, useAuthStore } from "../stores/auth";
-import { purchasingQueryKeys } from "../queryKeys";
+import { logisticsQueryKeys, purchasingQueryKeys } from "../queryKeys";
 import { operationsKeys } from "../hooks/useOperations";
 import type { Supplier, PurchaseOrder } from "../types/purchasing";
 import { useProducts } from "../hooks/useCatalog";
@@ -114,6 +114,16 @@ function PurchaseOrdersContent() {
       await client.invalidateQueries({ queryKey: purchasingQueryKeys.orders(store) });
     }
   });
+  const positions = useQuery<{ id: string; nome: string; status: string }[]>({
+    queryKey: logisticsQueryKeys.positions(),
+    queryFn: async () => (await api.get("/positions", { headers: authHeader() })).data
+  });
+  // D-15: destino padrão do pedido; a API recusa a troca depois do primeiro recebimento.
+  const changeDestination = useMutation({
+    mutationFn: ({ id, posicaoId }: { id: string; posicaoId: string }) =>
+      api.put(`/purchase-orders/${id}/destination`, { posicaoId }, { headers: { ...authHeader(), "x-store-id": store } }),
+    onSettled: () => client.invalidateQueries({ queryKey: purchasingQueryKeys.orders(store) })
+  });
   const actionAvailable = Boolean(selectedAction && orders.data?.some((order) =>
     order.id === selectedAction.id && order.allowedStatusTransitions.includes(selectedAction.status)
   ));
@@ -207,6 +217,7 @@ function PurchaseOrdersContent() {
           Fornecedores disponíveis:{" "}
           {suppliers.data?.filter((s) => s.ativo).length ?? 0}
         </Typography>
+        <MutationStatus mutation={changeDestination} successMessage="Destino atualizado." />
         {orders.isLoading && <Typography>Carregando...</Typography>}
         {orders.isError && <Typography>Falha ao carregar dados</Typography>}
         {orders.data?.map((o) => (
@@ -218,6 +229,22 @@ function PurchaseOrdersContent() {
             <Typography color="text.secondary" variant="body2">
               Subtotal {o.subtotal} · Total {o.total}
             </Typography>
+            {!!positions.data?.length && (
+              <TextField
+                select
+                size="small"
+                label="Destino"
+                value={o.destinoPosicaoId}
+                disabled={changeDestination.isPending}
+                onChange={(event) => changeDestination.mutate({ id: o.id, posicaoId: event.target.value })}
+              >
+                {positions.data
+                  .filter((position) => position.id === o.destinoPosicaoId || position.status === "ATIVA" || position.status === "CRIADA")
+                  .map((position) => (
+                    <MenuItem key={position.id} value={position.id}>{position.nome}</MenuItem>
+                  ))}
+              </TextField>
+            )}
             {(["PLACED", "CONFIRMED"] as const).filter((status) =>
               o.allowedStatusTransitions?.includes(status)
             ).map((status) => (

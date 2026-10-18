@@ -150,3 +150,20 @@ export async function remove(
     n(e);
   }
 }
+
+export async function destination(
+  r: AuthenticatedRequest,
+  x: Response,
+  n: NextFunction
+) {
+  const posicaoId =
+    typeof r.body?.posicaoId === "string" ? r.body.posicaoId : "";
+  if (!posicaoId || Object.keys(r.body).length !== 1) return bad(x);
+  try {
+    x.json(
+      await s.setDestination(st(r), r.identity!.user.id, id(r), posicaoId)
+    );
+  } catch (e) {
+    n(e);
+  }
+}
