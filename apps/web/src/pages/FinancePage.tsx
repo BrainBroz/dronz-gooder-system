@@ -1,5 +1,5 @@
 import React from "react";
-import { Button, Card, CardContent, MenuItem, Stack, TextField, Typography } from "@mui/material";
+import { Button, Card, CardContent, MenuItem, Stack, Tab, Tabs, TextField, Typography } from "@mui/material";
 import { useForm } from "react-hook-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ContentCard } from "../components/ui/ContentCard";
@@ -10,6 +10,12 @@ import { api } from "../api/client";
 import { authHeader, useAuthStore } from "../stores/auth";
 import { financeQueryKeys, purchasingQueryKeys } from "../queryKeys";
 import type { PurchaseOrder } from "../types/purchasing";
+import {
+  CardsPanel,
+  ExpensesPanel,
+  ReconciliationPanel,
+  RefundAction
+} from "../components/FinanceLedger";
 
 function FinanceContent() {
   const store = useAuthStore((s) => s.activeStoreId);
@@ -303,13 +309,16 @@ function FinanceContent() {
             valor: string;
             moeda: string;
             status: string;
+            estornoDeId?: string | null;
           }) => (
             <Card key={p.id}>
               <CardContent>
                 <Typography>
-                  {p.formaPagamento} · {p.moeda} {p.valor}
+                  {p.estornoDeId ? "Reembolso" : p.formaPagamento} · {p.moeda}{" "}
+                  {p.valor}
                 </Typography>
                 <Typography>{p.status}</Typography>
+                {!p.estornoDeId && <RefundAction paymentId={p.id} />}
               </CardContent>
             </Card>
           )
@@ -369,12 +378,28 @@ function FinanceContent() {
   );
 }
 
+const TABS = ["Pagamentos", "Conciliação", "Cartões e faturas", "Despesas"];
+
 export function FinancePage() {
   const store = useAuthStore((s) => s.activeStoreId);
+  const [tab, setTab] = React.useState(0);
 
   return (
     <PageContainer>
-      <FinanceContent key={store} />
+      <Tabs
+        value={tab}
+        onChange={(_, value: number) => setTab(value)}
+        variant="scrollable"
+        sx={{ mb: 2 }}
+      >
+        {TABS.map((label) => (
+          <Tab key={label} label={label} />
+        ))}
+      </Tabs>
+      {tab === 0 && <FinanceContent key={store} />}
+      {tab === 1 && <ReconciliationPanel key={store} />}
+      {tab === 2 && <CardsPanel key={store} />}
+      {tab === 3 && <ExpensesPanel key={store} />}
     </PageContainer>
   );
 }

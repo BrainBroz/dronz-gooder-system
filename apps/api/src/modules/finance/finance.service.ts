@@ -26,6 +26,54 @@ async function lockedOrder(
   return item;
 }
 
+type OrderWithPayments = Prisma.PedidoCompraGetPayload<{
+  include: { pagamentos: true };
+}>;
+
+// Estado agregado da obrigação (PENDING/PARTIAL/PAID/REFUNDED/CANCELLED), não o do comando.
+function obligation(order: OrderWithPayments) {
+  const total = (
+    filter: (p: OrderWithPayments["pagamentos"][number]) => boolean
+  ) =>
+    order.pagamentos
+      .filter(filter)
+      .reduce((s, p) => s.plus(p.valor), new Prisma.Decimal(0));
+  const pago = total((p) => p.status !== "CANCELLED" && !p.estornoDeId);
+  const reembolsado = total((p) => !!p.estornoDeId);
+  const estado =
+    order.status === "CANCELLED"
+      ? "CANCELLED"
+      : pago.isZero()
+        ? "PENDING"
+        : reembolsado.equals(pago)
+          ? "REFUNDED"
+          : pago.greaterThanOrEqualTo(order.total)
+            ? "PAID"
+            : "PARTIAL";
+  return { pago, reembolsado, estado };
+}
+
+export async function orderObligation(lojaId: string, id: string) {
+  const order = await prisma.pedidoCompra.findFirst({
+    where: { id, lojaId },
+    include: { pagamentos: { orderBy: { createdAt: "asc" } } }
+  });
+  if (!order) throw new AppError(404, "not_found");
+  const { pago, reembolsado, estado } = obligation(order);
+  return {
+    pedidoCompraId: order.id,
+    numeroPedido: order.numeroPedido,
+    moeda: order.moeda,
+    total: order.total.toFixed(2),
+    pago: pago.toFixed(2),
+    reembolsado: reembolsado.toFixed(2),
+    liquido: pago.minus(reembolsado).toFixed(2),
+    restante: order.total.minus(pago).toFixed(2),
+    estado,
+    pagamentos: order.pagamentos
+  };
+}
+
 export const listPayments = (lojaId: string) =>
   prisma.pagamento.findMany({
     where: { lojaId },
@@ -114,13 +162,9 @@ export async function pay(
       const o = await lockedOrder(tx, lojaId, pedidoCompraId);
       // Moeda divergente não é convertida silenciosamente: o saldo do pedido só soma a sua própria moeda.
       if (data.moeda !== o.moeda) throw new AppError(409, "currency_mismatch");
-      const paid = o.pagamentos
-        .filter((p) => p.status !== "CANCELLED" && !p.estornoDeId)
-        .reduce((s, p) => s.plus(p.valor), new Prisma.Decimal(0));
-      const refunds = o.pagamentos
-        .filter((p) => !!p.estornoDeId)
-        .reduce((s, p) => s.plus(p.valor), new Prisma.Decimal(0));
-      const next = paid.minus(refunds).plus(money(data.valor));
+      if (o.status === "CANCELLED") throw new AppError(409, "order_cancelled");
+      // Reembolso não reabre a dívida: o saldo da obrigação considera só aplicações brutas.
+      const next = obligation(o).pago.plus(money(data.valor));
       if (next.greaterThan(o.total)) throw new AppError(409, "overpayment");
       const created = await tx.pagamento.create({
         data: {
@@ -178,10 +222,16 @@ export async function refund(
           .greaterThan(original.valor)
       )
         throw new AppError(409, "refund_exceeds_payment");
-      await tx.pagamento.update({
-        where: { id },
-        data: { status: "REFUNDED" }
-      });
+      // REFUNDED só com estorno integral; parcial mantém bruto, reembolsado e líquido visíveis.
+      if (
+        money(valor)
+          .plus(alreadyRefunded._sum.valor ?? 0)
+          .equals(original.valor)
+      )
+        await tx.pagamento.update({
+          where: { id },
+          data: { status: "REFUNDED" }
+        });
       const created = await tx.pagamento.create({
         data: {
           lojaId,

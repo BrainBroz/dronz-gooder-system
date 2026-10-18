@@ -30,7 +30,13 @@ export const inventoryQueryKeys = {
   movements: (id: string | null) => ["inventory-movements", id] as const
 };
 export const financeQueryKeys = {
-  payments: (id: string | null) => ["finance-payments", id] as const
+  payments: (id: string | null) => ["finance-payments", id] as const,
+  accounts: (id: string | null) => ["finance-accounts", id] as const,
+  reconciliations: (id: string | null, estado: string) =>
+    ["finance-reconciliations", id, estado] as const,
+  statements: (id: string | null, contaId: string) =>
+    ["finance-statements", id, contaId] as const,
+  expenses: (id: string | null) => ["finance-expenses", id] as const
 };
 export const dashboardQueryKeys = {
   summary: (id: string | null) => ["dashboard", id] as const
