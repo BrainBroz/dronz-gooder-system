@@ -1,7 +1,7 @@
 import { prisma } from "../../lib/prisma";
 import { AppError } from "../../lib/app-error";
 import { hasPermission, type OperationalAction } from "./operations.types";
-import { evaluateBrazilTransition, evaluateDefinitiveEntry, evaluateParaguayTransition, evaluateReceivingTransition } from "./operations.policy";
+import { aptPendingQuantity, evaluateBrazilTransition, evaluateDefinitiveEntry, evaluateParaguayTransition, evaluateReceivingTransition } from "./operations.policy";
 
 const action = (permissions: string[], permission: string, value: OperationalAction) =>
   hasPermission(permissions, permission) ? [value] : [];
@@ -20,7 +20,8 @@ export async function overview(lojaId: string, permissions: string[]) {
   if (hasPermission(permissions, "RECEBIMENTO_VISUALIZAR"))
     totals.receivingPending = await prisma.mala.count({ where: { lojaId, checkpointsBrasil: { some: { supersededAt: null } }, recebimentos: { none: { supersededAt: null } } } });
   if (hasPermission(permissions, "ENTRADA_DEFINITIVA_VISUALIZAR"))
-    totals.definitivePending = await prisma.recebimento.count({ where: { lojaId, status: "COMPLETED", viagem: { estoquesEntradas: { none: { supersededAt: null } } } } });
+    // X-07: pendente é todo recebimento com unidade apta ainda não incorporada.
+    totals.definitivePending = (await definitiveEntryCandidates(lojaId, permissions)).filter((candidate) => candidate.impactQuantity > 0).length;
   return {
     lojaId,
     totals,
@@ -34,6 +35,10 @@ export async function overview(lojaId: string, permissions: string[]) {
   };
 }
 
+// D-4: registro em nome de terceiro é atributo restrito; operador de recebimento informa, mas não o lê de volta.
+const seesRestrictedCondition = (permissions: string[]) =>
+  permissions.includes("SYSTEM_ADMIN") || permissions.includes("PEDIDOS_COMPRA_VISUALIZAR");
+
 export async function miamiCandidates(lojaId: string, permissions: string[], itemId?: string) {
   const now = Date.now();
   const items = await prisma.pedidoCompraItem.findMany({
@@ -42,7 +47,7 @@ export async function miamiCandidates(lojaId: string, permissions: string[], ite
       id: true, quantidade: true, quantidadeRecebidaMiami: true, createdAt: true,
       produto: { select: { id: true, codigo: true, nome: true, peso: true } },
       pedido: { select: { id: true, numeroPedido: true, status: true } },
-      recebimentosMiami: { select: { id: true, quantidadeRecebida: true, recebidoEm: true, tipoDivergencia: true, confirmadoPor: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }
+      recebimentosMiami: { select: { id: true, quantidadeRecebida: true, recebidoEm: true, tipoDivergencia: true, condicaoComercial: true, funcionamento: true, acessoriosAusentes: true, observacaoCondicao: true, registroTerceiro: seesRestrictedCondition(permissions), confirmadoPor: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }
     },
     orderBy: { createdAt: "asc" }
   });
@@ -64,7 +69,7 @@ export async function miamiDetail(lojaId: string, itemId: string, permissions: s
   const candidate = candidates.find((item) => item.id === itemId);
   const item = candidate ?? await prisma.pedidoCompraItem.findFirst({
     where: { id: itemId, lojaId },
-    select: { id: true, quantidade: true, quantidadeRecebidaMiami: true, produto: { select: { id: true, codigo: true, nome: true, peso: true } }, pedido: { select: { id: true, numeroPedido: true, status: true } }, recebimentosMiami: { include: { confirmadoPor: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } } }
+    select: { id: true, quantidade: true, quantidadeRecebidaMiami: true, produto: { select: { id: true, codigo: true, nome: true, peso: true } }, pedido: { select: { id: true, numeroPedido: true, status: true } }, recebimentosMiami: { include: { confirmadoPor: { select: { id: true, name: true } } }, omit: { registroTerceiro: !seesRestrictedCondition(permissions) }, orderBy: { createdAt: "asc" } } }
   });
   if (!item) throw new AppError(404, "not_found");
   const history = await operationalHistory(lojaId, "PedidoCompraItem", itemId);
@@ -169,14 +174,14 @@ export async function receivingDetail(lojaId: string, receivingId: string, permi
   });
   const projectionById = new Map(projections.map((projection) => [projection.entityId, projection.state as Record<string, unknown>]));
   const items = receiving.itens.map((item) => ({ ...item, ...projectionById.get(item.id) }));
-  const pending = items.some((item) => item.quantidadeRecebida + item.quantidadeRejeitada < item.quantidadeEsperada);
+  const pending = items.some((item) => item.quantidadeRecebida < item.quantidadeEsperada);
   return {
     ...receiving,
     itens: items,
     progress: {
       total: items.length,
-      completed: items.filter((item) => item.quantidadeRecebida + item.quantidadeRejeitada >= item.quantidadeEsperada).length,
-      pending: items.filter((item) => item.quantidadeRecebida + item.quantidadeRejeitada < item.quantidadeEsperada).length,
+      completed: items.filter((item) => item.quantidadeRecebida >= item.quantidadeEsperada).length,
+      pending: items.filter((item) => item.quantidadeRecebida < item.quantidadeEsperada).length,
       divergent: items.filter((item) => item.tipoDivergencia !== "CORRETO").length
     },
     allowedActions: receiving.status !== "COMPLETED" && pending ? action(permissions, "RECEBIMENTO_CONFIRMAR", "CONFIRM_RECEIVING_ITEM") : [],
@@ -210,15 +215,15 @@ export async function definitiveEntryCandidates(lojaId: string, permissions: str
     const brasilType = brasil ? (projectionById.get(brasil.id)?.tipoDivergencia as string | undefined) ?? brasil.tipoDivergencia : null;
     const paraguay = receipt.viagem.checkpointsParaguai[0];
     const paraguayType = paraguay ? (projectionById.get(paraguay.id)?.tipoDivergencia as string | undefined) ?? paraguay.tipoDivergencia : null;
-    const impact = effectiveItems.reduce((sum, item) => sum + Math.max(0, Math.min(item.quantidadeEsperada, item.quantidadeRecebida - item.quantidadeRejeitada) - item.quantidadeJaIncorporada), 0);
-    const existingEntry = receipt.viagem.estoquesEntradas.find((entry) => entry.malaId === receipt.malaId && entry.status === "COMPLETED");
+    const impact = effectiveItems.reduce((sum, item) => sum + aptPendingQuantity(item), 0);
+    const existingEntry = receipt.viagem.estoquesEntradas
+      .filter((entry) => entry.malaId === receipt.malaId && entry.status === "COMPLETED")
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
     const evaluation = evaluateDefinitiveEntry({
       brazil: brasilType ? { tipoDivergencia: brasilType } : null,
       paraguayRequired,
       paraguay: paraguayType ? { tipoDivergencia: paraguayType } : null,
-      receivingComplete: receipt.status === "COMPLETED",
-      unresolvedDivergence: effectiveItems.some((item) => !item.divergenciaResolvida),
-      alreadyPosted: Boolean(existingEntry),
+      receivingOpened: true,
       impactQuantity: impact,
       miamiComplete: effectiveItems.every((item) => miamiConfirmedItems.has(item.pedidoCompraItemId))
     });
@@ -226,7 +231,7 @@ export async function definitiveEntryCandidates(lojaId: string, permissions: str
     return {
       id: receipt.id, viagemId: receipt.viagemId, malaId: receipt.malaId, status: receipt.status, entryId: existingEntry?.id ?? null,
       requiredCheckpoints: receipt.viagem.checkpointsObrigatorios, impactQuantity: impact,
-      items: effectiveItems.map((item) => ({ id: item.id, produtoId: item.produtoId, quantidadeEsperada: item.quantidadeEsperada, quantidadeRecebida: item.quantidadeRecebida, quantidadeRejeitada: item.quantidadeRejeitada, quantidadeJaIncorporada: item.quantidadeJaIncorporada, tipoDivergencia: item.tipoDivergencia, divergenciaResolvida: item.divergenciaResolvida })),
+      items: effectiveItems.map((item) => ({ id: item.id, produtoId: item.produtoId, quantidadeEsperada: item.quantidadeEsperada, quantidadeRecebida: item.quantidadeRecebida, quantidadeRejeitada: item.quantidadeRejeitada, quantidadeJaIncorporada: item.quantidadeJaIncorporada, tipoDivergencia: item.tipoDivergencia, divergenciaResolvida: item.divergenciaResolvida, quantidadeAptaPendente: aptPendingQuantity(item), entradaBloqueada: aptPendingQuantity(item) === 0 && !item.divergenciaResolvida && ["EXCESSO", "ITEM_INCORRETO", "OUTRO"].includes(item.tipoDivergencia ?? "") })),
       allowedActions: blockers.length === 0 ? action(permissions, "ENTRADA_DEFINITIVA_CONFIRMAR", "POST_DEFINITIVE_ENTRY") : [],
       blockedReasons: blockers
     };

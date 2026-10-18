@@ -1,7 +1,7 @@
 import { prisma } from "../../lib/prisma";
 import { AppError } from "../../lib/app-error";
 import { audit, idempotentMutation } from "../operations/operations.persistence";
-import { evaluateDefinitiveEntry, evaluateReceivingTransition } from "../operations/operations.policy";
+import { aptPendingQuantity, evaluateDefinitiveEntry, evaluateReceivingTransition } from "../operations/operations.policy";
 export const list = (lojaId: string) =>
   prisma.recebimento.findMany({
     where: { lojaId, supersededAt: null },
@@ -120,11 +120,9 @@ export async function confirm(
       !item ||
       d.quantidadeRecebida < 0 ||
       d.quantidadeRejeitada < 0 ||
-      (d.tipoDivergencia !== "EXCESSO" && item.quantidadeRecebida +
-        item.quantidadeRejeitada +
-        d.quantidadeRecebida +
-        d.quantidadeRejeitada >
-        item.quantidadeEsperada)
+      // Rejeitadas são parte das recebidas (recebido − rejeitado = apto); só sobra declarada excede o esperado.
+      item.quantidadeRejeitada + d.quantidadeRejeitada > item.quantidadeRecebida + d.quantidadeRecebida ||
+      (d.tipoDivergencia !== "EXCESSO" && item.quantidadeRecebida + d.quantidadeRecebida > item.quantidadeEsperada)
     )
       throw new AppError(409, "conflict");
     if (d.quantidadeRecebida + d.quantidadeRejeitada === 0)
@@ -153,7 +151,7 @@ export async function confirm(
     });
     const pending = items.some(
       (current) =>
-        current.quantidadeRecebida + current.quantidadeRejeitada <
+        current.quantidadeRecebida <
         current.quantidadeEsperada
     );
     const result = await tx.recebimento.update({
@@ -207,19 +205,15 @@ export async function entradaDefinitiva(
     const effectiveParaguayType = checkpointParaguai ? projectionByCheckpoint.get(checkpointParaguai.id)?.tipoDivergencia ?? checkpointParaguai.tipoDivergencia : null;
     const effectiveBrasilType = checkpointBrasil ? projectionByCheckpoint.get(checkpointBrasil.id)?.tipoDivergencia ?? checkpointBrasil.tipoDivergencia : null;
 
-    const entradaExistente = await tx.estoqueEntrada.findFirst({
-      where: { lojaId, viagemId: d.viagemId, malaId: d.malaId }
+    // X-07: a mala pode receber entradas parciais sucessivas; cada uma incorpora só o apto ainda não incorporado.
+    const entradaAnterior = await tx.estoqueEntrada.findFirst({
+      where: { lojaId, viagemId: d.viagemId, malaId: d.malaId },
+      orderBy: { createdAt: "desc" }
     });
-
-    if (entradaExistente) {
-      if (entradaExistente.status === "COMPLETED") {
-        return entradaExistente;
-      }
-      throw new AppError(409, "entrada_already_processing");
-    }
+    if (entradaAnterior?.status === "PENDING") throw new AppError(409, "entrada_already_processing");
 
     const recebimento = await tx.recebimento.findFirst({
-      where: { lojaId, viagemId: d.viagemId, malaId: d.malaId, status: "COMPLETED", supersededAt: null }
+      where: { lojaId, viagemId: d.viagemId, malaId: d.malaId, supersededAt: null }
     });
     const rawItems = await tx.recebimentoItem.findMany({
       where: {
@@ -239,20 +233,21 @@ export async function entradaDefinitiva(
     });
     const confirmedMiami = new Set(miamiItems.map((item) => item.pedidoCompraItemId));
 
-    const impactQuantity = itens.reduce((sum, item) => sum + Math.max(0, Math.min(item.quantidadeEsperada, item.quantidadeRecebida - item.quantidadeRejeitada) - item.quantidadeJaIncorporada), 0);
+    const impactQuantity = itens.reduce((sum, item) => sum + aptPendingQuantity(item), 0);
+    // Repetir a intenção depois de tudo incorporado devolve a entrada anterior, sem novo crédito.
+    if (impactQuantity === 0 && entradaAnterior?.status === "COMPLETED") return entradaAnterior;
     const evaluation = evaluateDefinitiveEntry({
       brazil: effectiveBrasilType ? { tipoDivergencia: effectiveBrasilType } : null,
       paraguayRequired: viagem.checkpointsObrigatorios.includes("PARAGUAI"),
       paraguay: effectiveParaguayType ? { tipoDivergencia: effectiveParaguayType } : null,
-      receivingComplete: recebimento?.status === "COMPLETED",
-      unresolvedDivergence: itens.some((item) => !item.divergenciaResolvida),
-      alreadyPosted: false,
+      receivingOpened: Boolean(recebimento),
       impactQuantity,
       miamiComplete: itens.every((item) => confirmedMiami.has(item.pedidoCompraItemId))
     });
     if (!evaluation.allowed) throw new AppError(409, evaluation.blockedReasons[0]!.toLowerCase());
 
-    const entrada = await tx.estoqueEntrada.create({
+    // Uma entrada ativa por mala (índice único); entradas parciais seguintes acrescentam movimentos a ela.
+    const entrada = entradaAnterior ?? await tx.estoqueEntrada.create({
       data: {
         lojaId,
         viagemId: d.viagemId,
@@ -265,7 +260,7 @@ export async function entradaDefinitiva(
     });
 
     for (const item of itens) {
-      const quantidadeApta = Math.min(item.quantidadeEsperada, item.quantidadeRecebida - item.quantidadeRejeitada) - item.quantidadeJaIncorporada;
+      const quantidadeApta = aptPendingQuantity(item);
 
       if (quantidadeApta > 0) {
         const stock = await tx.estoque.upsert({

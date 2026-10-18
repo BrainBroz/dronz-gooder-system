@@ -19,6 +19,7 @@ const users: string[] = [];
 
 beforeAll(async () => ({ createApp } = await import("../src/app")));
 afterEach(async () => {
+  await prisma.solicitacaoCorrecao.deleteMany({ where: { OR: [{ propostoPorId: { in: users } }, { decididoPorId: { in: users } }] } });
   await prisma.eventoCorretivo.deleteMany({ where: { usuarioId: { in: users } } });
   await prisma.auditLog.deleteMany({ where: { usuarioId: { in: users } } });
   await prisma.refreshToken.deleteMany({ where: { usuarioId: { in: users } } });
@@ -40,6 +41,19 @@ async function session(email = "admin@example.com", password = "change-me") {
     ...(key ? { "idempotency-key": key } : {})
   });
   return { app, login, store, headers };
+}
+
+// D-17: aprovador distinto do proponente, com capacidade de aprovar correção patrimonial.
+async function approver() {
+  const store = await prisma.loja.findUniqueOrThrow({ where: { slug: "dronz" } });
+  const profile = await prisma.perfil.findUniqueOrThrow({ where: { code: "GESTOR_LOJA" } });
+  const email = `approver-${randomUUID()}@example.com`;
+  const user = await prisma.usuario.create({ data: {
+    name: "Aprovador", email, passwordHash: await bcrypt.hash("change-me", 12),
+    lojas: { create: { lojaId: store.id } }, perfis: { create: { perfilId: profile.id } }
+  } });
+  users.push(user.id);
+  return { ...(await session(email)), userId: user.id };
 }
 
 async function fixture(route: "MIAMI_BRASIL" | "MIAMI_PARAGUAI_BRASIL" = "MIAMI_BRASIL") {
@@ -219,6 +233,12 @@ describe("UI-3C backend", () => {
       after: { tipoDivergencia: "AVARIA" }, adjustments: [{ productId: data.product.id, quantityDelta: -2, originalMovementId: originalMovement.id }]
     });
     expect(correction.status).toBe(200);
+    expect(correction.body.status).toBe("PENDENTE");
+    expect((await prisma.estoque.findUniqueOrThrow({ where: { id: stock.id } })).quantidadeFisica).toBe(15);
+    const selfApproval = await request(app).post(`/operations/corrections/requests/${correction.body.id}/approve`).set(headers());
+    expect(selfApproval.body.error).toBe("approver_must_differ");
+    const manager = await approver();
+    expect((await request(manager.app).post(`/operations/corrections/requests/${correction.body.id}/approve`).set(manager.headers())).status).toBe(200);
     expect((await prisma.estoque.findUniqueOrThrow({ where: { id: stock.id } })).quantidadeFisica).toBe(13);
     const movement = await prisma.movimentacaoEstoque.findFirstOrThrow({ where: { movimentoOriginalId: originalMovement.id } });
     expect(movement.tipo).toBe("ADJUSTMENT_NEGATIVE");
@@ -234,7 +254,32 @@ describe("UI-3C backend", () => {
       after: { tipoDivergencia: "AVARIA" }, adjustments: [{ productId: data.product.id, quantityDelta: -3, originalMovementId: originalMovement.id }]
     });
     expect(remaining.status).toBe(200);
+    expect((await request(manager.app).post(`/operations/corrections/requests/${remaining.body.id}/approve`).set(manager.headers())).status).toBe(200);
     expect((await prisma.estoque.findUniqueOrThrow({ where: { id: stock.id } })).quantidadeFisica).toBe(10);
+  });
+
+  it("D-17: rejeição exige motivo e não altera o estoque", async () => {
+    const { app, headers } = await session();
+    const data = await fixture();
+    await arrive(data);
+    const checkpoint = await prisma.checkpointBrasil.create({ data: { lojaId: data.bag.lojaId, viagemId: data.trip.id, malaId: data.bag.id, confirmadoPorId: data.admin.id, confirmadoEm: new Date() } });
+    const stock = await prisma.estoque.create({ data: { lojaId: data.bag.lojaId, produtoId: data.product.id, quantidadeFisica: 5 } });
+    const originalMovement = await prisma.movimentacaoEstoque.create({ data: {
+      lojaId: data.bag.lojaId, produtoId: data.product.id, estoqueId: stock.id, tipo: "ENTRY", motivo: "PURCHASE_RECEIPT",
+      quantidade: 5, quantidadeAnterior: 0, quantidadePosterior: 5, responsavelId: data.admin.id
+    } });
+    const proposal = await request(app).post("/operations/corrections").set(headers(undefined, randomUUID())).send({
+      entity: "CheckpointBrasil", originalEventId: checkpoint.id, correctionType: "STOCK_COMPENSATION", reason: "Suspeita de avaria",
+      after: { tipoDivergencia: "AVARIA" }, adjustments: [{ productId: data.product.id, quantityDelta: -1, originalMovementId: originalMovement.id }]
+    });
+    const manager = await approver();
+    const queue = await request(manager.app).get("/operations/corrections/requests").set(manager.headers());
+    expect(queue.body.map((entry: { id: string }) => entry.id)).toContain(proposal.body.id);
+    const reject = (body: object) => request(manager.app).post(`/operations/corrections/requests/${proposal.body.id}/reject`).set(manager.headers()).send(body);
+    expect((await reject({})).status).toBe(400);
+    expect((await reject({ motivo: "Unidade conferida e íntegra" })).body.status).toBe("REJEITADA");
+    expect((await prisma.estoque.findUniqueOrThrow({ where: { id: stock.id } })).quantidadeFisica).toBe(5);
+    expect((await request(manager.app).post(`/operations/corrections/requests/${proposal.body.id}/approve`).set(manager.headers())).body.error).toBe("request_already_decided");
   });
 
   it("serializa compensações concorrentes sem ultrapassar o movimento original", async () => {
@@ -251,9 +296,15 @@ describe("UI-3C backend", () => {
       entity: "CheckpointBrasil", originalEventId: checkpoint.id, correctionType: "STOCK_COMPENSATION", reason: "Compensação concorrente",
       after: { tipoDivergencia: "AVARIA" }, adjustments: [{ productId: data.product.id, quantityDelta: -4, originalMovementId: originalMovement.id }]
     });
-    const responses = await Promise.all([send(), send()]);
-    expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+    // As duas propostas cabem no original isoladamente; a aprovação concorrente só pode aplicar uma.
+    const proposals = [await send(), await send()];
+    expect(proposals.map((response) => response.status)).toEqual([200, 200]);
+    const manager = await approver();
+    const { approveCompensation } = await import("../src/modules/operations/corrections.service");
+    const results = await Promise.allSettled(proposals.map((proposal) => approveCompensation(data.bag.lojaId, manager.userId, proposal.body.id)));
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
     expect(await prisma.movimentacaoEstoque.count({ where: { movimentoOriginalId: originalMovement.id, tipo: "ADJUSTMENT_NEGATIVE" } })).toBe(1);
+    expect((await prisma.estoque.findUniqueOrThrow({ where: { id: stock.id } })).quantidadeFisica).toBe(11);
   });
 
   it("restringe overview e histórico do perfil Miami ao próprio escopo", async () => {
@@ -304,7 +355,7 @@ describe("UI-3C backend", () => {
     expect(await prisma.checkpointBrasil.count({ where: { malaId: data.bag.id, supersededAt: null } })).toBe(0);
   });
 
-  it("expõe divergência tipada de recebimento e bloqueia entrada enquanto não resolvida", async () => {
+  it("expõe divergência tipada de recebimento e bloqueia entrada sem unidade apta", async () => {
     const { app, headers } = await session();
     const data = await fixture();
     await arrive(data);
@@ -316,14 +367,15 @@ describe("UI-3C backend", () => {
     const detail = await request(app).get(`/operations/receiving/${receiving.body.id}`).set(headers());
     const itemId = detail.body.itens[0].id;
     const confirmation = await request(app).post(`/receiving/${receiving.body.id}/items/${itemId}/confirm`).set(headers()).send({
-      quantidadeRecebida: 0, quantidadeRejeitada: 2, tipoDivergencia: "AVARIA", observacoes: "Avaria confirmada"
+      quantidadeRecebida: 2, quantidadeRejeitada: 2, tipoDivergencia: "AVARIA", observacoes: "Avaria confirmada"
     });
     expect(confirmation.status).toBe(200);
     const updated = await request(app).get(`/operations/receiving/${receiving.body.id}`).set(headers());
     expect(updated.body.itens[0].tipoDivergencia).toBe("AVARIA");
     expect(updated.body.itens[0].divergenciaResolvida).toBe(false);
     const entry = await request(app).get("/operations/definitive-entry/candidates").set(headers());
+    // X-07: avaria mantém as unidades rejeitadas fora do estoque; sem unidade apta não há entrada.
     expect(entry.body.find((candidate: { id: string }) => candidate.id === receiving.body.id).blockedReasons)
-      .toContainEqual(expect.objectContaining({ code: "DIVERGENCE_UNRESOLVED" }));
+      .toContainEqual(expect.objectContaining({ code: "NO_APT_QUANTITY" }));
   });
 });

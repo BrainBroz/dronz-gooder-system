@@ -35,13 +35,26 @@ export function evaluateReceivingTransition(trip: Viagem, bag: Mala, paraguay: C
   return { allowed: true, blockedReason: null };
 }
 
+// X-07/DEC-DOM-003: sobra, item incorreto ou divergência genérica não resolvida bloqueiam a entrada
+// do próprio item; falta e avaria mantêm as unidades aptas elegíveis.
+const ITEM_BLOCKING_DIVERGENCES = ["EXCESSO", "ITEM_INCORRETO", "OUTRO"];
+export function aptPendingQuantity(item: {
+  quantidadeEsperada: number;
+  quantidadeRecebida: number;
+  quantidadeRejeitada: number;
+  quantidadeJaIncorporada: number;
+  tipoDivergencia?: string | null;
+  divergenciaResolvida: boolean;
+}) {
+  if (!item.divergenciaResolvida && ITEM_BLOCKING_DIVERGENCES.includes(item.tipoDivergencia ?? "")) return 0;
+  return Math.max(0, Math.min(item.quantidadeEsperada, item.quantidadeRecebida - item.quantidadeRejeitada) - item.quantidadeJaIncorporada);
+}
+
 export function evaluateDefinitiveEntry(input: {
   brazil: CheckpointView;
   paraguayRequired: boolean;
   paraguay: CheckpointView;
-  receivingComplete: boolean;
-  unresolvedDivergence: boolean;
-  alreadyPosted: boolean;
+  receivingOpened: boolean;
   impactQuantity: number;
   miamiComplete: boolean;
 }) {
@@ -50,9 +63,7 @@ export function evaluateDefinitiveEntry(input: {
   else if (input.brazil.tipoDivergencia !== "CORRETO") blockers.push("DIVERGENCE_UNRESOLVED");
   if (input.paraguayRequired && !input.paraguay) blockers.push("CHECKPOINT_REQUIRED");
   else if (input.paraguayRequired && input.paraguay?.tipoDivergencia !== "CORRETO") blockers.push("DIVERGENCE_UNRESOLVED");
-  if (!input.receivingComplete) blockers.push("RECEIVING_NOT_COMPLETE");
-  if (input.unresolvedDivergence) blockers.push("DIVERGENCE_UNRESOLVED");
-  if (input.alreadyPosted) blockers.push("STOCK_ALREADY_POSTED");
+  if (!input.receivingOpened) blockers.push("RECEIVING_NOT_STARTED");
   if (input.impactQuantity <= 0) blockers.push("NO_APT_QUANTITY");
   if (!input.miamiComplete) blockers.push("MISSING_CHECKPOINT_MIAMI");
   return { allowed: blockers.length === 0, blockedReasons: [...new Set(blockers)] };

@@ -427,6 +427,11 @@ export async function confirmMiami(
   actor: Actor,
   d: {
     posicaoId?: string;
+    condicaoComercial?: "NAO_DEFINIDA" | "NOVO" | "CAIXA_ABERTA" | "USADO";
+    funcionamento?: "NAO_TESTADO" | "FUNCIONAL" | "DEFEITO_PARCIAL" | "INOPERANTE";
+    acessoriosAusentes?: string[];
+    observacaoCondicao?: string;
+    registroTerceiro?: boolean;
     pedidoCompraItemId: string;
     quantidadeRecebida: number;
     recebidoEm: Date;
@@ -463,6 +468,11 @@ export async function confirmMiami(
         observacao: d.observacao,
         tipoDivergencia: d.tipoDivergencia || "CORRETO",
         posicaoId: i.pedido.destinoPosicaoId,
+        condicaoComercial: d.condicaoComercial,
+        funcionamento: d.funcionamento,
+        acessoriosAusentes: d.acessoriosAusentes ?? [],
+        observacaoCondicao: d.observacaoCondicao,
+        registroTerceiro: d.registroTerceiro ?? false,
         lojaId,
         confirmadoPorId: userId,
         atraso

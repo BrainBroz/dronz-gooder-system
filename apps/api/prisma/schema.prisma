@@ -39,6 +39,7 @@ model Loja {
   pagamentos                    Pagamento[]
   custosPedido                  CustoPedido[]
   handoffsVolume                HandoffVolume[]
+  solicitacoesCorrecao          SolicitacaoCorrecao[]
   simulacoesViagem              SimulacaoViagem[]
   atribuicoes                   AtribuicaoItem[]
   comprasImportadas             CompraImportada[]
@@ -82,6 +83,8 @@ model Usuario {
   decisoesBuyerCompra            BuyerApprovalDecision[]
   responsabilidadesContextuais   ResponsabilidadeContextual[]
   handoffsEntregues              HandoffVolume[]
+  correcoesPropostas             SolicitacaoCorrecao[]          @relation("CorrecaoProponente")
+  correcoesDecididas             SolicitacaoCorrecao[]          @relation("CorrecaoAprovador")
   reservasMala                   AlocacaoMala[]
 }
 
@@ -1271,6 +1274,11 @@ model RecebimentoMiami {
   observacao         String?
   atraso             Boolean              @default(false)
   tipoDivergencia    TipoDivergenciaMiami @default(CORRETO)
+  condicaoComercial  CondicaoComercial    @default(NAO_DEFINIDA)
+  funcionamento      Funcionamento        @default(NAO_TESTADO)
+  acessoriosAusentes String[]             @default([])
+  observacaoCondicao String?
+  registroTerceiro   Boolean              @default(false)
   posicaoId          String               @default("posicao-miami-base")
   posicao            PosicaoOperacional   @relation(fields: [posicaoId], references: [id], onDelete: Restrict)
   createdAt          DateTime             @default(now())
@@ -1851,4 +1859,44 @@ model HandoffVolume {
   entreguePor   Usuario  @relation(fields: [entreguePorId], references: [id], onDelete: Restrict)
 
   @@index([lojaId, malaId])
+}
+
+// D-4: condição em dimensões separadas; não altera aptidão para entrada/venda até política própria.
+enum CondicaoComercial {
+  NAO_DEFINIDA
+  NOVO
+  CAIXA_ABERTA
+  USADO
+}
+
+enum Funcionamento {
+  NAO_TESTADO
+  FUNCIONAL
+  DEFEITO_PARCIAL
+  INOPERANTE
+}
+
+enum StatusSolicitacaoCorrecao {
+  PENDENTE
+  APROVADA
+  REJEITADA
+}
+
+// D-17: correção com efeito patrimonial é proposta por um usuário e aplicada só após aval de outro.
+model SolicitacaoCorrecao {
+  id                String                    @id @default(cuid())
+  lojaId            String
+  payload           Json
+  status            StatusSolicitacaoCorrecao @default(PENDENTE)
+  propostoPorId     String
+  decididoPorId     String?
+  decididoEm        DateTime?
+  motivoDecisao     String?
+  eventoCorretivoId String?
+  createdAt         DateTime                  @default(now())
+  loja              Loja                      @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  propostoPor       Usuario                   @relation("CorrecaoProponente", fields: [propostoPorId], references: [id], onDelete: Restrict)
+  decididoPor       Usuario?                  @relation("CorrecaoAprovador", fields: [decididoPorId], references: [id], onDelete: Restrict)
+
+  @@index([lojaId, status])
 }

@@ -63,7 +63,7 @@ function validTimezone(timezone: string) {
 }
 
 // D-10: pendências que impedem o encerramento de uma posição temporária.
-async function closurePendencies(db: Db, posicaoId: string) {
+export async function closurePendencies(db: Db, posicaoId: string) {
   const [pendingItems, openBags, reservations] = await Promise.all([
     db.pedidoCompraItem.findMany({
       where: {
