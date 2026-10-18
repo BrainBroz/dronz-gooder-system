@@ -1,7 +1,8 @@
 import React from "react";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { webcrypto } from "node:crypto";
 import { api } from "../src/api/client";
 import { SalesPage } from "../src/pages/SalesPage";
 import { renderWithProviders } from "./render";
@@ -35,7 +36,32 @@ function mockReads(suggestion: unknown) {
   });
 }
 
-beforeEach(() => vi.restoreAllMocks());
+function mockReceiptReads() {
+  return vi.spyOn(api, "get").mockImplementation(async (url) => {
+    if (url === "/sales")
+      return {
+        data: [
+          {
+            ...draft,
+            estado: "CONFIRMADA",
+            recebivel: {
+              valorPrevisto: "100",
+              valorRecebido: "0",
+              status: "PENDENTE"
+            }
+          }
+        ]
+      };
+    if (url === "/products") return { data: { items: [] } };
+    throw new Error(`GET inesperado: ${url}`);
+  });
+}
+
+beforeEach(() => {
+  vi.restoreAllMocks();
+  vi.stubGlobal("crypto", webcrypto);
+});
+afterEach(() => vi.unstubAllGlobals());
 
 describe("Vendas B17", () => {
   it("confirma a venda com os lotes FIFO sugeridos", async () => {
@@ -135,7 +161,7 @@ describe("Vendas B17", () => {
       .spyOn(api, "post")
       .mockRejectedValueOnce(new Error("network"))
       .mockResolvedValue({ data: {} });
-    renderWithProviders(<SalesPage />, {
+    const firstMount = renderWithProviders(<SalesPage />, {
       permissions: ["VENDA_VISUALIZAR", "VENDA_CRIAR"]
     });
     await userEvent.click(screen.getByRole("combobox", { name: "Produto" }));
@@ -148,6 +174,16 @@ describe("Vendas B17", () => {
       screen.getByRole("button", { name: "Criar rascunho" })
     );
     await screen.findByRole("alert");
+    firstMount.unmount();
+    renderWithProviders(<SalesPage />, {
+      permissions: ["VENDA_VISUALIZAR", "VENDA_CRIAR"]
+    });
+    await userEvent.click(screen.getByRole("combobox", { name: "Produto" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Drone" }));
+    await userEvent.type(
+      screen.getByRole("spinbutton", { name: "Preço unitário" }),
+      "100"
+    );
     await userEvent.click(
       screen.getByRole("button", { name: "Criar rascunho" })
     );
@@ -186,7 +222,7 @@ describe("Vendas B17", () => {
       .spyOn(api, "post")
       .mockRejectedValueOnce(new Error("network"))
       .mockResolvedValue({ data: {} });
-    renderWithProviders(<SalesPage />, {
+    const firstMount = renderWithProviders(<SalesPage />, {
       permissions: ["VENDA_VISUALIZAR", "FINANCEIRO_REGISTRAR"]
     });
     const input = await screen.findByRole("spinbutton", {
@@ -202,10 +238,17 @@ describe("Vendas B17", () => {
     await screen.findByText("Nenhuma venda neste filtro.");
     await userEvent.click(screen.getByRole("combobox", { name: "Estado" }));
     await userEvent.click(screen.getByRole("option", { name: "Todos" }));
-    const remountedInput = await screen.findByRole("spinbutton", {
+    await screen.findByRole("spinbutton", {
       name: "Valor recebido"
     });
-    await userEvent.type(remountedInput, "25");
+    firstMount.unmount();
+    renderWithProviders(<SalesPage />, {
+      permissions: ["VENDA_VISUALIZAR", "FINANCEIRO_REGISTRAR"]
+    });
+    const returnedInput = await screen.findByRole("spinbutton", {
+      name: "Valor recebido"
+    });
+    await userEvent.type(returnedInput, "25");
     await userEvent.click(
       screen.getByRole("button", { name: "Registrar recebimento" })
     );
@@ -215,12 +258,62 @@ describe("Vendas B17", () => {
       valor: 25,
       recebidoEm: expect.any(String)
     });
-    await userEvent.type(remountedInput, "25");
+    await userEvent.type(returnedInput, "25");
     await userEvent.click(
       screen.getByRole("button", { name: "Registrar recebimento" })
     );
     await waitFor(() => expect(post).toHaveBeenCalledTimes(3));
     expect(post.mock.calls[2][2]?.headers?.["idempotency-key"]).not.toBe(
+      post.mock.calls[0][2]?.headers?.["idempotency-key"]
+    );
+  });
+
+  it("sessão indisponível bloqueia antes de enviar e explica que nenhum recebimento foi realizado", async () => {
+    mockReceiptReads();
+    const post = vi.spyOn(api, "post").mockResolvedValue({ data: {} });
+    renderWithProviders(<SalesPage />, {
+      permissions: ["VENDA_VISUALIZAR", "FINANCEIRO_REGISTRAR"]
+    });
+    await userEvent.type(
+      await screen.findByRole("spinbutton", { name: "Valor recebido" }),
+      "25"
+    );
+    vi.spyOn(Storage.prototype, "setItem").mockImplementationOnce(() => {
+      throw new DOMException("quota", "QuotaExceededError");
+    });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Registrar recebimento" })
+    );
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Nenhum envio foi realizado"
+    );
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("falha de limpeza da sessão não transforma recebimento confirmado em erro nem reutiliza a chave para outra parcela", async () => {
+    mockReceiptReads();
+    const post = vi.spyOn(api, "post").mockResolvedValue({ data: {} });
+    renderWithProviders(<SalesPage />, {
+      permissions: ["VENDA_VISUALIZAR", "FINANCEIRO_REGISTRAR"]
+    });
+    const input = await screen.findByRole("spinbutton", {
+      name: "Valor recebido"
+    });
+    await userEvent.type(input, "25");
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementationOnce(() => {
+      throw new DOMException("unavailable", "SecurityError");
+    });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Registrar recebimento" })
+    );
+    await screen.findByText("Recebimento registrado.");
+    expect(screen.queryByRole("alert")).toBeNull();
+    await userEvent.type(input, "25");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Registrar recebimento" })
+    );
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+    expect(post.mock.calls[1][2]?.headers?.["idempotency-key"]).not.toBe(
       post.mock.calls[0][2]?.headers?.["idempotency-key"]
     );
   });
