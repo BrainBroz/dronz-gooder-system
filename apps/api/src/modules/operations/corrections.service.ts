@@ -4,6 +4,7 @@ import { prisma } from "../../lib/prisma";
 import { AppError } from "../../lib/app-error";
 import { audit, idempotentMutation } from "./operations.persistence";
 import type { CorrectionInput } from "./corrections.schemas";
+import { applyMove, type MoveInput } from "../inventory/inventory.service";
 
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 
@@ -145,9 +146,13 @@ async function decide(lojaId: string, approverId: string, id: string, approve: b
       if (!request) throw new AppError(404, "not_found");
       if (request.status !== "PENDENTE") throw new AppError(409, "request_already_decided");
       if (request.propostoPorId === approverId) throw new AppError(403, "approver_must_differ");
-      const correction = approve
-        ? await applyCorrection(tx, lojaId, request.propostoPorId, request.payload as unknown as CorrectionInput, correlationId)
-        : null;
+      // PD-12: a mesma fila decide perdas de estoque acima do limite; aprovar aplica o movimento proposto.
+      const payload = request.payload as { kind?: string; move?: MoveInput };
+      const correction = !approve
+        ? null
+        : payload.kind === "STOCK_LOSS"
+          ? await applyMove(tx, lojaId, request.propostoPorId, payload.move!, correlationId)
+          : await applyCorrection(tx, lojaId, request.propostoPorId, request.payload as unknown as CorrectionInput, correlationId);
       const updated = await tx.solicitacaoCorrecao.update({
         where: { id },
         data: {

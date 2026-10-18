@@ -1,8 +1,10 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import type { AuthIdentity } from "../../middlewares/auth";
 import { overview as purchasesOverview } from "../unified-purchases/unified-purchases.service";
 import { closurePendencies } from "../positions/positions.service";
 import { overview as operationsOverview } from "./operations.service";
+import { thursdayMorningWindow } from "../../lib/time-window";
 
 type HomeItem = {
   codigo: string;
@@ -147,6 +149,42 @@ export async function home(identity: AuthIdentity, lojaId: string) {
       definicao: "Linhas de reserva em volumes ainda não fechados (F-8)."
     }
   ];
+  // PD-08: envio planejado para quinta de manhã que não saiu até 12:00 no fuso da origem (só alerta).
+  const thursdayTrips = await prisma.viagem.findMany({
+    where: {
+      lojaId,
+      periodoEnvio: "MANHA",
+      status: {
+        in: ["PLANNED", "OPEN_FOR_ALLOCATION", "CLOSED_FOR_ALLOCATION"]
+      },
+      partidaEm: {
+        gte: new Date(referenciaEm.getTime() - 14 * 86_400_000),
+        lte: referenciaEm
+      }
+    },
+    select: {
+      partidaEm: true,
+      malas: {
+        take: 1,
+        select: {
+          posicao: { select: { local: { select: { timezone: true } } } }
+        }
+      }
+    }
+  });
+  logistica.push({
+    codigo: "ENVIO_QUINTA_ATRASADO",
+    titulo: "Envios de quinta de manhã ainda não saíram",
+    quantidade: thursdayTrips.filter((trip) => {
+      const window = thursdayMorningWindow(
+        trip.partidaEm,
+        trip.malas[0]?.posicao.local.timezone ?? "America/New_York"
+      );
+      return window && referenciaEm > window.fim;
+    }).length,
+    definicao:
+      "Viagens com envio na quinta de manhã (08:00–12:00 no fuso da posição de origem, PD-08) ainda não em trânsito após o fim da janela. Alerta, sem bloqueio."
+  });
   if (has("LOGISTICA_POSICOES_GERENCIAR")) {
     const temporary = await prisma.posicaoOperacional.findMany({
       where: { tipo: "TEMPORARIA", status: "ATIVA" },
@@ -201,17 +239,17 @@ export async function home(identity: AuthIdentity, lojaId: string) {
         pagamentos: { select: { valor: true, status: true, estornoDeId: true } }
       }
     });
+    // Mesma regra da obrigação (B16): reembolso não reabre a dívida; conta só aplicação bruta.
     const unpaid = orders.filter((order) => {
-      const paid = order.pagamentos.reduce(
-        (sum, payment) =>
-          payment.estornoDeId
-            ? sum - Number(payment.valor)
-            : payment.status === "CANCELLED"
-              ? sum
-              : sum + Number(payment.valor),
-        0
-      );
-      return paid < Number(order.total);
+      const paid = order.pagamentos
+        .filter(
+          (payment) => !payment.estornoDeId && payment.status !== "CANCELLED"
+        )
+        .reduce(
+          (sum, payment) => sum.plus(payment.valor),
+          new Prisma.Decimal(0)
+        );
+      return paid.lessThan(order.total);
     }).length;
     secoes.push({
       codigo: "FINANCEIRO",
@@ -223,7 +261,7 @@ export async function home(identity: AuthIdentity, lojaId: string) {
           titulo: "Pedidos com pagamento pendente",
           quantidade: unpaid,
           definicao:
-            "Pedidos não cancelados cujo total pago (menos estornos) é menor que o total."
+            "Pedidos não cancelados cujo total aplicado (sem descontar reembolsos) é menor que o total."
         }
       ]
     });

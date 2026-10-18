@@ -149,7 +149,7 @@ describe("purchase finance", () => {
       ).status
     ).toBe(409);
     expect(
-      (await request(app).get("/finance/payments").set(h(g.id))).body.some(
+      (await request(app).get("/finance/payments").set(h(g.id))).body.items.some(
         (x: { pedidoCompraId: string }) => x.pedidoCompraId === order.id
       )
     ).toBe(false);

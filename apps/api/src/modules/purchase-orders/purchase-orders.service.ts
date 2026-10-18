@@ -60,6 +60,7 @@ export const list = async (
     numero?: string;
     fornecedorId?: string;
     status?: string;
+    incluirCancelados?: "true" | "false";
     page: number;
     limit: number;
   }
@@ -71,7 +72,11 @@ export const list = async (
         ? { numeroPedido: { contains: q.numero, mode: "insensitive" } }
         : {}),
       ...(q.fornecedorId ? { fornecedorId: q.fornecedorId } : {}),
-      ...(q.status ? { status: q.status as PedidoCompraStatus } : {})
+      ...(q.status
+        ? { status: q.status as PedidoCompraStatus }
+        : q.incluirCancelados === "true"
+          ? {}
+          : { status: { not: "CANCELLED" as const } })
     },
     include: { fornecedor: true, itens: true },
     orderBy: [{ dataCompra: "desc" }, { id: "desc" }],

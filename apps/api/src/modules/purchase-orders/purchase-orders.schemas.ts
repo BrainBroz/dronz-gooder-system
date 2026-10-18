@@ -51,6 +51,8 @@ export const querySchema = z.object({
   numero: z.string().optional(),
   fornecedorId: z.string().optional(),
   status: z.string().optional(),
+  // PD-10: cancelados ficam fora da visão ativa, salvo pedido explícito.
+  incluirCancelados: z.enum(["true", "false"]).optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20)
 });

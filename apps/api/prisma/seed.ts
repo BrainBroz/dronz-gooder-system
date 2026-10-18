@@ -120,6 +120,10 @@ async function main() {
     "VENDA_CONFIRMAR",
     "VENDA_CORRIGIR",
     "DEVOLUCAO_CONFERIR",
+    // PD-13: gestor revisa e aprova evidências buyer; Miami continua sem financeiro e vendas.
+    "BUYER_INGESTION_VISUALIZAR",
+    "BUYER_INGESTION_APROVAR",
+    "BUYER_INGESTION_REJEITAR",
     "ESTOQUE_VISUALIZAR",
     "ESTOQUE_MOVIMENTAR",
     "ESTOQUE_AJUSTAR",

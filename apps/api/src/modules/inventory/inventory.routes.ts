@@ -125,3 +125,25 @@ inventoryRouter.post(
     )
   )
 );
+// PD-12: perda/ajuste negativo acima do limite vira proposta; o aval vem da fila de correções (D-17).
+inventoryRouter.post(
+  "/movements/loss-requests",
+  requirePermission("ESTOQUE_AJUSTAR"),
+  w((r) =>
+    s.proposeLoss(
+      r.storeId!,
+      r.identity!.user.id,
+      z
+        .object({
+          produtoId: z.string(),
+          tipo: z.enum(["EXIT", "ADJUSTMENT_NEGATIVE"]),
+          motivo: z.enum(["LOSS", "DAMAGE", "MANUAL_CORRECTION"]),
+          quantidade: z.number().int().positive(),
+          observacoes: z.string().trim().min(3).max(1000)
+        })
+        .strict()
+        .parse(r.body),
+      lotKey(r)
+    )
+  )
+);

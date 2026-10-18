@@ -85,7 +85,10 @@ const KNOWN_ERROR_MESSAGES: Record<string, string> = {
   lot_exceeds_purchase_item: "O item de compra não tem unidades suficientes para este lote.",
   product_mismatch: "O item de compra é de outro produto.",
   package_exceeds_item: "Os pacotes somam mais unidades do que o item comprado.",
-  purchase_item_not_found: "Item de compra não encontrado neste pedido."
+  purchase_item_not_found: "Item de compra não encontrado neste pedido.",
+  loss_requires_approval:
+    "Perda acima do limite: registre uma proposta para aprovação por outro usuário.",
+  loss_within_limit: "A perda está dentro do limite; registre o movimento direto."
 };
 const STATUS_FALLBACK_MESSAGES: Record<number, string> = {
   400: "Dados inválidos. Verifique os campos e tente novamente.",
