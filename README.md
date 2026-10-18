@@ -10,6 +10,9 @@ Status atual:
 - catálogo, Fornecedores e Pedidos Operacionais isolados por loja;
 - Compras Unificadas com staging global controlada, atribuição quantitativa e materialização independente por loja;
 - UI-3C, logística, recebimento, entrada definitiva, estoque, financeiro manual, Dashboard e Relatórios;
+- posições operacionais, remessas, recebimento parcial e Home operacional;
+- revisão humana de evidências multicanal, adapter eBay Buyer implementado (desabilitado até configuração segura) e painel mensal com CSV;
+- contas/faturas e conciliação financeira manual, vendas por lote e indicadores com acesso financeiro controlado;
 - migrations e testes de integração usam PostgreSQL real.
 
 ## Stack
@@ -68,14 +71,16 @@ O roadmap oficial está em `docs/PROJECT_CONTEXT_MASTER.md`. Dronz e Gooder usam
 
 ## Itens não implementados ainda
 
-- adapter eBay buyer e futura retomada do adapter Amazon Business buyer após onboarding;
-- e-mail autorizado, reconciliação multicanal e migração da planilha;
-- painel mensal de compras reconciliadas;
+- ativação real do adapter eBay buyer depende de credenciais/configuração segura e homologação da conta;
+- adapter Amazon Business buyer após onboarding externo;
+- ingestão automática de mailbox autorizada (Batch 12) e migração da planilha histórica real;
 - adapters seller Amazon/eBay, adiados até existir necessidade específica de importar vendas recebidas;
 - tracking automático e integrações com transportadoras;
 - PayPal, bancos e cartões como integrações (PAYPAL atual é classificação manual);
 - e-mail e QR Code;
 - exportações PDF e Excel.
+
+Vendas com perdas/saídas antigas que não identificam lote ficam bloqueadas até reconciliação do saldo de origem. Recebimentos parciais são auditados individualmente; sua associação a transações-fonte do B16 permanece bloqueada até existir contrato de entrada financeira compatível. Tracking manual e códigos do marketplace não substituem o motor automático do Batch 15.
 
 ## Produção
 

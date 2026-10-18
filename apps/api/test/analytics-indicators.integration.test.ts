@@ -35,6 +35,20 @@ afterEach(async () => {
         select: { id: true }
       })
     ).map((sale) => sale.id);
+    const receivables = await prisma.recebivelVenda.findMany({
+      where: { vendaId: { in: ids } },
+      select: { id: true }
+    });
+    await prisma.auditLog.deleteMany({
+      where: {
+        entity: "RecebivelVenda",
+        entityId: { in: receivables.map((row) => row.id) }
+      }
+    });
+    await prisma.recebivelVenda.deleteMany({ where: { vendaId: { in: ids } } });
+    await prisma.baixaVenda.deleteMany({
+      where: { item: { vendaId: { in: ids } } }
+    });
     await prisma.vendaItem.deleteMany({ where: { vendaId: { in: ids } } });
     await prisma.venda.deleteMany({ where: { id: { in: ids } } });
     await prisma.pedidoCompraItem.deleteMany({
@@ -297,13 +311,28 @@ describe("analytics read models (Batch 18)", () => {
         ).status,
         type
       ).toBe(403);
+    for (const type of ["inventory", "movements"]) {
+      const report = await request(user.app)
+        .get(`/analytics/reports/${type}`)
+        .set(user.header("dronz"));
+      expect(report.status).toBe(200);
+      expect(report.body.length).toBeGreaterThan(0);
+      for (const row of report.body) {
+        expect(row.produto).toHaveProperty("nome");
+        expect(row.produto).not.toHaveProperty("precoVenda");
+        expect(row.produto).not.toHaveProperty("markup");
+      }
+    }
+    const admin = await login("admin@example.com");
+    const full = await request(admin.app)
+      .get("/analytics/reports/inventory")
+      .set(admin.header("dronz"));
     expect(
-      (
-        await request(user.app)
-          .get("/analytics/reports/inventory")
-          .set(user.header("dronz"))
-      ).status
-    ).toBe(200);
+      full.body.some(
+        (row: { produto: { precoVenda?: string } }) =>
+          row.produto.precoVenda !== undefined
+      )
+    ).toBe(true);
     const result = await request(user.app)
       .get("/analytics/indicators")
       .query(WINDOW)
@@ -325,5 +354,139 @@ describe("analytics read models (Batch 18)", () => {
           .set(user.header("dronz"))
       ).status
     ).toBe(403);
+  });
+
+  it("fluxo mensal usa cada parcela auditada, sem mover janeiro para fevereiro no pagamento parcial", async () => {
+    const admin = await login("admin@example.com");
+    const store = await prisma.loja.findUniqueOrThrow({
+      where: { slug: "dronz" }
+    });
+    const data = await createOperationalFixture(prisma, store.id);
+    fixtures.push(data);
+    const stock = await prisma.estoque.create({
+      data: {
+        lojaId: store.id,
+        produtoId: data.product.id,
+        quantidadeFisica: 2
+      }
+    });
+    const lot = await prisma.movimentacaoEstoque.create({
+      data: {
+        lojaId: store.id,
+        produtoId: data.product.id,
+        estoqueId: stock.id,
+        pedidoCompraItemId: data.item.id,
+        tipo: "ENTRY",
+        motivo: "PURCHASE_RECEIPT",
+        quantidade: 2,
+        quantidadeAnterior: 0,
+        quantidadePosterior: 2,
+        responsavelId: data.admin.id
+      }
+    });
+    const sale = await request(admin.app)
+      .post("/sales")
+      .set(admin.header("dronz"))
+      .set("idempotency-key", randomUUID())
+      .send({
+        canal: "OUTRO",
+        dataVenda: "2037-01-01T12:00:00Z",
+        moeda: "USD",
+        itens: [
+          { produtoId: data.product.id, quantidade: 1, precoUnitario: 100 }
+        ]
+      });
+    expect(sale.status).toBe(201);
+    expect(
+      (
+        await request(admin.app)
+          .post(`/sales/${sale.body.id}/confirm`)
+          .set(admin.header("dronz"))
+          .send({
+            lotes: [
+              {
+                vendaItemId: sale.body.itens[0].id,
+                movimentoEntradaId: lot.id,
+                quantidade: 1
+              }
+            ]
+          })
+      ).status
+    ).toBe(200);
+    const receive = (valor: number, recebidoEm: string, key: string) =>
+      request(admin.app)
+        .post(`/sales/${sale.body.id}/receipts`)
+        .set(admin.header("dronz"))
+        .set("idempotency-key", key)
+        .send({ valor, recebidoEm });
+    const key = randomUUID();
+    expect((await receive(25, "2037-01-31T23:00:00Z", key)).status).toBe(201);
+    expect((await receive(25, "2037-01-31T23:00:00Z", key)).status).toBe(201);
+    expect(
+      (await receive(30, "2037-02-15T12:00:00Z", randomUUID())).status
+    ).toBe(201);
+    for (const [from, to, amount] of [
+      ["2037-01-01", "2037-02-01", "25.00"],
+      ["2037-02-01", "2037-03-01", "30.00"]
+    ]) {
+      const result = await request(admin.app)
+        .get("/analytics/indicators")
+        .query({ from, to })
+        .set(admin.header("dronz"));
+      expect(result.status).toBe(200);
+      expect(
+        line(result.body.linhas, "FLUXO_FINANCEIRO", "RECEBIMENTO_VENDA", "USD")
+      ).toMatchObject({ valor: amount, amostra: 1 });
+    }
+    const other = await request(admin.app)
+      .get("/analytics/indicators")
+      .query({ from: "2037-01-01", to: "2037-03-01" })
+      .set(admin.header("gooder"));
+    expect(
+      line(other.body.linhas, "FLUXO_FINANCEIRO", "RECEBIMENTO_VENDA", "USD")
+    ).toBeUndefined();
+    const brl = await request(admin.app)
+      .get("/analytics/indicators")
+      .query({ from: "2037-01-01", to: "2037-03-01", moeda: "BRL" })
+      .set(admin.header("dronz"));
+    expect(
+      line(brl.body.linhas, "FLUXO_FINANCEIRO", "RECEBIMENTO_VENDA", "USD")
+    ).toBeUndefined();
+  });
+
+  it("datas de calendário respeitam São Paulo, preservam timestamps explícitos e rejeitam períodos inválidos", async () => {
+    const data = await facts();
+    const admin = await login("admin@example.com");
+    const query = (from: string, to: string) =>
+      request(admin.app)
+        .get("/analytics/indicators")
+        .query({ from, to })
+        .set(admin.header("dronz"));
+    await prisma.pedidoCompra.update({
+      where: { id: data.order.id },
+      data: { dataCompra: new Date("2032-02-01T01:00:00Z") }
+    });
+    const february = await query("2032-02-01", "2032-03-01");
+    expect(february.status).toBe(200);
+    expect(february.body.parametros.from).toBe("2032-02-01T03:00:00.000Z");
+    expect(
+      line(february.body.linhas, "COMPRAS_VALOR", null, "USD")
+    ).toBeUndefined();
+    const january = await query("2032-01-01", "2032-02-01");
+    expect(
+      line(january.body.linhas, "COMPRAS_VALOR", null, "USD")
+    ).toMatchObject({ valor: "100.00" });
+    const utc = await query("2032-02-01T00:00:00Z", "2032-03-01T00:00:00Z");
+    expect(line(utc.body.linhas, "COMPRAS_VALOR", null, "USD")).toMatchObject({
+      valor: "100.00"
+    });
+    expect((await query("2032-02-30", "2032-03-01")).status).toBe(400);
+    expect((await query("2032-03-01", "2032-02-01")).status).toBe(400);
+    const csv = await request(admin.app)
+      .get("/analytics/indicators.csv")
+      .query({ from: "2032-02-01", to: "2032-03-01" })
+      .set(admin.header("dronz"));
+    expect(csv.status).toBe(200);
+    expect(csv.text).not.toContain("COMPRAS_VALOR,B18-v1,,USD,100.00");
   });
 });

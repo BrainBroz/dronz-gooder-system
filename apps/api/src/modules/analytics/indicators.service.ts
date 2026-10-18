@@ -1,5 +1,7 @@
 import { Prisma } from "@prisma/client";
+import { z } from "zod";
 import { prisma } from "../../lib/prisma";
+import { AppError } from "../../lib/app-error";
 import { saleInclude, saleView } from "../sales/sales.service";
 
 // Batch 18: read models derivados e reconstruíveis (não é ledger paralelo). Cada indicador declara
@@ -60,7 +62,7 @@ export const DEFINITIONS: Definition[] = [
   {
     codigo: "FLUXO_FINANCEIRO",
     descricao: "Saídas e entradas de caixa registradas",
-    fonte: "Pagamento, PagamentoFatura, RecebivelVenda",
+    fonte: "Pagamento, PagamentoFatura, AuditLog RECEIVE_SALE",
     formula:
       "pagamentos a fornecedor − reembolsos; pagamentos de fatura; recebimentos de venda",
     financeiro: true
@@ -92,6 +94,11 @@ const row = (
   status: amostra ? "OK" : "SEM_AMOSTRA"
 });
 const empty = (codigo: string) => row(codigo, null, null, null, 0);
+const receiptSnapshot = z.object({
+  moeda: z.string(),
+  valorRecebido: z.string().regex(/^\d+(\.\d+)?$/),
+  dataRecebida: z.string().datetime().nullable()
+});
 const add = (
   map: Map<string, { valor: Prisma.Decimal; amostra: number }>,
   key: string,
@@ -299,18 +306,50 @@ export async function indicators(
     });
     for (const payment of statementPayments)
       add(flows, `PAGAMENTO_FATURA|${payment.fatura.moeda}`, payment.valor);
-    // shortcut: recebível guarda só o acumulado e a última data; vale como fluxo do período da última
-    // liquidação. Trocar por lançamentos de recebimento se o fluxo diário for contratado.
-    const receivables = await prisma.recebivelVenda.findMany({
-      where: { lojaId, dataRecebida: period, ...(moeda ? { moeda } : {}) },
-      select: { moeda: true, valorRecebido: true }
+    // Cada parcela já tem antes/depois imutáveis no AuditLog; saldo acumulado não é fluxo mensal.
+    const receipts = await prisma.auditLog.findMany({
+      where: {
+        lojaId,
+        entity: "RecebivelVenda",
+        action: "RECEIVE_SALE",
+        AND: [
+          {
+            afterData: {
+              path: ["dataRecebida"],
+              lt: (filters.to ?? referenciaEm).toISOString()
+            }
+          },
+          ...(filters.from
+            ? [
+                {
+                  afterData: {
+                    path: ["dataRecebida"],
+                    gte: filters.from.toISOString()
+                  }
+                }
+              ]
+            : []),
+          ...(moeda ? [{ afterData: { path: ["moeda"], equals: moeda } }] : [])
+        ]
+      },
+      select: { beforeData: true, afterData: true }
     });
-    for (const receivable of receivables)
-      add(
-        flows,
-        `RECEBIMENTO_VENDA|${receivable.moeda}`,
-        receivable.valorRecebido
+    for (const receipt of receipts) {
+      const before = receiptSnapshot.safeParse(receipt.beforeData);
+      const after = receiptSnapshot.safeParse(receipt.afterData);
+      if (
+        !before.success ||
+        !after.success ||
+        before.data.moeda !== after.data.moeda
+      )
+        throw new AppError(409, "sale_receipt_history_requires_reconciliation");
+      const amount = new Prisma.Decimal(after.data.valorRecebido).minus(
+        before.data.valorRecebido
       );
+      if (amount.isNegative())
+        throw new AppError(409, "sale_receipt_history_requires_reconciliation");
+      add(flows, `RECEBIMENTO_VENDA|${after.data.moeda}`, amount);
+    }
     rows.push(
       ...(flows.size
         ? [...flows].map(([key, v]) => {

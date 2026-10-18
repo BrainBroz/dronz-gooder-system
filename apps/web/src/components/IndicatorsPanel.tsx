@@ -78,8 +78,8 @@ export function IndicatorsPanel() {
           setParams(
             Object.fromEntries(
               Object.entries({
-                from: draft.from && new Date(draft.from).toISOString(),
-                to: draft.to && new Date(draft.to).toISOString(),
+                from: draft.from,
+                to: draft.to,
                 moeda: draft.moeda
               }).filter(([, value]) => value)
             )

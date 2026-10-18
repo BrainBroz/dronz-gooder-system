@@ -15,11 +15,11 @@ Em caso de conflito, prevalecem, nesta ordem:
 
 ## 2. Objetivo do sistema
 
-### Estado verificado em 2026-10-16
+### Estado funcional em 2026-10-18
 
-A baseline integrada atual é `caa148c` (merge da PR #4). Ela contém a fundação de marketplace e fila de compras da PR #2 (`9c6f087`), o gate local opcional da PR #3 (`d6a7714`) e o drawer de compra manual/externa da PR #4. Esses commits não implementam o pipeline Buyer Ingestion, adapters reais ou tracking automático. O contrato de reconstrução de UX está parcialmente implementado em Compras; não declarar toda a experiência operacional entregue.
+A baseline `caa148c` da PR #4 foi ampliada pela linha `5617800` (Codex, integrada na PR #5). As PRs #6–#14 acrescentaram posições, remessas, recebimento parcial, Home operacional, revisão humana multicanal (B10), adapter eBay Buyer (B11), painel mensal/CSV (B13), tracking manual (B14) e Financeiro (B16). Vendas (B17, PR #15) e Analytics (B18, PR #16) completam esta rodada de implementação; os SHAs de merge devem ser consultados no histórico Git. Batch 12 e Batch 15 permanecem dependentes de mailbox/OAuth e APIs de transportadoras, respectivamente. O adapter eBay está implementado e desabilitado até configuração e homologação seguras.
 
-A execução local foi atualizada para essa baseline preservando arquivos não rastreados. No checkout de correção `codex/baseline-local-readiness`, o drawer recupera o mapping merchant–fornecedor e distingue pendência de concorrência. A prova manual pela UI criou e materializou uma compra fictícia de duas unidades, sem criar estoque. A tela de Pedidos Operacionais passou a consumir as transições permitidas devolvidas pelo backend; o pedido avançou por `DRAFT → PLACED → CONFIRMED` e apareceu como candidato em Miami. A jornada manual até estoque permanece não homologada: nenhuma mercadoria física de teste foi recebida. Resultados, alertas de dependências e limites de publicação estão em [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md). Não há publicação externa nesta etapa.
+As provas anteriores de compra/materialização, confirmação e alocação foram feitas com dados fictícios. A jornada até estoque possui teste integrado, mas eventos simulados não homologam mercadoria física real. O ambiente autorizado continua sendo somente local. Resultados, histórico das validações, alertas de dependências e limites de publicação estão em [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md).
 
 O sistema coordena a operação internacional de Dronz e Gooder: compras, atribuição por loja, pedidos operacionais, logística, recebimento, entrada definitiva, estoque, custos e análise. A automação deve preservar revisão humana, rastreabilidade, auditoria e isolamento rigoroso por loja.
 
@@ -136,14 +136,19 @@ Implementado e coberto por testes:
 - estoque e movimentações;
 - financeiro manual, Dashboard e Relatórios existentes;
 - testes de integração PostgreSQL e testes comportamentais web.
+- posições operacionais, responsabilidade contextual, remessas e recebimento parcial;
+- reconciliação humana multicanal, adapter eBay configurável e painel mensal/CSV;
+- tracking manual, contas/faturas e conciliação financeira manual;
+- vendas com baixa por lote/custo em snapshot e indicadores derivados com controle financeiro.
 
 Não implementado:
 
-- ingestão automática de compras realizadas por contas buyer;
+- ativação real do adapter buyer e homologação da conexão eBay;
+- ingestão automática de mailbox (B12), dependente de OAuth, caixa dedicada e retenção;
 - adapters seller Amazon/eBay, adiados até existir necessidade específica;
 - tracking automático;
 - integrações PayPal, bancárias ou de cartão;
-- e-mail, OCR operacional e QR Code;
+- OCR operacional e QR Code;
 - documentos e anexos;
 - exportações PDF e Excel.
 
@@ -253,7 +258,7 @@ Continuam abertas e bloqueiam somente seus batches: vigência de cotação (`E-2
 - O contrato buyer é independente da fonte; Amazon Business, eBay, e-mail, invoice, CSV e entrada manual são origens possíveis e preservadas como evidências.
 - A Amazon Business Reporting API `2025-06-09` é uma fonte buyer empresarial oficial com pedidos, itens e remessas; não deve ser confundida com SP-API seller. Seu estado é `PENDENTE_DE_ONBOARDING_EXTERNO`, não cancelado, e sua ativação depende de onboarding e papéis concedidos pela Amazon Business.
 - Enquanto o onboarding Amazon estiver pendente, e-mails autorizados de confirmação, atualização, cancelamento, reembolso, remessa, tracking e invoice serão a fonte inicial Amazon. Nenhum e-mail cria operação automaticamente.
-- A primeira integração estruturada validada é eBay Buyer. O gate comprovou OAuth Production e Trading API `GetOrders` com `OrderRole=Buyer`; o adapter produtivo ainda não foi implementado.
+- A primeira integração estruturada validada é eBay Buyer. O gate comprovou OAuth Production e Trading API `GetOrders` com `OrderRole=Buyer`; o adapter foi implementado no B11 e sua ativação real depende de configuração segura e homologação da conta.
 - A futura Amazon Business API deverá reconciliar por `(provider, externalAccountId, normalizedExternalOrderId)` com compras já sustentadas por e-mail, adicionando evidência sem duplicar ou apagar o histórico.
 - A V1 Amazon usa uma conta Amazon Business `SHARED`, Amazon.com/EUA e USD, mantendo arquitetura multi-conta. Marco é o responsável administrativo pela conexão.
 - O backfill inicial Amazon é configurável e começa em 15 dias; toda compra histórica entra em staging/revisão e nunca cria operação, estoque ou logística automaticamente.

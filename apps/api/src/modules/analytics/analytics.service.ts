@@ -97,8 +97,21 @@ type ReportFilters = { from?: Date; to?: Date; status?: string };
 export async function report(
   lojaId: string,
   type: string,
-  filters: ReportFilters = {}
+  filters: ReportFilters = {},
+  financial = false
 ) {
+  const productSelect = {
+    id: true,
+    lojaId: true,
+    categoriaId: true,
+    codigo: true,
+    nome: true,
+    slug: true,
+    descricao: true,
+    peso: true,
+    ativo: true,
+    ...(financial ? { precoVenda: true, markup: true } : {})
+  } satisfies Prisma.ProdutoSelect;
   const period =
     filters.from || filters.to
       ? { gte: filters.from, lte: filters.to }
@@ -197,12 +210,12 @@ export async function report(
     case "inventory":
       return prisma.estoque.findMany({
         where: { lojaId, createdAt: period },
-        include: { produto: true }
+        include: { produto: { select: productSelect } }
       });
     case "movements":
       return prisma.movimentacaoEstoque.findMany({
         where: { lojaId, createdAt: period },
-        include: { produto: true },
+        include: { produto: { select: productSelect } },
         orderBy: { createdAt: "desc" }
       });
     case "payments":

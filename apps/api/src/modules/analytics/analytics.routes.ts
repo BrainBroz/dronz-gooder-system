@@ -1,6 +1,7 @@
 import { Router, type NextFunction, type Response } from "express";
 import { z } from "zod";
 import { AppError } from "../../lib/app-error";
+import { zonedDayStart } from "../../lib/calendar";
 import {
   hasPermission,
   requireAuth,
@@ -35,16 +36,32 @@ const FINANCIAL_REPORTS = new Set([
   "payments",
   "markup"
 ]);
+const indicatorDate = z.union([
+  z
+    .string()
+    .date()
+    .transform((value) => {
+      const [year, month, day] = value.split("-").map(Number);
+      return zonedDayStart(year!, month!, day!, "America/Sao_Paulo");
+    }),
+  z
+    .string()
+    .datetime({ offset: true })
+    .transform((value) => new Date(value))
+]);
 const indicatorFilters = z
   .object({
-    from: z.coerce.date().optional(),
-    to: z.coerce.date().optional(),
+    from: indicatorDate.optional(),
+    to: indicatorDate.optional(),
     moeda: z
       .string()
       .regex(/^[A-Za-z]{3}$/)
       .optional()
   })
-  .strict();
+  .strict()
+  .refine((value) => !value.from || !value.to || value.from < value.to, {
+    message: "invalid_period"
+  });
 analyticsRouter.get(
   "/indicators",
   run((r) =>
@@ -97,6 +114,6 @@ analyticsRouter.get(
     const type = String(r.params.type);
     if (FINANCIAL_REPORTS.has(type) && !financial(r))
       throw new AppError(403, "insufficient_permission");
-    return s.report(r.storeId!, type, filters);
+    return s.report(r.storeId!, type, filters, financial(r));
   })
 );
