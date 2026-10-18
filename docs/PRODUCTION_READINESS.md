@@ -12,6 +12,7 @@
 - Repetir o cálculo com os mesmos filtros refaz a consulta, inclusive após erro. Os indicadores usam uma transação `REPEATABLE READ` e referência temporal do PostgreSQL para manter receita, estoque e demais leituras no mesmo estado; teste concorrente bloqueia a leitura de vendas enquanto outra transação grava a confirmação.
 - Se o armazenamento da sessão falhar antes do envio, a operação é bloqueada com mensagem explícita. Se falhar só depois de a API confirmar, a UI mantém o sucesso e a identidade confirmada em memória para navegação. Uma recarga completa durante falha total desse armazenamento exige conferir o recebível antes de registrar outra parcela; essa memória não sobrevive ao reinício da página.
 - Migrations e seed são verificados somente em banco exclusivo de testes. Atualização do banco operacional local exige backup verificável, `migrate deploy` e concessão idempotente das novas permissões; o seed não deve ser usado para esse upgrade, pois redefine a senha administrativa.
+- Validação local final: Node 22.23.1, npm 10.9.8, Prisma validate/generate, lint, typecheck e builds API/web passaram. Suíte global: 265 testes API + 230 web = 495, sem ignorados e sem o warning MUI de select vazio. As 44 migrations passaram em banco limpo e a migration B17 passou no upgrade de uma cópia restaurada do banco local com B16. O backup foi restaurado e verificado antes do upgrade. O CI de cada PR é verificado separadamente antes do merge.
 
 As seções datadas abaixo são evidência histórica e não substituem o estado funcional acima.
 

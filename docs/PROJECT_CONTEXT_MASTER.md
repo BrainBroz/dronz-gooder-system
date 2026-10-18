@@ -21,6 +21,8 @@ A baseline `caa148c` da PR #4 foi ampliada pela linha `5617800` (Codex, integrad
 
 As provas anteriores de compra/materialização, confirmação e alocação foram feitas com dados fictícios. A jornada até estoque possui teste integrado, mas eventos simulados não homologam mercadoria física real. O ambiente autorizado continua sendo somente local. Resultados, histórico das validações, alertas de dependências e limites de publicação estão em [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md).
 
+Validação local B17/B18 em Node 22: 265 testes API e 230 web (495 no total, sem ignorados), Prisma validate/generate, lint, typecheck e builds aprovados. Migrations verificadas em instalação limpa (44) e upgrade de cópia restaurada da baseline B16; homologação de produção e de integrações reais permanece pendente.
+
 O sistema coordena a operação internacional de Dronz e Gooder: compras, atribuição por loja, pedidos operacionais, logística, recebimento, entrada definitiva, estoque, custos e análise. A automação deve preservar revisão humana, rastreabilidade, auditoria e isolamento rigoroso por loja.
 
 As lojas iniciais são `dronz` e `gooder`. Uma remessa física pode transportar itens das duas lojas, mas cada item conserva seu próprio `lojaId`; patrimônio, estoque, autorização e operação não são misturados.
