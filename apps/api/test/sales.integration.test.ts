@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
 import { PrismaClient } from "@prisma/client";
+import { randomUUID } from "node:crypto";
 import { createOperationalFixture } from "./helpers/operational-fixture";
 
 process.env.DATABASE_URL =
@@ -17,6 +18,8 @@ let createApp: typeof import("../src/app").createApp;
 type Fixture = Awaited<ReturnType<typeof createOperationalFixture>>;
 const fixtures: Fixture[] = [];
 const quotes: string[] = [];
+const users: string[] = [];
+const profiles: string[] = [];
 
 beforeAll(async () => ({ createApp } = await import("../src/app")));
 afterEach(async () => {
@@ -47,6 +50,16 @@ afterEach(async () => {
   await prisma.cotacaoCambio.deleteMany({
     where: { id: { in: quotes.splice(0) } }
   });
+  for (const id of users.splice(0)) {
+    await prisma.refreshToken.deleteMany({ where: { usuarioId: id } });
+    await prisma.usuarioPerfil.deleteMany({ where: { usuarioId: id } });
+    await prisma.usuarioLoja.deleteMany({ where: { usuarioId: id } });
+    await prisma.usuario.delete({ where: { id } });
+  }
+  for (const id of profiles.splice(0)) {
+    await prisma.perfilPermissao.deleteMany({ where: { perfilId: id } });
+    await prisma.perfil.delete({ where: { id } });
+  }
 });
 afterAll(() => prisma.$disconnect());
 
@@ -110,6 +123,7 @@ const draft = (
   request(ctx.app)
     .post("/sales")
     .set(ctx.headers)
+    .set("idempotency-key", randomUUID())
     .send({
       canal: "MERCADO_LIVRE",
       dataVenda: "2026-10-18T12:00:00.000Z",
@@ -266,6 +280,7 @@ describe("vendas e baixa patrimonial (Batch 17)", () => {
       request(ctx.app)
         .post(`/sales/${sale.body.id}/receipts`)
         .set(ctx.headers)
+        .set("idempotency-key", randomUUID())
         .send({ valor, recebidoEm: "2026-10-30T12:00:00.000Z" });
     expect((await receipt(300)).body.status).toBe("PARCIAL");
     expect((await receipt(37)).body.error).toBe("receipt_exceeds_receivable");
@@ -340,5 +355,218 @@ describe("vendas e baixa patrimonial (Batch 17)", () => {
     const hidden = await getSale(ctx.store.id, sale.body.id, false);
     expect(hidden).not.toHaveProperty("custo");
     expect(hidden.itens[0]).not.toHaveProperty("baixas");
+  });
+
+  it("filtra custo na confirmação e no replay de outro usuário sem acesso financeiro", async () => {
+    const ctx = await admin();
+    const { data, lot } = await stocked();
+    const profile = await prisma.perfil.create({
+      data: { code: `SALE_TEST_${randomUUID()}`, name: "Vendas sem financeiro" }
+    });
+    profiles.push(profile.id);
+    for (const code of ["VENDA_VISUALIZAR", "VENDA_CONFIRMAR"]) {
+      const permission = await prisma.permissao.findUniqueOrThrow({
+        where: { code }
+      });
+      await prisma.perfilPermissao.create({
+        data: { perfilId: profile.id, permissaoId: permission.id }
+      });
+    }
+    const user = await prisma.usuario.create({
+      data: {
+        email: `sale-${randomUUID()}@example.com`,
+        name: "Vendas",
+        passwordHash: data.admin.passwordHash,
+        lojas: { create: { lojaId: ctx.store.id } },
+        perfis: { create: { perfilId: profile.id } }
+      }
+    });
+    users.push(user.id);
+    const login = await request(ctx.app)
+      .post("/auth/login")
+      .send({ email: user.email, password: "change-me" });
+    const operatorHeaders = {
+      ...ctx.headers,
+      Authorization: `Bearer ${login.body.accessToken}`
+    };
+    const sale = await draft(ctx, data.product.id, 1);
+    const body = {
+      lotes: [
+        {
+          vendaItemId: sale.body.itens[0].id,
+          movimentoEntradaId: lot.id,
+          quantidade: 1
+        }
+      ]
+    };
+    const key = randomUUID();
+    const confirm = (headers: typeof ctx.headers) =>
+      request(ctx.app)
+        .post(`/sales/${sale.body.id}/confirm`)
+        .set(headers)
+        .set("idempotency-key", key)
+        .send(body);
+    const privileged = await confirm(ctx.headers);
+    expect(privileged.status).toBe(200);
+    expect(privileged.body).toHaveProperty("custo");
+    const replay = await confirm(operatorHeaders);
+    expect(replay.status).toBe(200);
+    expect(replay.body).not.toHaveProperty("custo");
+    expect(replay.body).not.toHaveProperty("lucro");
+    expect(replay.body.itens[0]).not.toHaveProperty("baixas");
+    const fresh = await draft(ctx, data.product.id, 1);
+    const confirmed = await request(ctx.app)
+      .post(`/sales/${fresh.body.id}/confirm`)
+      .set(operatorHeaders)
+      .send({
+        lotes: [
+          {
+            vendaItemId: fresh.body.itens[0].id,
+            movimentoEntradaId: lot.id,
+            quantidade: 1
+          }
+        ]
+      });
+    expect(confirmed.status).toBe(200);
+    expect(confirmed.body).not.toHaveProperty("custo");
+  });
+
+  it("não reutiliza lote perdido após reposição e desconta reservas da sugestão", async () => {
+    const ctx = await admin();
+    const { data, lot, stock } = await stocked(2, 1);
+    const sale = await draft(ctx, data.product.id, 2);
+    const suggestion = await request(ctx.app)
+      .get(`/sales/${sale.body.id}/lot-suggestion`)
+      .set(ctx.headers);
+    expect(suggestion.body.itens[0]).toMatchObject({
+      faltante: 1,
+      lotes: [{ quantidade: 1 }]
+    });
+    const { move } = await import("../src/modules/inventory/inventory.service");
+    await move(ctx.store.id, ctx.userId, {
+      produtoId: data.product.id,
+      tipo: "RELEASE_RESERVATION",
+      motivo: "RESERVATION_RELEASE",
+      quantidade: 1
+    });
+    await move(ctx.store.id, ctx.userId, {
+      produtoId: data.product.id,
+      tipo: "ADJUSTMENT_NEGATIVE",
+      motivo: "LOSS",
+      quantidade: 2,
+      observacoes: "Perda integral"
+    });
+    await move(ctx.store.id, ctx.userId, {
+      produtoId: data.product.id,
+      tipo: "ADJUSTMENT_POSITIVE",
+      motivo: "MANUAL_CORRECTION",
+      quantidade: 2,
+      observacoes: "Reposição de outra origem"
+    });
+    const blocked = await request(ctx.app)
+      .get(`/sales/${sale.body.id}/lot-suggestion`)
+      .set(ctx.headers);
+    expect(blocked.body.itens[0]).toMatchObject({
+      faltante: 2,
+      lotes: [],
+      blockedReason: "stock_lots_require_reconciliation"
+    });
+    const confirmed = await request(ctx.app)
+      .post(`/sales/${sale.body.id}/confirm`)
+      .set(ctx.headers)
+      .send({
+        lotes: [
+          {
+            vendaItemId: sale.body.itens[0].id,
+            movimentoEntradaId: lot.id,
+            quantidade: 2
+          }
+        ]
+      });
+    expect(confirmed.status).toBe(409);
+    expect(confirmed.body.error).toBe("stock_lots_require_reconciliation");
+    expect(
+      (await prisma.estoque.findUniqueOrThrow({ where: { id: stock.id } }))
+        .quantidadeFisica
+    ).toBe(2);
+    expect(
+      await prisma.baixaVenda.count({ where: { movimentoEntradaId: lot.id } })
+    ).toBe(0);
+  });
+
+  it("exige idempotência e não duplica criação, recebimento ou auditoria no replay", async () => {
+    const ctx = await admin();
+    const { data, lot } = await stocked();
+    const body = {
+      canal: "OUTRO",
+      dataVenda: "2026-10-18T12:00:00Z",
+      moeda: "USD",
+      itens: [{ produtoId: data.product.id, quantidade: 1, precoUnitario: 100 }]
+    };
+    expect(
+      (await request(ctx.app).post("/sales").set(ctx.headers).send(body)).status
+    ).toBe(400);
+    const key = randomUUID();
+    const create = () =>
+      request(ctx.app)
+        .post("/sales")
+        .set(ctx.headers)
+        .set("idempotency-key", key)
+        .send(body);
+    const sale = await create();
+    expect(sale.status).toBe(201);
+    expect((await create()).body.id).toBe(sale.body.id);
+    expect(
+      await prisma.vendaItem.count({ where: { produtoId: data.product.id } })
+    ).toBe(1);
+    await request(ctx.app)
+      .post(`/sales/${sale.body.id}/confirm`)
+      .set(ctx.headers)
+      .send({
+        lotes: [
+          {
+            vendaItemId: sale.body.itens[0].id,
+            movimentoEntradaId: lot.id,
+            quantidade: 1
+          }
+        ]
+      });
+    const receiptBody = { valor: 25, recebidoEm: "2034-01-15T12:00:00Z" };
+    const url = `/sales/${sale.body.id}/receipts`;
+    expect(
+      (await request(ctx.app).post(url).set(ctx.headers).send(receiptBody))
+        .status
+    ).toBe(400);
+    const receiptKey = randomUUID();
+    const receive = (payload = receiptBody) =>
+      request(ctx.app)
+        .post(url)
+        .set(ctx.headers)
+        .set("idempotency-key", receiptKey)
+        .send(payload);
+    expect((await receive()).body.valorRecebido).toBe("25");
+    expect((await receive()).body.valorRecebido).toBe("25");
+    expect((await receive({ ...receiptBody, valor: 30 })).body.error).toBe(
+      "idempotency_conflict"
+    );
+    expect(
+      await prisma.auditLog.count({
+        where: { action: "RECEIVE_SALE", idempotencyKey: receiptKey }
+      })
+    ).toBe(1);
+    const incompatible = await request(ctx.app)
+      .post(url)
+      .set(ctx.headers)
+      .set("idempotency-key", randomUUID())
+      .send({ ...receiptBody, transacaoFonteId: "fonte-b16-incompativel" });
+    expect(incompatible.status).toBe(409);
+    expect(incompatible.body.error).toBe("sale_receipt_source_not_supported");
+    expect(
+      (
+        await prisma.recebivelVenda.findUniqueOrThrow({
+          where: { vendaId: sale.body.id }
+        })
+      ).valorRecebido.toString()
+    ).toBe("25");
   });
 });

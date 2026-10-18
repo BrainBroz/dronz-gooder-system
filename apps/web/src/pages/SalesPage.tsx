@@ -46,6 +46,7 @@ type Suggestion = {
   itens: {
     vendaItemId: string;
     faltante: number;
+    blockedReason?: string | null;
     lotes: {
       movimentoEntradaId: string;
       quantidade: number;
@@ -71,11 +72,50 @@ function useSalesContext() {
   return { store, headers, can };
 }
 
+function useSalesPost() {
+  const { store, headers } = useSalesContext();
+  const attempt = React.useRef<{
+    fingerprint: string;
+    body: object;
+    key: string;
+    pending?: ReturnType<typeof api.post>;
+  } | null>(null);
+  return async (
+    url: string,
+    body: object,
+    dateField?: "dataVenda" | "recebidoEm"
+  ) => {
+    const fingerprint = JSON.stringify({ store, url, body });
+    if (attempt.current?.fingerprint !== fingerprint) {
+      attempt.current = {
+        fingerprint,
+        body: dateField
+          ? { ...body, [dateField]: new Date().toISOString() }
+          : body,
+        key: crypto.randomUUID()
+      };
+    }
+    const current = attempt.current;
+    if (current.pending) return current.pending;
+    current.pending = api.post(url, current.body, {
+      headers: { ...headers, "idempotency-key": current.key }
+    });
+    try {
+      const result = await current.pending;
+      if (attempt.current === current) attempt.current = null;
+      return result;
+    } finally {
+      current.pending = undefined;
+    }
+  };
+}
+
 function SaleCard({ sale }: { sale: Sale }) {
   const { store, headers, can } = useSalesContext();
   const client = useQueryClient();
   const [suggestion, setSuggestion] = React.useState<Suggestion | null>(null);
   const [valor, setValor] = React.useState("");
+  const post = useSalesPost();
   const refresh = () =>
     client.invalidateQueries({ queryKey: ["sales", store] });
   const suggest = useMutation({
@@ -85,36 +125,30 @@ function SaleCard({ sale }: { sale: Sale }) {
   });
   const confirm = useMutation({
     mutationFn: () =>
-      api.post(
-        `/sales/${sale.id}/confirm`,
-        {
-          lotes: suggestion!.itens.flatMap((item) =>
-            item.lotes.map((lote) => ({
-              vendaItemId: item.vendaItemId,
-              movimentoEntradaId: lote.movimentoEntradaId,
-              quantidade: lote.quantidade
-            }))
-          )
-        },
-        { headers }
-      ),
+      post(`/sales/${sale.id}/confirm`, {
+        lotes: suggestion!.itens.flatMap((item) =>
+          item.lotes.map((lote) => ({
+            vendaItemId: item.vendaItemId,
+            movimentoEntradaId: lote.movimentoEntradaId,
+            quantidade: lote.quantidade
+          }))
+        )
+      }),
     onSuccess: refresh
   });
   const cancel = useMutation({
     mutationFn: () =>
-      api.post(
-        `/sales/${sale.id}/cancel`,
-        { motivo: "Cancelado antes da confirmação" },
-        { headers }
-      ),
+      post(`/sales/${sale.id}/cancel`, {
+        motivo: "Cancelado antes da confirmação"
+      }),
     onSuccess: refresh
   });
   const receive = useMutation({
     mutationFn: () =>
-      api.post(
+      post(
         `/sales/${sale.id}/receipts`,
-        { valor: Number(valor), recebidoEm: new Date().toISOString() },
-        { headers }
+        { valor: Number(valor) },
+        "recebidoEm"
       ),
     onSuccess: async () => {
       setValor("");
@@ -122,6 +156,9 @@ function SaleCard({ sale }: { sale: Sale }) {
     }
   });
   const missing = suggestion?.itens.some((item) => item.faltante > 0);
+  const unreconciled = suggestion?.itens.some(
+    (item) => item.blockedReason === "stock_lots_require_reconciliation"
+  );
   return (
     <Card variant="outlined">
       <CardContent>
@@ -187,7 +224,9 @@ function SaleCard({ sale }: { sale: Sale }) {
             )}
             {missing ? (
               <Typography role="alert">
-                Saldo insuficiente no estoque Brasil para confirmar.
+                {unreconciled
+                  ? "Os lotes precisam de reconciliação após saídas ou ajustes de estoque."
+                  : "Saldo insuficiente no estoque Brasil para confirmar."}
               </Typography>
             ) : (
               <Button
@@ -238,6 +277,7 @@ export function SalesPage() {
   const { store, headers, can } = useSalesContext();
   const client = useQueryClient();
   const { products } = useProducts();
+  const post = useSalesPost();
   const [estado, setEstado] = React.useState("");
   const [form, setForm] = React.useState({
     canal: "MERCADO_LIVRE",
@@ -260,13 +300,12 @@ export function SalesPage() {
   const amount = (value: string) => (value ? Number(value) : undefined);
   const create = useMutation({
     mutationFn: () =>
-      api.post(
+      post(
         "/sales",
         {
           canal: form.canal,
           referenciaExterna: form.referenciaExterna || undefined,
           moeda: form.moeda,
-          dataVenda: new Date().toISOString(),
           itens: [
             {
               produtoId: form.produtoId,
@@ -278,7 +317,7 @@ export function SalesPage() {
             }
           ]
         },
-        { headers }
+        "dataVenda"
       ),
     onSuccess: () => client.invalidateQueries({ queryKey: ["sales", store] })
   });

@@ -15,6 +15,8 @@ const key = (req: AuthenticatedRequest) =>
   typeof req.headers["idempotency-key"] === "string"
     ? req.headers["idempotency-key"]
     : undefined;
+const requiredKey = (req: AuthenticatedRequest) =>
+  z.string().trim().min(1).max(200).parse(req.headers["idempotency-key"]);
 const run =
   (fn: (req: AuthenticatedRequest) => Promise<unknown>, status = 200) =>
   async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
@@ -92,7 +94,12 @@ salesRouter.post(
       })
       .strict()
       .parse(req.body);
-    return service.createSale(req.storeId!, req.identity!.user.id, d, key(req));
+    return service.createSale(
+      req.storeId!,
+      req.identity!.user.id,
+      d,
+      requiredKey(req)
+    );
   }, 201)
 );
 salesRouter.post(
@@ -138,7 +145,8 @@ salesRouter.post(
         })
         .strict()
         .parse(req.body),
-      key(req)
+      key(req),
+      seesCost(req)
     )
   )
 );
@@ -159,7 +167,7 @@ salesRouter.post(
           })
           .strict()
           .parse(req.body),
-        key(req)
+        requiredKey(req)
       ),
     201
   )
