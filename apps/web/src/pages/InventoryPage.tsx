@@ -87,7 +87,7 @@ function InventoryContent() {
               : v.tipo === "RELEASE_RESERVATION"
                 ? "RESERVATION_RELEASE"
                 : v.tipo === "EXIT"
-                  ? "SALE"
+                  ? "LOSS"
                   : v.tipo.startsWith("RETURN")
                     ? "RETURN"
                     : "MANUAL_CORRECTION",
@@ -171,7 +171,7 @@ function InventoryContent() {
                 "RETURN_EXIT"
               ].map((x) => (
                 <MenuItem key={x} value={x}>
-                  {x}
+                  {x === "EXIT" ? "EXIT (perda; venda só em Vendas)" : x}
                 </MenuItem>
               ))}
             </TextField>

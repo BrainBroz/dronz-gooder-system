@@ -12,6 +12,7 @@ import { logisticsRouter } from "./modules/logistics/logistics.routes";
 import { receivingRouter } from "./modules/receiving/receiving.routes";
 import { inventoryRouter } from "./modules/inventory/inventory.routes";
 import { financeRouter } from "./modules/finance/finance.routes";
+import { salesRouter } from "./modules/sales/sales.routes";
 import { analyticsRouter } from "./modules/analytics/analytics.routes";
 import { simulationRouter } from "./modules/simulation/simulation.routes";
 import { operationsRouter } from "./modules/operations/operations.routes";
@@ -34,6 +35,7 @@ export function createApp() {
   app.use("/receiving", receivingRouter);
   app.use("/inventory", inventoryRouter);
   app.use("/finance", financeRouter);
+  app.use("/sales", salesRouter);
   app.use("/analytics", analyticsRouter);
   app.use("/simulations", simulationRouter);
   app.use("/operations", operationsRouter);

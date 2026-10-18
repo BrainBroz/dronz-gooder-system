@@ -279,6 +279,7 @@ export async function entradaDefinitiva(
             produtoId: item.produtoId,
             estoqueId: stock.id,
             recebimentoId: item.recebimentoId,
+            pedidoCompraItemId: item.pedidoCompraItemId,
             tipo: "ENTRY",
             motivo: "PURCHASE_RECEIPT",
             quantidade: quantidadeApta,
