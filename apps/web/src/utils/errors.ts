@@ -31,7 +31,20 @@ const KNOWN_ERROR_MESSAGES: Record<string, string> = {
   items_not_received: "Ainda há itens destinados não recebidos.",
   volumes_not_dispatched: "Ainda há malas não despachadas nesta posição.",
   reservations_open: "Ainda há reservas em aberto nesta posição.",
-  permanent_position: "Posição permanente não é encerrada."
+  permanent_position: "Posição permanente não é encerrada.",
+  resolution_requires_evidence_choice: "Escolha qual evidência deve valer.",
+  approved_purchase_requires_acknowledgement:
+    "Compra já aprovada: registre ciência da evidência nova.",
+  conflict_not_found: "Divergência já resolvida ou inexistente.",
+  account_not_found: "Conta externa não encontrada para este marketplace.",
+  buyer_currency_mismatch:
+    "Itens em moeda diferente da compra: resolva antes de aprovar.",
+  buyer_candidate_not_reviewable: "Esta compra não está aguardando aprovação.",
+  legacy_purchase_requires_review:
+    "Já existe compra importada com esta identidade.",
+  buyer_candidate_cancelled: "Compra cancelada na origem.",
+  approver_must_differ: "Quem propôs a correção não pode aprová-la.",
+  request_already_decided: "Esta solicitação já foi decidida."
 };
 const STATUS_FALLBACK_MESSAGES: Record<number, string> = {
   400: "Dados inválidos. Verifique os campos e tente novamente.",
