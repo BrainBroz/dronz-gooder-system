@@ -85,3 +85,28 @@ purchaseOrdersRouter.patch("/:id/items/:itemId", c.updateItem);
 purchaseOrdersRouter.delete("/:id/items/:itemId", c.removeItem);
 purchaseOrdersRouter.post("/:id/items/:itemId/atribuir", tc.atribuirItem);
 purchaseOrdersRouter.get("/:id/atribuicoes", tc.listarAtribuicoes);
+purchaseOrdersRouter.put(
+  "/:id/packages/:pacoteId/destination",
+  async (r: AuthenticatedRequest, x: Response, n: NextFunction) => {
+    try {
+      const d = z
+        .object({
+          posicaoId: z.string().min(1).nullable(),
+          motivo: z.string().trim().min(3).max(500)
+        })
+        .strict()
+        .parse(r.body);
+      x.json(
+        await tracking.setPackageDestination(
+          r.storeId!,
+          r.identity!.user.id,
+          String(r.params.id),
+          String(r.params.pacoteId),
+          d
+        )
+      );
+    } catch (e) {
+      n(e);
+    }
+  }
+);
