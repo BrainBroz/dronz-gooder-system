@@ -7,6 +7,9 @@ import {
 } from "../../middlewares/auth";
 import {
   buyerCandidateListSchema,
+  buyerConflictResolutionSchema,
+  buyerEvidenceIdentifySchema,
+  buyerEvidenceIntakeSchema,
   buyerDecisionSchema,
   createConnectionSchema,
   listConnectionsSchema,
@@ -97,6 +100,50 @@ marketplaceIntegrationsRouter.post(
       identity(request),
       z.string().cuid().parse(request.params.candidateId),
       buyerDecisionSchema.parse(request.body),
+      idempotencyKey(request)
+    ));
+  })
+);
+
+marketplaceIntegrationsRouter.post(
+  "/buyer-evidence",
+  requirePermission("BUYER_INGESTION_REGISTRAR"),
+  wrap(async (request, response) => {
+    response.status(201).json(await service.registerBuyerEvidence(
+      identity(request), buyerEvidenceIntakeSchema.parse(request.body), idempotencyKey(request)
+    ));
+  })
+);
+
+marketplaceIntegrationsRouter.get(
+  "/buyer-evidence/unidentified",
+  requirePermission("BUYER_INGESTION_VISUALIZAR"),
+  wrap(async (request, response) => {
+    response.json(await service.unidentifiedBuyerEvidence(identity(request)));
+  })
+);
+
+marketplaceIntegrationsRouter.post(
+  "/buyer-evidence/:evidenceId/identify",
+  requirePermission("BUYER_INGESTION_REGISTRAR"),
+  wrap(async (request, response) => {
+    response.json(await service.identifyBuyerEvidence(
+      identity(request),
+      z.string().cuid().parse(request.params.evidenceId),
+      buyerEvidenceIdentifySchema.parse(request.body),
+      idempotencyKey(request)
+    ));
+  })
+);
+
+marketplaceIntegrationsRouter.post(
+  "/buyer-candidates/:candidateId/conflicts/resolve",
+  requirePermission("BUYER_INGESTION_APROVAR"),
+  wrap(async (request, response) => {
+    response.json(await service.resolveBuyerConflicts(
+      identity(request),
+      z.string().cuid().parse(request.params.candidateId),
+      buyerConflictResolutionSchema.parse(request.body),
       idempotencyKey(request)
     ));
   })

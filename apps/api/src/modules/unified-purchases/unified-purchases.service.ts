@@ -1434,3 +1434,10 @@ export async function resolveConflict(
     }
   });
 }
+
+export const listExternalAccounts = () =>
+  prisma.contaExterna.findMany({
+    where: { status: "ATIVA" },
+    select: { id: true, plataforma: true, nomeExibicao: true, identificadorExterno: true },
+    orderBy: { nomeExibicao: "asc" }
+  });

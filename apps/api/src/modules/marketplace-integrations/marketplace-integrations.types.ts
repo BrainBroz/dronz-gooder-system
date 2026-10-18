@@ -112,7 +112,8 @@ export type BuyerCandidateReadModel = {
   purchaseId: string | null;
   order: NormalizedMarketplaceOrder;
   currentEvidence: { id: string; version: number; source: string; recordedAt: string };
-  allowedActions: Array<"VIEW" | "APPROVE" | "REJECT">;
+  allowedActions: Array<"VIEW" | "APPROVE" | "REJECT" | "RESOLVE_CONFLICT">;
+  confianca: ReturnType<typeof import("./reconciliation-score").reconciliationScore>;
   blockedReasons: Array<
     "LEGACY_PURCHASE_REQUIRES_REVIEW" | "CANCELLED" |
     "ALREADY_DECIDED" | "NEW_EVIDENCE_REQUIRES_RECONCILIATION" |
@@ -141,6 +142,9 @@ export type BuyerConflictReadModel = {
   referenceEvidenceId: string | null;
   evidenceId: string;
   createdAt: string;
+  resolucao: "ACEITAR_EVIDENCIA" | "MANTER_REFERENCIA" | "CIENTE" | null;
+  motivoResolucao: string | null;
+  resolvidoEm: string | null;
 };
 
 export type MarketplaceConnectionContext = {

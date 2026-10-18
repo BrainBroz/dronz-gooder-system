@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { PrismaClient } from "@prisma/client";
@@ -124,12 +124,14 @@ async function cleanup() {
     where: { candidate: candidateWhere }
   });
   await prisma.buyerPurchaseCandidate.deleteMany({ where: candidateWhere });
-  await prisma.buyerEvidenceItem.deleteMany({
-    where: { evidence: { conexaoMarketplace: { identificadorExterno: { startsWith: "batch8-" } } } }
-  });
-  await prisma.buyerEvidence.deleteMany({
-    where: { conexaoMarketplace: { identificadorExterno: { startsWith: "batch8-" } } }
-  });
+  // Evidências de fontes não-API (e-mail/manual) não têm conexão: ficam pela conta ou pela caixa de teste.
+  const evidenceWhere = { OR: [
+    { conexaoMarketplace: { identificadorExterno: { startsWith: "batch8-" } } },
+    { contaExterna: { identificadorExterno: { startsWith: "batch8-" } } },
+    { sourceIdentity: { contains: "batch8-" } }
+  ] };
+  await prisma.buyerEvidenceItem.deleteMany({ where: { evidence: evidenceWhere } });
+  await prisma.buyerEvidence.deleteMany({ where: evidenceWhere });
   const purchases = await prisma.compraImportada.findMany({
     where: { contaExterna: { identificadorExterno: { startsWith: "batch8-" } } },
     select: { id: true }
@@ -485,7 +487,7 @@ describe("marketplace integration foundation", () => {
       .get(`/integrations/marketplaces/buyer-candidates/${candidate.id}`)
       .set(bearer(fixture.token));
     expect(detail.body).toMatchObject({
-      allowedActions: ["VIEW"], blockedReasons: ["CANCELLED"]
+      allowedActions: ["VIEW", "RESOLVE_CONFLICT"], blockedReasons: ["CANCELLED"]
     });
     const approval = await request(fixture.app)
       .post(`/integrations/marketplaces/buyer-candidates/${candidate.id}/decision`)
@@ -745,7 +747,7 @@ describe("marketplace integration foundation", () => {
         .get(`/integrations/marketplaces/buyer-candidates/${candidate.id}`)
         .set(bearer(fixture.token));
       expect(detail.body).toMatchObject({
-        allowedActions: ["VIEW", "REJECT"],
+        allowedActions: ["VIEW", "REJECT", "RESOLVE_CONFLICT"],
         blockedReasons: ["MATERIAL_DIVERGENCE"]
       });
       const approval = await request(fixture.app)
@@ -828,7 +830,7 @@ describe("marketplace integration foundation", () => {
       .get(`/integrations/marketplaces/buyer-candidates/${candidate.id}`)
       .set(bearer(fixture.token));
     expect(detail.body).toMatchObject({
-      allowedActions: ["VIEW", "REJECT"],
+      allowedActions: ["VIEW", "REJECT", "RESOLVE_CONFLICT"],
       blockedReasons: ["MATERIAL_DIVERGENCE"]
     });
     const approval = await request(fixture.app)
@@ -1015,7 +1017,7 @@ describe("marketplace integration foundation", () => {
         .get(`/integrations/marketplaces/buyer-candidates/${candidate.id}`)
         .set(bearer(fixture.token));
       expect(detail.body).toMatchObject({
-        allowedActions: ["VIEW"],
+        allowedActions: ["VIEW", "RESOLVE_CONFLICT"],
         blockedReasons: ["CANCELLED"]
       });
       const approval = await request(fixture.app)
@@ -2504,7 +2506,7 @@ describe("evidência de tracking após aprovação humana", () => {
       .get(`/integrations/marketplaces/buyer-candidates/${candidate.id}`)
       .set(bearer(fixture.token));
     expect(detail.body).toMatchObject({
-      allowedActions: ["VIEW"],
+      allowedActions: ["VIEW", "RESOLVE_CONFLICT"],
       blockedReasons: ["NEW_EVIDENCE_REQUIRES_RECONCILIATION"]
     });
     expect(await prisma.buyerEvidence.count({
@@ -2677,5 +2679,116 @@ describe("evidência de tracking após aprovação humana", () => {
       .sort((a, b) => a.codigo.localeCompare(b.codigo));
 
     expect(afterTrackings).toEqual(beforeTrackings);
+  });
+});
+
+describe("B10: evidência multicanal, confiança e resolução humana", () => {
+  const accountOf = async (fixture: Awaited<ReturnType<typeof connectionFixture>>) =>
+    (await prisma.conexaoMarketplace.findUniqueOrThrow({ where: { id: fixture.connectionId } })).contaExternaId;
+  const recordApi = async (fixture: Awaited<ReturnType<typeof connectionFixture>>, value: Order) =>
+    recordMarketplaceEvidence({
+      provider: "AMAZON", accountId: await accountOf(fixture), connectionId: fixture.connectionId,
+      order: value, actorId: fixture.userId, correlationId: randomUUID()
+    });
+  const emailEvidence = (fixture: Awaited<ReturnType<typeof connectionFixture>>, body: Record<string, unknown>, key: string) =>
+    request(fixture.app).post("/integrations/marketplaces/buyer-evidence")
+      .set(bearer(fixture.token)).set("idempotency-key", key).send(body);
+  const candidateDetail = async (fixture: Awaited<ReturnType<typeof connectionFixture>>, id: string) =>
+    (await request(fixture.app).get(`/integrations/marketplaces/buyer-candidates/${id}`).set(bearer(fixture.token))).body;
+
+  it("T01: API e e-mail da mesma compra formam um candidato com duas evidências e a API segue prevalecendo", async () => {
+    const fixture = await connectionFixture("AMAZON", "SHARED", `b10-t01-${randomUUID().slice(0, 6)}`);
+    const api = await recordApi(fixture, order("B10-T01"));
+    const single = await candidateDetail(fixture, api.candidateId!);
+    expect(single.confianca).toMatchObject({ versao: "X-03-v1", faixa: "BAIXA" });
+    expect(single.confianca.sinais.find((signal: { codigo: string }) => signal.codigo === "E").valor).toBe(0);
+    const email = await emailEvidence(fixture, {
+      source: "EMAIL_AMAZON", provider: "AMAZON", contaExternaId: await accountOf(fixture), mailbox: "batch8-mail",
+      externalEvidenceId: "msg-b10-t01",
+      order: { ...order("B10-T01"), merchant: undefined, shipments: [], items: [{ ...order("B10-T01").items[0], title: "Título no e-mail" }] }
+    }, `b10-t01-${randomUUID()}`);
+    expect(email.status).toBe(201);
+    expect(email.body.candidateId).toBe(api.candidateId);
+    const detail = await candidateDetail(fixture, api.candidateId!);
+    expect(detail.status).toBe("AGUARDANDO_APROVACAO");
+    expect(detail.currentEvidence.source).toBe("AMAZON_BUSINESS_API");
+    expect(detail.confianca.score).toBeGreaterThan(single.confianca.score);
+    expect(detail.confianca.faixa).toBe("ALTA");
+    const links = await prisma.buyerEvidenceLink.findMany({ where: { candidateId: api.candidateId! }, include: { evidence: true } });
+    expect(links.map((link) => [link.evidence.source, link.type]).sort()).toEqual([["AMAZON_BUSINESS_API", "MATCHED"], ["EMAIL_AMAZON", "SUPPORTING"]]);
+    expect(await prisma.compraImportada.count({ where: { contaExternaId: await accountOf(fixture) } })).toBe(0);
+  });
+
+  it("T06/X-01: quantidade divergente no e-mail abre conflito; revisor mantém a API com motivo e aprova", async () => {
+    const fixture = await connectionFixture("AMAZON", "SHARED", `b10-t06-${randomUUID().slice(0, 6)}`);
+    const api = await recordApi(fixture, order("B10-T06"));
+    const divergent = { ...order("B10-T06"), merchant: undefined, items: [{ ...order("B10-T06").items[0], quantity: 7 }] };
+    const email = await emailEvidence(fixture, {
+      source: "EMAIL_AMAZON", provider: "AMAZON", contaExternaId: await accountOf(fixture), mailbox: "batch8-mail",
+      externalEvidenceId: "msg-b10-t06", order: divergent
+    }, `b10-t06-${randomUUID()}`);
+    const conflicted = await candidateDetail(fixture, api.candidateId!);
+    expect(conflicted.status).toBe("COM_DIVERGENCIA");
+    expect(conflicted.allowedActions).toContain("RESOLVE_CONFLICT");
+    expect(conflicted.allowedActions).not.toContain("APPROVE");
+    const resolve = (body: Record<string, unknown>) => request(fixture.app)
+      .post(`/integrations/marketplaces/buyer-candidates/${api.candidateId}/conflicts/resolve`)
+      .set(bearer(fixture.token)).set("idempotency-key", `b10-resolve-${randomUUID()}`).send(body);
+    expect((await resolve({ evidenceId: email.body.evidenceId, resolution: "MANTER_REFERENCIA", reason: "API é a fonte oficial", expectedVersion: conflicted.version - 1 })).status).toBe(409);
+    expect((await resolve({ evidenceId: email.body.evidenceId, resolution: "CIENTE", reason: "x", expectedVersion: conflicted.version })).body.error).toBe("resolution_requires_evidence_choice");
+    const resolved = await resolve({ evidenceId: email.body.evidenceId, resolution: "MANTER_REFERENCIA", reason: "API é a fonte oficial", expectedVersion: conflicted.version });
+    expect(resolved.status).toBe(200);
+    expect(resolved.body.status).toBe("AGUARDANDO_APROVACAO");
+    const conflicts = await prisma.buyerReconciliationConflict.findMany({ where: { candidateId: api.candidateId! } });
+    expect(conflicts.every((conflict) => conflict.status === "RESOLVIDO" && conflict.motivoResolucao === "API é a fonte oficial")).toBe(true);
+    const approved = await approveCandidate(fixture, "B10-T06");
+    const purchase = await prisma.compraImportada.findUniqueOrThrow({ where: { id: approved.purchaseId }, include: { itens: true } });
+    expect(purchase.itens[0]!.quantidade).toBe(5);
+  });
+
+  it("T04: e-mail sem Order ID aguarda identificação humana e não consolida por heurística", async () => {
+    const fixture = await connectionFixture("AMAZON", "SHARED", `b10-t04-${randomUUID().slice(0, 6)}`);
+    const api = await recordApi(fixture, order("B10-T04"));
+    const { externalOrderId: _omit, ...withoutId } = order("B10-T04");
+    void _omit;
+    const pending = await emailEvidence(fixture, {
+      source: "EMAIL_AMAZON", provider: "AMAZON", mailbox: "batch8-mail", externalEvidenceId: "msg-b10-t04",
+      order: { ...withoutId, reference: "Pedido sem número" }
+    }, `b10-t04-${randomUUID()}`);
+    expect(pending.body).toMatchObject({ status: "AGUARDANDO_IDENTIFICACAO", candidateId: null });
+    const queue = await request(fixture.app).get("/integrations/marketplaces/buyer-evidence/unidentified").set(bearer(fixture.token));
+    expect(queue.body.map((entry: { id: string }) => entry.id)).toContain(pending.body.evidenceId);
+    expect(await prisma.buyerEvidenceLink.count({ where: { candidateId: api.candidateId! } })).toBe(1);
+    const identified = await request(fixture.app)
+      .post(`/integrations/marketplaces/buyer-evidence/${pending.body.evidenceId}/identify`)
+      .set(bearer(fixture.token)).set("idempotency-key", `b10-identify-${randomUUID()}`)
+      .send({ contaExternaId: await accountOf(fixture), externalOrderId: "B10-T04" });
+    expect(identified.status).toBe(200);
+    expect(identified.body.candidateId).toBe(api.candidateId);
+    const after = await request(fixture.app).get("/integrations/marketplaces/buyer-evidence/unidentified").set(bearer(fixture.token));
+    expect(after.body.map((entry: { id: string }) => entry.id)).not.toContain(pending.body.evidenceId);
+    expect(await prisma.buyerEvidence.findUnique({ where: { id: pending.body.evidenceId } })).not.toBeNull();
+  });
+
+  it("e-mail primeiro fica como evidência atual provisória; API depois assume a prioridade", async () => {
+    const fixture = await connectionFixture("AMAZON", "SHARED", `b10-first-${randomUUID().slice(0, 6)}`);
+    const email = await emailEvidence(fixture, {
+      source: "EMAIL_AMAZON", provider: "AMAZON", contaExternaId: await accountOf(fixture), mailbox: "batch8-mail",
+      externalEvidenceId: "msg-b10-first", order: { ...order("B10-FIRST"), merchant: undefined }
+    }, `b10-first-${randomUUID()}`);
+    expect((await candidateDetail(fixture, email.body.candidateId)).currentEvidence.source).toBe("EMAIL_AMAZON");
+    await recordApi(fixture, order("B10-FIRST"));
+    const detail = await candidateDetail(fixture, email.body.candidateId);
+    expect(detail.currentEvidence.source).toBe("AMAZON_BUSINESS_API");
+    expect(detail.status).toBe("AGUARDANDO_APROVACAO");
+  });
+
+  it("registrar evidência exige BUYER_INGESTION_REGISTRAR", async () => {
+    const fixture = await connectionFixture("AMAZON", "SHARED", `b10-acl-${randomUUID().slice(0, 6)}`);
+    const token = await scopedUser(fixture, ["BUYER_INGESTION_VISUALIZAR"], [fixture.dronz.id]);
+    const denied = await request(fixture.app).post("/integrations/marketplaces/buyer-evidence")
+      .set(bearer(token)).set("idempotency-key", `b10-acl-${randomUUID()}`)
+      .send({ source: "MANUAL", provider: "AMAZON", externalEvidenceId: "x", order: { ...order("B10-ACL") } });
+    expect(denied.status).toBe(403);
   });
 });

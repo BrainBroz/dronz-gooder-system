@@ -83,6 +83,7 @@ model Usuario {
   decisoesBuyerCompra            BuyerApprovalDecision[]
   responsabilidadesContextuais   ResponsabilidadeContextual[]
   handoffsEntregues              HandoffVolume[]
+  conflitosBuyerResolvidos       BuyerReconciliationConflict[]  @relation("BuyerConflictResolver")
   correcoesPropostas             SolicitacaoCorrecao[]          @relation("CorrecaoProponente")
   correcoesDecididas             SolicitacaoCorrecao[]          @relation("CorrecaoAprovador")
   reservasMala                   AlocacaoMala[]
@@ -681,6 +682,11 @@ model BuyerReconciliationConflict {
   evidenceId          String
   type                TipoConflitoEvidenciaCompra
   status              StatusConflitoEvidenciaCompra @default(ABERTO)
+  resolucao           ResolucaoConflitoEvidencia?
+  motivoResolucao     String?
+  resolvidoPorId      String?
+  resolvidoEm         DateTime?
+  resolvidoPor        Usuario?                      @relation("BuyerConflictResolver", fields: [resolvidoPorId], references: [id], onDelete: Restrict)
   createdAt           DateTime                      @default(now())
 
   candidate         BuyerPurchaseCandidate @relation(fields: [candidateId], references: [id], onDelete: Restrict)
@@ -1899,4 +1905,11 @@ model SolicitacaoCorrecao {
   decididoPor       Usuario?                  @relation("CorrecaoAprovador", fields: [decididoPorId], references: [id], onDelete: Restrict)
 
   @@index([lojaId, status])
+}
+
+// X-01: divergência só se resolve por decisão humana motivada; nenhuma tolerância a encerra sozinha.
+enum ResolucaoConflitoEvidencia {
+  ACEITAR_EVIDENCIA
+  MANTER_REFERENCIA
+  CIENTE
 }

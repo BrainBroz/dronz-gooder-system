@@ -81,6 +81,13 @@ export const buyerCandidateListSchema = z.object({
   ]).optional()
 }).strict();
 
+export const buyerConflictResolutionSchema = z.object({
+  evidenceId: z.string().cuid(),
+  resolution: z.enum(["ACEITAR_EVIDENCIA", "MANTER_REFERENCIA", "CIENTE"]),
+  reason: z.string().trim().min(1).max(1000),
+  expectedVersion: z.number().int().positive()
+}).strict();
+
 export const buyerDecisionSchema = z.object({
   decision: z.enum(["APROVAR", "REJEITAR"]),
   expectedVersion: z.number().int().positive(),
@@ -175,3 +182,22 @@ export const marketplaceOrderPageSchema = z
     nextCursor: z.string().trim().min(1).max(2000).optional()
   })
   .strict();
+
+// §3/§4.3: evidência de fonte não-API (e-mail encaminhado, documento, registro manual). Sem Order ID
+// confiável ela fica AGUARDANDO_IDENTIFICACAO; nunca é consolidada por heurística.
+export const buyerEvidenceIntakeSchema = z.object({
+  source: z.enum(["EMAIL_AMAZON", "EMAIL_EBAY", "EMAIL_OUTRO", "DOCUMENTO", "MANUAL"]),
+  provider: z.enum(["AMAZON", "EBAY"]),
+  contaExternaId: z.string().cuid().optional(),
+  externalEvidenceId: z.string().trim().min(1).max(240),
+  mailbox: z.string().trim().min(1).max(240).optional(),
+  order: normalizedMarketplaceOrderSchema.extend({
+    externalOrderId: z.string().trim().min(1).max(240).optional(),
+    reference: z.string().trim().min(1).max(240).optional()
+  })
+}).strict();
+
+export const buyerEvidenceIdentifySchema = z.object({
+  contaExternaId: z.string().cuid(),
+  externalOrderId: z.string().trim().min(1).max(240)
+}).strict();

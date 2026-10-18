@@ -74,7 +74,8 @@ async function main() {
     "LOGISTICA_POSICOES_VISUALIZAR",
     "LOGISTICA_POSICOES_GERENCIAR",
     "LOGISTICA_POSICOES_TODAS",
-    "CORRECAO_PATRIMONIAL_APROVAR"
+    "CORRECAO_PATRIMONIAL_APROVAR",
+    "BUYER_INGESTION_REGISTRAR"
   ] as const;
   const permissions = await Promise.all(
     permissionCodes.map((code) =>

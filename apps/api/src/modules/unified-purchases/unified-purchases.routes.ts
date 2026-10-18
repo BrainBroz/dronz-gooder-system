@@ -49,6 +49,19 @@ const key = (request: AuthenticatedRequest) => {
   return typeof value === "string" && value.length <= 200 ? value : undefined;
 };
 
+// Contas externas para seleção em revisão/identificação; sem metadata nem erros de sincronização.
+unifiedPurchasesRouter.get(
+  "/accounts",
+  requirePermission(
+    "COMPRAS_IMPORTADAS_VISUALIZAR",
+    "BUYER_INGESTION_VISUALIZAR",
+    "CONTA_EXTERNA_GERENCIAR"
+  ),
+  wrap(async (_request, response) => {
+    response.json(await service.listExternalAccounts());
+  })
+);
+
 unifiedPurchasesRouter.post(
   "/accounts",
   requirePermission("CONTA_EXTERNA_GERENCIAR"),

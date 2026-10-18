@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { reconciliationScore } from "./reconciliation-score";
 import {
   Prisma,
   type ConexaoMarketplace,
@@ -20,13 +21,14 @@ import {
   marketplaceAdapterRegistry,
   translateMarketplaceAdapterError
 } from "./marketplace-integrations.adapters";
-import { hasDuplicateOfficialLineId, recordMarketplaceEvidence } from "./buyer-evidence.service";
+import { hasDuplicateOfficialLineId, isStructuredApiSource, recordMarketplaceEvidence } from "./buyer-evidence.service";
 import {
   capabilitySchema,
   marketplaceOrderPageSchema,
   normalizedMarketplaceOrderSchema
 } from "./marketplace-integrations.schemas";
 import type {
+  buyerEvidenceIntakeSchema,
   buyerCandidateListSchema,
   buyerDecisionSchema,
   createConnectionSchema,
@@ -335,9 +337,13 @@ export async function syncHistory(
   return { items, page, limit, total };
 }
 
-type CandidateWithCurrent = Prisma.BuyerPurchaseCandidateGetPayload<{
-  include: { contaExterna: true; currentEvidence: true };
-}>;
+const candidateInclude = {
+  contaExterna: true,
+  currentEvidence: true,
+  evidenceLinks: { where: { type: { not: "REJECTED" } }, select: { evidence: { select: { source: true } } } },
+  conflicts: { where: { status: "ABERTO" }, select: { type: true } }
+} satisfies Prisma.BuyerPurchaseCandidateInclude;
+type CandidateWithCurrent = Prisma.BuyerPurchaseCandidateGetPayload<{ include: typeof candidateInclude }>;
 
 function candidateReadModel(
   identity: AuthIdentity,
@@ -365,6 +371,8 @@ function candidateReadModel(
     if (hasPermission(identity, "BUYER_INGESTION_REJEITAR"))
       allowedActions.push("REJECT");
   }
+  if (candidate.conflicts.length && hasPermission(identity, "BUYER_INGESTION_APROVAR"))
+    allowedActions.push("RESOLVE_CONFLICT");
   return {
     id: candidate.id,
     provider: candidate.provider,
@@ -384,7 +392,13 @@ function candidateReadModel(
       recordedAt: candidate.currentEvidence.createdAt.toISOString()
     },
     allowedActions,
-    blockedReasons
+    blockedReasons,
+    confianca: reconciliationScore({
+      order,
+      hasStrongIdentity: !!candidate.externalOrderIdNormalized && !!candidate.contaExternaId,
+      sources: candidate.evidenceLinks.map((link) => link.evidence.source),
+      openConflicts: candidate.conflicts.map((conflict) => conflict.type)
+    })
   };
 }
 
@@ -399,7 +413,7 @@ export async function listBuyerCandidates(
     const [items, total] = await Promise.all([
       tx.buyerPurchaseCandidate.findMany({
         where,
-        include: { contaExterna: true, currentEvidence: true },
+        include: candidateInclude,
         orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
         skip: (input.page - 1) * input.limit,
         take: input.limit
@@ -432,12 +446,7 @@ export async function buyerCandidateDetail(identity: AuthIdentity, id: string) {
     const candidate = await tx.buyerPurchaseCandidate.findUnique({
       where: { id },
       include: {
-        contaExterna: true,
-        currentEvidence: true,
-        evidenceLinks: {
-          include: { evidence: true },
-          orderBy: { evidence: { createdAt: "desc" } }
-        },
+        ...candidateInclude,
         decisions: { orderBy: { createdAt: "desc" } }
       }
     });
@@ -452,9 +461,14 @@ export async function buyerCandidateDetail(identity: AuthIdentity, id: string) {
       after: { currentEvidenceId: candidate.currentEvidenceId, version: candidate.version },
       origin: ORIGIN
     });
+    const links = await tx.buyerEvidenceLink.findMany({
+      where: { candidateId: id },
+      include: { evidence: true },
+      orderBy: { evidence: { createdAt: "desc" } }
+    });
     return {
       ...candidateReadModel(identity, candidate),
-      evidenceVersions: candidate.evidenceLinks.map((link) => ({
+      evidenceVersions: links.map((link) => ({
         id: link.evidence.id,
         version: link.evidence.version,
         source: link.evidence.source,
@@ -553,7 +567,10 @@ export async function buyerCandidateConflicts(
       status: conflict.status,
       referenceEvidenceId: conflict.referenceEvidenceId,
       evidenceId: conflict.evidenceId,
-      createdAt: conflict.createdAt.toISOString()
+      createdAt: conflict.createdAt.toISOString(),
+      resolucao: conflict.resolucao,
+      motivoResolucao: conflict.motivoResolucao,
+      resolvidoEm: conflict.resolvidoEm?.toISOString() ?? null
     }));
     return { items, page: input.page, limit: input.limit, total };
   });
@@ -684,7 +701,8 @@ export async function decideBuyerCandidate(
           moeda: order.currency.toUpperCase(),
           statusExterno: order.externalStatus,
           totalExterno: order.total,
-          origem: "API",
+          // Evidência de e-mail, documento ou registro manual entra como importação, não como API.
+          origem: isStructuredApiSource(candidate.currentEvidence.source) ? "API" : "IMPORTACAO_ARQUIVO",
           itens: order.items.map((item) => ({
             externalLineId: item.externalLineId,
             titulo: item.title,
@@ -723,7 +741,7 @@ export async function decideBuyerCandidate(
           compraImportadaId: purchaseId,
           version: { increment: 1 }
         },
-        include: { contaExterna: true, currentEvidence: true }
+        include: candidateInclude
       });
       const decision = await tx.buyerApprovalDecision.create({
         data: {
@@ -1197,4 +1215,186 @@ export function connectionAllowsStore(
   return (
     connection.escopo === "SHARED" || connection.lojaPermitidaId === storeId
   );
+}
+
+// X-01: o revisor escolhe qual evidência vale para o par em conflito; compra já aprovada só registra
+// ciência, porque fato externo não reescreve decisão interna. Todos os conflitos do par são resolvidos juntos.
+export async function resolveBuyerConflicts(
+  identity: AuthIdentity,
+  candidateId: string,
+  input: { evidenceId: string; resolution: "ACEITAR_EVIDENCIA" | "MANTER_REFERENCIA" | "CIENTE"; reason: string; expectedVersion: number },
+  key: string
+) {
+  if (!hasPermission(identity, "BUYER_INGESTION_APROVAR"))
+    throw new AppError(403, "insufficient_permission");
+  return idempotentMutation({
+    lojaId: GLOBAL_SCOPE,
+    operation: "RESOLVE_BUYER_CONFLICT",
+    entityId: candidateId,
+    key,
+    payload: input,
+    execute: async (tx, correlationId) => {
+      await tx.$queryRaw`SELECT id FROM "BuyerPurchaseCandidate" WHERE id = ${candidateId} FOR UPDATE`;
+      const candidate = await tx.buyerPurchaseCandidate.findUnique({ where: { id: candidateId } });
+      if (!candidate) throw new AppError(404, "not_found");
+      if (candidate.version !== input.expectedVersion) throw new AppError(409, "concurrent_modification");
+      const conflicts = await tx.buyerReconciliationConflict.findMany({
+        where: { candidateId, evidenceId: input.evidenceId, status: "ABERTO" }
+      });
+      if (!conflicts.length) throw new AppError(404, "conflict_not_found");
+      const approved = !!candidate.compraImportadaId;
+      if (approved !== (input.resolution === "CIENTE"))
+        throw new AppError(409, approved ? "approved_purchase_requires_acknowledgement" : "resolution_requires_evidence_choice");
+      const referenceEvidenceId = conflicts[0]!.referenceEvidenceId;
+      const chosen = input.resolution === "ACEITAR_EVIDENCIA" ? input.evidenceId
+        : input.resolution === "MANTER_REFERENCIA" ? referenceEvidenceId : candidate.currentEvidenceId;
+      if (!chosen) throw new AppError(409, "reference_evidence_missing");
+      await tx.buyerReconciliationConflict.updateMany({
+        where: { id: { in: conflicts.map((conflict) => conflict.id) } },
+        data: { status: "RESOLVIDO", resolucao: input.resolution, motivoResolucao: input.reason, resolvidoPorId: identity.user.id, resolvidoEm: new Date() }
+      });
+      const remaining = await tx.buyerReconciliationConflict.count({ where: { candidateId, status: "ABERTO" } });
+      const current = await tx.buyerEvidence.findUniqueOrThrow({ where: { id: chosen } });
+      const order = normalizedMarketplaceOrderSchema.safeParse(current.normalizedPayload);
+      const status = remaining ? "COM_DIVERGENCIA"
+        : approved ? "APROVADA"
+          : order.success && order.data.cancelled ? "CANCELADA" : "AGUARDANDO_APROVACAO";
+      const updated = await tx.buyerPurchaseCandidate.update({
+        where: { id: candidateId },
+        data: { currentEvidenceId: chosen, status, version: { increment: 1 } }
+      });
+      await audit(tx, {
+        usuarioId: identity.user.id,
+        permissionCode: "BUYER_INGESTION_APROVAR",
+        action: "BUYER_CONFLICT_RESOLVED",
+        entity: "BuyerPurchaseCandidate",
+        entityId: candidateId,
+        correlationId,
+        idempotencyKey: key,
+        reason: input.reason,
+        before: { status: candidate.status, currentEvidenceId: candidate.currentEvidenceId, version: candidate.version },
+        after: { status: updated.status, currentEvidenceId: chosen, resolution: input.resolution, conflicts: conflicts.map((conflict) => conflict.type) },
+        origin: ORIGIN
+      });
+      return { id: updated.id, status: updated.status, version: updated.version, currentEvidenceId: chosen };
+    }
+  });
+}
+
+type EvidenceIntake = z.infer<typeof buyerEvidenceIntakeSchema>;
+
+// Registra evidência de fonte não-API. Com conta e Order ID, reconcilia pela identidade forte (a API
+// mantém prioridade); sem eles, guarda a evidência imutável na fila de identificação, sem candidato.
+export async function registerBuyerEvidence(identity: AuthIdentity, input: EvidenceIntake, key: string) {
+  if (!hasPermission(identity, "BUYER_INGESTION_REGISTRAR"))
+    throw new AppError(403, "insufficient_permission");
+  const sourceIdentity = `${input.source}:${input.mailbox ?? "manual"}`;
+  const correlationId = randomUUID();
+  if (input.contaExternaId && input.order.externalOrderId) {
+    const account = await prisma.contaExterna.findUnique({ where: { id: input.contaExternaId } });
+    if (!account || account.plataforma !== input.provider) throw new AppError(404, "account_not_found");
+    const recorded = await recordMarketplaceEvidence({
+      provider: input.provider,
+      accountId: account.id,
+      connectionId: null,
+      order: { ...input.order, externalOrderId: input.order.externalOrderId, reference: input.order.reference ?? input.order.externalOrderId },
+      actorId: identity.user.id,
+      correlationId,
+      idempotencyKey: key,
+      source: input.source,
+      sourceIdentity,
+      externalEvidenceId: input.externalEvidenceId
+    });
+    return { evidenceId: recorded.id, candidateId: "candidateId" in recorded ? recorded.candidateId : null, status: "IDENTIFICADA" as const };
+  }
+  const payload = JSON.stringify(input.order);
+  const payloadHash = createHash("sha256").update(payload).digest("hex");
+  const externalEvidenceId = input.externalEvidenceId.trim().normalize("NFC");
+  return prisma.$transaction(async (tx) => {
+    const replay = await tx.buyerEvidence.findUnique({
+      where: { sourceIdentity_externalEvidenceId_payloadHash: { sourceIdentity, externalEvidenceId, payloadHash } }
+    });
+    if (replay) return { evidenceId: replay.id, candidateId: null, status: "AGUARDANDO_IDENTIFICACAO" as const };
+    const latest = await tx.buyerEvidence.findFirst({ where: { sourceIdentity, externalEvidenceId }, orderBy: { version: "desc" }, select: { version: true } });
+    const evidence = await tx.buyerEvidence.create({
+      data: {
+        source: input.source, sourceIdentity, externalEvidenceId,
+        contaExternaId: input.contaExternaId,
+        sourceOccurredAt: new Date(input.order.updatedAt),
+        payloadHash, version: (latest?.version ?? 0) + 1,
+        normalizedPayload: JSON.parse(payload) as Prisma.InputJsonValue,
+        correlationId
+      }
+    });
+    await audit(tx, {
+      usuarioId: identity.user.id, permissionCode: "BUYER_INGESTION_REGISTRAR", action: "BUYER_EVIDENCE_UNIDENTIFIED",
+      entity: "BuyerEvidence", entityId: evidence.id, correlationId, idempotencyKey: key,
+      after: { source: input.source, externalEvidenceId, version: evidence.version, payloadHash }, origin: ORIGIN
+    });
+    return { evidenceId: evidence.id, candidateId: null, status: "AGUARDANDO_IDENTIFICACAO" as const };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
+// Evidências sem Order ID que ainda não ganharam versão identificada.
+export async function unidentifiedBuyerEvidence(identity: AuthIdentity) {
+  if (!hasPermission(identity, "BUYER_INGESTION_VISUALIZAR"))
+    throw new AppError(403, "insufficient_permission");
+  const pending = await prisma.buyerEvidence.findMany({
+    where: { externalOrderIdNormalized: null, source: { notIn: ["EBAY_BUYER_API", "AMAZON_BUSINESS_API"] } },
+    orderBy: { createdAt: "asc" },
+    take: 200
+  });
+  const identified = await prisma.buyerEvidence.findMany({
+    where: {
+      externalOrderIdNormalized: { not: null },
+      OR: pending.map((evidence) => ({ sourceIdentity: evidence.sourceIdentity, externalEvidenceId: evidence.externalEvidenceId }))
+    },
+    select: { sourceIdentity: true, externalEvidenceId: true }
+  });
+  const done = new Set(identified.map((evidence) => `${evidence.sourceIdentity}|${evidence.externalEvidenceId}`));
+  return pending
+    .filter((evidence) => !done.has(`${evidence.sourceIdentity}|${evidence.externalEvidenceId}`))
+    .map((evidence) => ({
+      id: evidence.id, source: evidence.source, externalEvidenceId: evidence.externalEvidenceId,
+      version: evidence.version, recordedAt: evidence.createdAt.toISOString(), order: evidence.normalizedPayload
+    }));
+}
+
+// Identificação humana: nova versão da mesma evidência com a identidade forte; a original permanece.
+export async function identifyBuyerEvidence(
+  identity: AuthIdentity,
+  evidenceId: string,
+  input: { contaExternaId: string; externalOrderId: string },
+  key: string
+) {
+  if (!hasPermission(identity, "BUYER_INGESTION_REGISTRAR"))
+    throw new AppError(403, "insufficient_permission");
+  const evidence = await prisma.buyerEvidence.findUnique({ where: { id: evidenceId } });
+  if (!evidence || evidence.externalOrderIdNormalized) throw new AppError(404, "not_found");
+  const provider = evidence.source === "EMAIL_EBAY" ? "EBAY" : evidence.source === "EMAIL_AMAZON" ? "AMAZON" : null;
+  const account = await prisma.contaExterna.findUnique({ where: { id: input.contaExternaId } });
+  if (!account || (provider && account.plataforma !== provider) || !["AMAZON", "EBAY"].includes(account.plataforma))
+    throw new AppError(404, "account_not_found");
+  const order = evidence.normalizedPayload as Record<string, unknown>;
+  const recorded = await recordMarketplaceEvidence({
+    provider: account.plataforma as "AMAZON" | "EBAY",
+    accountId: account.id,
+    connectionId: null,
+    order: normalizedMarketplaceOrderSchema.parse({ ...order, externalOrderId: input.externalOrderId, reference: order.reference ?? input.externalOrderId }),
+    actorId: identity.user.id,
+    correlationId: randomUUID(),
+    idempotencyKey: key,
+    source: evidence.source,
+    sourceIdentity: evidence.sourceIdentity,
+    externalEvidenceId: evidence.externalEvidenceId
+  });
+  await prisma.auditLog.create({
+    data: {
+      usuarioId: identity.user.id, permissionCode: "BUYER_INGESTION_REGISTRAR", action: "BUYER_EVIDENCE_IDENTIFIED",
+      entity: "BuyerEvidence", entityId: evidenceId, correlationId: randomUUID(), idempotencyKey: key,
+      afterData: { identifiedEvidenceId: recorded.id, contaExternaId: account.id, externalOrderId: input.externalOrderId },
+      origin: ORIGIN
+    }
+  });
+  return { evidenceId: recorded.id, candidateId: "candidateId" in recorded ? recorded.candidateId : null };
 }

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   Prisma,
+  type FonteEvidenciaCompra,
   type MarketplaceProvider,
   type TipoConflitoEvidenciaCompra
 } from "@prisma/client";
@@ -100,27 +101,49 @@ function materialConflictTypes(
   return types;
 }
 
+// §5: API estruturada tem prioridade operacional; e-mail, documento e manual confirmam ou contestam.
+export const isStructuredApiSource = (source: FonteEvidenciaCompra) =>
+  source === "EBAY_BUYER_API" || source === "AMAZON_BUSINESS_API";
+
+// Com uma fonte parcial (e-mail, documento, manual), só campos que ela efetivamente trouxe são comparados;
+// título, envio ou merchant ausentes não viram conflito falso.
+function partialConflictTypes(
+  types: TipoConflitoEvidenciaCompra[],
+  partial: NormalizedMarketplaceOrder
+): TipoConflitoEvidenciaCompra[] {
+  return types.filter((type) =>
+    type !== "SHIPMENTS" && type !== "ITEMS" &&
+    (type !== "MERCHANT" || !!partial.merchant) &&
+    (type !== "EXTERNAL_STATUS" || !!partial.externalStatus) &&
+    (type !== "TOTAL" || partial.total !== undefined || partial.items.some((item) => item.unitPrice > 0)));
+}
+
 export async function recordMarketplaceEvidence(input: {
   provider: MarketplaceProvider;
   accountId: string;
-  connectionId: string;
+  connectionId: string | null;
   order: NormalizedMarketplaceOrder;
   actorId: string;
   correlationId: string;
   idempotencyKey?: string;
+  source?: FonteEvidenciaCompra;
+  sourceIdentity?: string;
+  externalEvidenceId?: string;
 }) {
   const normalized = canonicalOrder(input.order);
   if (hasDuplicateOfficialLineId(normalized))
     throw new AppError(409, "buyer_duplicate_external_line_id");
   const payload = JSON.stringify(normalized);
   const payloadHash = digest(payload);
-  const externalEvidenceId = normalizeId(input.order.externalOrderId);
-  const sourceIdentity = `${input.provider}:${input.accountId}`;
-  const source = input.provider === "EBAY" ? "EBAY_BUYER_API" : "AMAZON_BUSINESS_API";
+  const externalOrderId = normalizeId(input.order.externalOrderId);
+  const externalEvidenceId = normalizeId(input.externalEvidenceId ?? input.order.externalOrderId);
+  const sourceIdentity = input.sourceIdentity ?? `${input.provider}:${input.accountId}`;
+  const source: FonteEvidenciaCompra = input.source ?? (input.provider === "EBAY" ? "EBAY_BUYER_API" : "AMAZON_BUSINESS_API");
+  const incomingIsApi = isStructuredApiSource(source);
   const candidateIdentity = {
     provider: input.provider,
     contaExternaId: input.accountId,
-    externalOrderIdNormalized: externalEvidenceId
+    externalOrderIdNormalized: externalOrderId
   };
 
   try {
@@ -132,7 +155,7 @@ export async function recordMarketplaceEvidence(input: {
             plataforma_contaExternaId_externalOrderIdNormalizado: {
               plataforma: input.provider,
               contaExternaId: input.accountId,
-              externalOrderIdNormalizado: externalEvidenceId
+              externalOrderIdNormalizado: externalOrderId
             }
           },
           select: { id: true }
@@ -161,7 +184,7 @@ export async function recordMarketplaceEvidence(input: {
           where: { provider_contaExternaId_externalOrderIdNormalized: candidateIdentity },
           include: { currentEvidence: {
             select: { version: true, sourceOccurredAt: true, normalizedPayload: true,
-              payloadHash: true }
+              payloadHash: true, source: true }
           } }
         });
         const previous = prior && normalizedMarketplaceOrderSchema.safeParse(
@@ -212,7 +235,7 @@ export async function recordMarketplaceEvidence(input: {
             source,
             sourceIdentity,
             externalEvidenceId,
-            externalOrderIdNormalized: externalEvidenceId,
+            externalOrderIdNormalized: externalOrderId,
             contaExternaId: input.accountId,
             conexaoMarketplaceId: input.connectionId,
             sourceOccurredAt: new Date(input.order.updatedAt),
@@ -232,10 +255,14 @@ export async function recordMarketplaceEvidence(input: {
           ? Date.parse(previous.data.updatedAt)
           : prior?.currentEvidence.sourceOccurredAt.getTime() ?? -Infinity;
         const sameTime = currentTime === incomingTime;
-        const conflictTypes: TipoConflitoEvidenciaCompra[] = !prior ? []
+        const currentIsApi = prior ? isStructuredApiSource(prior.currentEvidence.source) : false;
+        const partialSide = !incomingIsApi ? normalized
+          : previous?.success && !currentIsApi ? canonicalOrder(previous.data) : null;
+        const fullConflicts: TipoConflitoEvidenciaCompra[] = !prior ? []
           : previous && previous.success
             ? materialConflictTypes(canonicalOrder(previous.data), normalized)
             : ["INVALID_PRIOR_EVIDENCE"];
+        const conflictTypes = partialSide ? partialConflictTypes(fullConflicts, partialSide) : fullConflicts;
         if (normalized.items.some((item) =>
           item.currency.toUpperCase() !== normalized.currency.toUpperCase()) &&
           !conflictTypes.includes("CURRENCY"))
@@ -245,7 +272,10 @@ export async function recordMarketplaceEvidence(input: {
         const incomingShipmentTime = shipmentEventTime(normalized);
         const currentShipmentTime = previous?.success
           ? shipmentEventTime(previous.data) : -Infinity;
-        const promote = incomingTime > currentTime ||
+        // Fonte parcial nunca substitui a evidência de API; API sempre substitui a provisória.
+        const promote = prior && currentIsApi && !incomingIsApi ? false
+          : prior && incomingIsApi && !currentIsApi ? true
+          : incomingTime > currentTime ||
           (sameTime && (normalized.cancelled !== currentCancelled
             ? normalized.cancelled
             : incomingShipmentTime !== currentShipmentTime
@@ -286,7 +316,7 @@ export async function recordMarketplaceEvidence(input: {
             candidateId: candidate.id,
             evidenceId: evidence.id,
             type: materialChange || candidate.status === "COM_DIVERGENCIA"
-              ? "CONFLICTING" : "MATCHED"
+              ? "CONFLICTING" : promote || !prior ? "MATCHED" : "SUPPORTING"
           }
         });
         if (conflictTypes.length) {
