@@ -36,6 +36,12 @@ model Loja {
   movimentacoesEstoque          MovimentacaoEstoque[]
   cotacoesCambio                CotacaoCambio[]
   despesas                      Despesa[]
+  contasFinanceiras             ContaFinanceira[]
+  faturasCartao                 FaturaCartao[]
+  lancamentosCartao             LancamentoCartao[]
+  pagamentosFatura              PagamentoFatura[]
+  transacoesFonte               TransacaoFinanceiraFonte[]
+  conciliacoesFinanceiras       ConciliacaoFinanceira[]
   pagamentos                    Pagamento[]
   custosPedido                  CustoPedido[]
   handoffsVolume                HandoffVolume[]
@@ -71,6 +77,7 @@ model Usuario {
   recebimentosConfirmados        Recebimento[]
   movimentacoesEstoque           MovimentacaoEstoque[]
   cotacoesCambio                 CotacaoCambio[]
+  conciliacoesRevisadas          ConciliacaoFinanceira[]
   simulacoesViagemCriadas        SimulacaoViagem[]
   atribuicoes                    AtribuicaoItem[]
   contasExternasCriadas          ContaExterna[]
@@ -1586,34 +1593,225 @@ model Despesa {
   valor       Decimal          @db.Decimal(12, 2)
   dataDespesa DateTime
   observacoes String?
+  moeda       String           @default("BRL")
+  impacto     ImpactoDespesa   @default(DESPESA_RESULTADO)
+  // Origem vinculada impede contabilizar o mesmo fato duas vezes (B16).
+  origemTipo  String?
+  origemId    String?
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
   loja        Loja             @relation(fields: [lojaId], references: [id], onDelete: Restrict)
 
   @@unique([id, lojaId])
+  @@unique([lojaId, origemTipo, origemId])
   @@index([lojaId, categoria])
   @@index([lojaId, dataDespesa])
 }
 
 model Pagamento {
-  id             String          @id @default(cuid())
-  lojaId         String
-  pedidoCompraId String
-  formaPagamento FormaPagamento
-  moeda          String
-  valor          Decimal         @db.Decimal(12, 2)
-  status         PagamentoStatus
-  pagoEm         DateTime?
-  referencia     String?
-  observacoes    String?
-  estornoDeId    String?
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  loja           Loja            @relation(fields: [lojaId], references: [id], onDelete: Restrict)
-  pedido         PedidoCompra    @relation(fields: [pedidoCompraId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  id                String                  @id @default(cuid())
+  lojaId            String
+  pedidoCompraId    String
+  formaPagamento    FormaPagamento
+  moeda             String
+  valor             Decimal                 @db.Decimal(12, 2)
+  status            PagamentoStatus
+  pagoEm            DateTime?
+  referencia        String?
+  observacoes       String?
+  estornoDeId       String?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  loja              Loja                    @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  pedido            PedidoCompra            @relation(fields: [pedidoCompraId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  lancamentosCartao LancamentoCartao[]
+  conciliacoes      ConciliacaoFinanceira[]
 
   @@unique([id, lojaId])
   @@index([lojaId, pedidoCompraId, status])
+}
+
+// Batch 16: contas, faturas, fontes e conciliação. Todo valor é Decimal com moeda explícita.
+enum ImpactoDespesa {
+  DESPESA_RESULTADO
+  TRANSFERENCIA
+  CUSTO_AQUISICAO
+  APLICACAO_CAPITAL
+}
+
+enum TipoContaFinanceira {
+  PAYPAL
+  CARTAO
+  BANCO
+  CAIXA
+}
+
+enum StatusContaFinanceira {
+  ATIVA
+  INATIVA
+}
+
+enum StatusFaturaCartao {
+  ABERTA
+  FECHADA
+  QUITADA
+}
+
+enum TipoLancamentoCartao {
+  DEBITO
+  CREDITO
+  TAXA
+  AJUSTE
+}
+
+enum TipoTransacaoFonte {
+  COMPRA
+  TAXA
+  CONVERSAO
+  REEMBOLSO
+  PAGAMENTO_FATURA
+}
+
+enum StatusConciliacaoFinanceira {
+  PENDENTE_REVISAO
+  CONCILIADO
+  POSSIVEL_DUPLICIDADE
+  SEM_PAGAMENTO_ASSOCIADO
+  IGNORADO
+}
+
+// Cartão é uma conta do tipo CARTAO (1:1 com a entidade conceitual Cartao). Nunca guarda PAN, CVV ou token.
+model ContaFinanceira {
+  id                String                     @id @default(cuid())
+  lojaId            String
+  tipo              TipoContaFinanceira
+  apelido           String
+  moedaPrincipal    String
+  estado            StatusContaFinanceira      @default(ATIVA)
+  referenciaExterna String?
+  emissor           String?
+  ultimosQuatro     String?                    @db.VarChar(4)
+  diaFechamento     Int?
+  diaVencimento     Int?
+  limite            Decimal?                   @db.Decimal(18, 2)
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+  loja              Loja                       @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  faturas           FaturaCartao[]
+  transacoes        TransacaoFinanceiraFonte[]
+  pagamentosFatura  PagamentoFatura[]
+
+  @@unique([id, lojaId])
+  @@unique([lojaId, apelido])
+}
+
+model FaturaCartao {
+  id          String             @id @default(cuid())
+  lojaId      String
+  contaId     String
+  moeda       String
+  inicio      DateTime           @db.Date
+  fim         DateTime           @db.Date
+  vencimento  DateTime           @db.Date
+  estado      StatusFaturaCartao @default(ABERTA)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  loja        Loja               @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  conta       ContaFinanceira    @relation(fields: [contaId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  lancamentos LancamentoCartao[]
+  pagamentos  PagamentoFatura[]
+
+  @@unique([id, lojaId])
+  @@unique([contaId, inicio])
+}
+
+// Lançamento é o compromisso no cartão; parcelas repartem o pagamento original sem recriar custo.
+model LancamentoCartao {
+  id            String               @id @default(cuid())
+  lojaId        String
+  faturaId      String
+  tipo          TipoLancamentoCartao
+  valor         Decimal              @db.Decimal(18, 2)
+  data          DateTime
+  descricao     String?
+  pagamentoId   String?
+  parcelaNumero Int?
+  parcelaTotal  Int?
+  createdAt     DateTime             @default(now())
+  loja          Loja                 @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  fatura        FaturaCartao         @relation(fields: [faturaId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  pagamento     Pagamento?           @relation(fields: [pagamentoId, lojaId], references: [id, lojaId], onDelete: Restrict)
+
+  @@unique([pagamentoId, parcelaNumero])
+  @@index([lojaId, faturaId])
+}
+
+// Pagamento da fatura liquida a dívida do cartão; não é nova despesa de compra.
+model PagamentoFatura {
+  id            String           @id @default(cuid())
+  lojaId        String
+  faturaId      String
+  contaOrigemId String?
+  valor         Decimal          @db.Decimal(18, 2)
+  pagoEm        DateTime
+  referencia    String?
+  createdAt     DateTime         @default(now())
+  loja          Loja             @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  fatura        FaturaCartao     @relation(fields: [faturaId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  contaOrigem   ContaFinanceira? @relation(fields: [contaOrigemId, lojaId], references: [id, lojaId], onDelete: Restrict)
+
+  @@index([lojaId, faturaId])
+}
+
+// Fonte externa ou manual (PayPal/extrato). Conteúdo novo gera versão; a anterior nunca é sobrescrita.
+model TransacaoFinanceiraFonte {
+  id            String                 @id @default(cuid())
+  lojaId        String
+  contaId       String
+  provider      String
+  transactionId String
+  versao        Int                    @default(1)
+  tipo          TipoTransacaoFonte
+  moeda         String
+  bruto         Decimal                @db.Decimal(18, 2)
+  taxa          Decimal?               @db.Decimal(18, 2)
+  liquido       Decimal?               @db.Decimal(18, 2)
+  occurredAt    DateTime
+  statusFonte   String?
+  contraparte   String?
+  payloadHash   String
+  substituidaEm DateTime?
+  createdAt     DateTime               @default(now())
+  loja          Loja                   @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  conta         ContaFinanceira        @relation(fields: [contaId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  conciliacao   ConciliacaoFinanceira?
+
+  @@unique([id, lojaId])
+  @@unique([contaId, provider, transactionId, versao])
+  @@index([lojaId, occurredAt])
+}
+
+// Vínculo humano entre fonte e pagamento já registrado: concilia sem criar pagamento duplicado.
+model ConciliacaoFinanceira {
+  id                  String                      @id @default(cuid())
+  lojaId              String
+  transacaoFonteId    String                      @unique
+  pagamentoId         String?
+  sugeridoPagamentoId String?
+  estado              StatusConciliacaoFinanceira
+  motivo              String?
+  revisadoPorId       String?
+  revisadoEm          DateTime?
+  createdAt           DateTime                    @default(now())
+  updatedAt           DateTime                    @updatedAt
+  loja                Loja                        @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  transacao           TransacaoFinanceiraFonte    @relation(fields: [transacaoFonteId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  pagamento           Pagamento?                  @relation(fields: [pagamentoId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  revisadoPor         Usuario?                    @relation(fields: [revisadoPorId], references: [id], onDelete: Restrict)
+
+  @@unique([transacaoFonteId, lojaId])
+  @@index([lojaId, estado])
+  @@index([pagamentoId])
 }
 
 model CustoPedido {
