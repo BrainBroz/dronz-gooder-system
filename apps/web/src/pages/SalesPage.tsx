@@ -74,35 +74,36 @@ function useSalesContext() {
 
 function useSalesPost() {
   const { store, headers } = useSalesContext();
-  const attempt = React.useRef<{
+  type Attempt = {
     fingerprint: string;
     body: object;
     key: string;
     pending?: ReturnType<typeof api.post>;
-  } | null>(null);
+  };
+  const attempts = React.useRef(new Map<string, Attempt>());
   return async (
     url: string,
     body: object,
     dateField?: "dataVenda" | "recebidoEm"
   ) => {
     const fingerprint = JSON.stringify({ store, url, body });
-    if (attempt.current?.fingerprint !== fingerprint) {
-      attempt.current = {
+    if (!attempts.current.has(fingerprint)) {
+      attempts.current.set(fingerprint, {
         fingerprint,
         body: dateField
           ? { ...body, [dateField]: new Date().toISOString() }
           : body,
         key: crypto.randomUUID()
-      };
+      });
     }
-    const current = attempt.current;
+    const current = attempts.current.get(fingerprint)!;
     if (current.pending) return current.pending;
     current.pending = api.post(url, current.body, {
       headers: { ...headers, "idempotency-key": current.key }
     });
     try {
       const result = await current.pending;
-      if (attempt.current === current) attempt.current = null;
+      attempts.current.delete(fingerprint);
       return result;
     } finally {
       current.pending = undefined;
@@ -110,12 +111,17 @@ function useSalesPost() {
   };
 }
 
-function SaleCard({ sale }: { sale: Sale }) {
+function SaleCard({
+  sale,
+  post
+}: {
+  sale: Sale;
+  post: ReturnType<typeof useSalesPost>;
+}) {
   const { store, headers, can } = useSalesContext();
   const client = useQueryClient();
   const [suggestion, setSuggestion] = React.useState<Suggestion | null>(null);
   const [valor, setValor] = React.useState("");
-  const post = useSalesPost();
   const refresh = () =>
     client.invalidateQueries({ queryKey: ["sales", store] });
   const suggest = useMutation({
@@ -433,7 +439,7 @@ export function SalesPage() {
             <Typography>Nenhuma venda neste filtro.</Typography>
           )}
           {sales.data?.map((sale) => (
-            <SaleCard key={sale.id} sale={sale} />
+            <SaleCard key={sale.id} sale={sale} post={post} />
           ))}
         </ContentCard>
       </Stack>

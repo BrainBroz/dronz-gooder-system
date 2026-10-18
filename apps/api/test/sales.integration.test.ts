@@ -409,6 +409,16 @@ describe("vendas e baixa patrimonial (Batch 17)", () => {
     const privileged = await confirm(ctx.headers);
     expect(privileged.status).toBe(200);
     expect(privileged.body).toHaveProperty("custo");
+    // Compatibilidade com o formato antigo, que armazenava a venda inteira como resposta.
+    await prisma.idempotencyRecord.updateMany({
+      where: {
+        lojaId: ctx.store.id,
+        operation: "CONFIRM_SALE",
+        entityId: sale.body.id,
+        idempotencyKey: key
+      },
+      data: { responseData: privileged.body }
+    });
     const replay = await confirm(operatorHeaders);
     expect(replay.status).toBe(200);
     expect(replay.body).not.toHaveProperty("custo");

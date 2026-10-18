@@ -454,7 +454,7 @@ export async function confirmSale(
   key?: string,
   includeCost = false
 ) {
-  const saleId = await idempotentMutation({
+  await idempotentMutation({
     lojaId,
     operation: "CONFIRM_SALE",
     entityId: id,
@@ -606,7 +606,7 @@ export async function confirmSale(
       return result.id;
     }
   });
-  return getSale(lojaId, saleId, includeCost);
+  return getSale(lojaId, id, includeCost);
 }
 
 // Recebimento liquida o recebível e preserva cada parcela no AuditLog, sem registrar receita duplicada.

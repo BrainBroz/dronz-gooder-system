@@ -160,21 +160,24 @@ describe("Vendas B17", () => {
     expect(post.mock.calls[0][1].dataVenda).toEqual(expect.any(String));
   });
 
-  it("retry de recebimento mantém data e chave, mas outra parcela recebe chave nova", async () => {
-    vi.spyOn(api, "get").mockImplementation(async (url) => {
+  it("retry de recebimento sobrevive ao filtro sem duplicar; outra parcela recebe chave nova", async () => {
+    vi.spyOn(api, "get").mockImplementation(async (url, config) => {
       if (url === "/sales")
         return {
-          data: [
-            {
-              ...draft,
-              estado: "CONFIRMADA",
-              recebivel: {
-                valorPrevisto: "100",
-                valorRecebido: "0",
-                status: "PENDENTE"
-              }
-            }
-          ]
+          data:
+            config?.params?.estado === "RASCUNHO"
+              ? []
+              : [
+                  {
+                    ...draft,
+                    estado: "CONFIRMADA",
+                    recebivel: {
+                      valorPrevisto: "100",
+                      valorRecebido: "0",
+                      status: "PENDENTE"
+                    }
+                  }
+                ]
         };
       if (url === "/products") return { data: { items: [] } };
       throw new Error(`GET inesperado: ${url}`);
@@ -194,6 +197,15 @@ describe("Vendas B17", () => {
       screen.getByRole("button", { name: "Registrar recebimento" })
     );
     await screen.findByRole("alert");
+    await userEvent.click(screen.getByRole("combobox", { name: "Estado" }));
+    await userEvent.click(screen.getByRole("option", { name: "Rascunho" }));
+    await screen.findByText("Nenhuma venda neste filtro.");
+    await userEvent.click(screen.getByRole("combobox", { name: "Estado" }));
+    await userEvent.click(screen.getByRole("option", { name: "Todos" }));
+    const remountedInput = await screen.findByRole("spinbutton", {
+      name: "Valor recebido"
+    });
+    await userEvent.type(remountedInput, "25");
     await userEvent.click(
       screen.getByRole("button", { name: "Registrar recebimento" })
     );
@@ -203,7 +215,7 @@ describe("Vendas B17", () => {
       valor: 25,
       recebidoEm: expect.any(String)
     });
-    await userEvent.type(input, "25");
+    await userEvent.type(remountedInput, "25");
     await userEvent.click(
       screen.getByRole("button", { name: "Registrar recebimento" })
     );
