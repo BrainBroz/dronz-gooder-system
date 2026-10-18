@@ -329,3 +329,4 @@ Ao iniciar uma nova tarefa:
 - Documentos iniciais V1 e investigações devem indicar explicitamente quando foram superados.
 - Toda afirmação de implementação exige evidência no código, migration ou teste da baseline.
 - Roadmap, limitação e decisão aprovada devem permanecer separados para não transformar planejamento em estado atual.
+- Retries de Vendas preservam na sessão do navegador apenas chave idempotente e instante, sob hash de usuário/loja/URL/conteúdo; nenhum valor financeiro ou token é persistido. A recuperação resiste à navegação e à recarga na mesma sessão; sucesso remove a tentativa.

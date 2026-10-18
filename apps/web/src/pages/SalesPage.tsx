@@ -1,4 +1,5 @@
 import React from "react";
+import { z } from "zod";
 import {
   Button,
   Card,
@@ -74,6 +75,7 @@ function useSalesContext() {
 
 function useSalesPost() {
   const { store, headers } = useSalesContext();
+  const userId = useAuthStore((state) => state.user?.id);
   type Attempt = {
     fingerprint: string;
     body: object;
@@ -86,14 +88,25 @@ function useSalesPost() {
     body: object,
     dateField?: "dataVenda" | "recebidoEm"
   ) => {
-    const fingerprint = JSON.stringify({ store, url, body });
+    const fingerprint = JSON.stringify({ userId, store, url, body });
+    const digest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(fingerprint)
+    );
+    const storageKey = `sales-attempt:${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
     if (!attempts.current.has(fingerprint)) {
+      const saved = sessionStorage.getItem(storageKey);
+      // Só chave e instante são persistidos; valores e tokens não saem da memória.
+      const metadata = saved
+        ? z
+            .object({ key: z.string().uuid(), at: z.string().datetime() })
+            .parse(JSON.parse(saved))
+        : { key: crypto.randomUUID(), at: new Date().toISOString() };
+      sessionStorage.setItem(storageKey, JSON.stringify(metadata));
       attempts.current.set(fingerprint, {
         fingerprint,
-        body: dateField
-          ? { ...body, [dateField]: new Date().toISOString() }
-          : body,
-        key: crypto.randomUUID()
+        body: dateField ? { ...body, [dateField]: metadata.at } : body,
+        key: metadata.key
       });
     }
     const current = attempts.current.get(fingerprint)!;
@@ -103,6 +116,7 @@ function useSalesPost() {
     });
     try {
       const result = await current.pending;
+      sessionStorage.removeItem(storageKey);
       attempts.current.delete(fingerprint);
       return result;
     } finally {

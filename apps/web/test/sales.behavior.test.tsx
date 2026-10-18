@@ -1,7 +1,8 @@
 import React from "react";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { webcrypto } from "node:crypto";
 import { api } from "../src/api/client";
 import { SalesPage } from "../src/pages/SalesPage";
 import { renderWithProviders } from "./render";
@@ -35,7 +36,11 @@ function mockReads(suggestion: unknown) {
   });
 }
 
-beforeEach(() => vi.restoreAllMocks());
+beforeEach(() => {
+  vi.restoreAllMocks();
+  vi.stubGlobal("crypto", webcrypto);
+});
+afterEach(() => vi.unstubAllGlobals());
 
 describe("Vendas B17", () => {
   it("confirma a venda com os lotes FIFO sugeridos", async () => {
@@ -135,7 +140,7 @@ describe("Vendas B17", () => {
       .spyOn(api, "post")
       .mockRejectedValueOnce(new Error("network"))
       .mockResolvedValue({ data: {} });
-    renderWithProviders(<SalesPage />, {
+    const firstMount = renderWithProviders(<SalesPage />, {
       permissions: ["VENDA_VISUALIZAR", "VENDA_CRIAR"]
     });
     await userEvent.click(screen.getByRole("combobox", { name: "Produto" }));
@@ -148,6 +153,16 @@ describe("Vendas B17", () => {
       screen.getByRole("button", { name: "Criar rascunho" })
     );
     await screen.findByRole("alert");
+    firstMount.unmount();
+    renderWithProviders(<SalesPage />, {
+      permissions: ["VENDA_VISUALIZAR", "VENDA_CRIAR"]
+    });
+    await userEvent.click(screen.getByRole("combobox", { name: "Produto" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Drone" }));
+    await userEvent.type(
+      screen.getByRole("spinbutton", { name: "Preço unitário" }),
+      "100"
+    );
     await userEvent.click(
       screen.getByRole("button", { name: "Criar rascunho" })
     );
@@ -186,7 +201,7 @@ describe("Vendas B17", () => {
       .spyOn(api, "post")
       .mockRejectedValueOnce(new Error("network"))
       .mockResolvedValue({ data: {} });
-    renderWithProviders(<SalesPage />, {
+    const firstMount = renderWithProviders(<SalesPage />, {
       permissions: ["VENDA_VISUALIZAR", "FINANCEIRO_REGISTRAR"]
     });
     const input = await screen.findByRole("spinbutton", {
@@ -202,10 +217,17 @@ describe("Vendas B17", () => {
     await screen.findByText("Nenhuma venda neste filtro.");
     await userEvent.click(screen.getByRole("combobox", { name: "Estado" }));
     await userEvent.click(screen.getByRole("option", { name: "Todos" }));
-    const remountedInput = await screen.findByRole("spinbutton", {
+    await screen.findByRole("spinbutton", {
       name: "Valor recebido"
     });
-    await userEvent.type(remountedInput, "25");
+    firstMount.unmount();
+    renderWithProviders(<SalesPage />, {
+      permissions: ["VENDA_VISUALIZAR", "FINANCEIRO_REGISTRAR"]
+    });
+    const returnedInput = await screen.findByRole("spinbutton", {
+      name: "Valor recebido"
+    });
+    await userEvent.type(returnedInput, "25");
     await userEvent.click(
       screen.getByRole("button", { name: "Registrar recebimento" })
     );
@@ -215,7 +237,7 @@ describe("Vendas B17", () => {
       valor: 25,
       recebidoEm: expect.any(String)
     });
-    await userEvent.type(remountedInput, "25");
+    await userEvent.type(returnedInput, "25");
     await userEvent.click(
       screen.getByRole("button", { name: "Registrar recebimento" })
     );
