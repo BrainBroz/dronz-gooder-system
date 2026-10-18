@@ -2832,3 +2832,42 @@ describe("B11: adapter eBay Buyer no pipeline comum", () => {
     expect(await prisma.buyerEvidence.count({ where: { conexaoMarketplaceId: fixture.connectionId } })).toBe(evidenceCount);
   });
 });
+
+describe("PD-07: replay histórico incompleto bloqueia a incremental", () => {
+  it("incremental recusada até um replay terminar com sucesso", async () => {
+    const fixture = await connectionFixture("EBAY", "SHARED", "pd07-replay-block");
+    const identity = await getAuthenticatedUser(fixture.userId);
+    await prisma.execucaoSincronizacao.create({
+      data: {
+        conexaoId: fixture.connectionId,
+        status: "PARTIALLY_SUCCEEDED",
+        origem: "REPLAY",
+        correlationId: randomUUID(),
+        idempotencyKey: `pd07-partial-${randomUUID()}`,
+        requestHash: "x",
+        iniciadoEm: new Date()
+      }
+    });
+    const registry = () =>
+      disabledRegistry(new FakeAdapter("EBAY", [{ orders: [order("pd07-order")] }]));
+    await expect(
+      syncConnection(identity, fixture.connectionId, {}, `pd07-inc-${randomUUID()}`, registry())
+    ).rejects.toMatchObject({ code: "historical_replay_incomplete" });
+    expect(
+      (
+        await syncConnection(
+          identity,
+          fixture.connectionId,
+          { replay: true },
+          `pd07-replay-${randomUUID()}`,
+          registry()
+        )
+      ).status
+    ).toBe("SUCCEEDED");
+    expect(
+      (
+        await syncConnection(identity, fixture.connectionId, {}, `pd07-inc2-${randomUUID()}`, registry())
+      ).status
+    ).toBe("SUCCEEDED");
+  });
+});

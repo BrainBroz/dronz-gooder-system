@@ -129,6 +129,8 @@ logisticsRouter.patch(
 );
 logisticsRouter.patch(
   "/trips/:id/status",
+  // PD-05: mudar status de viagem/mala é gestão logística, não só escopo de loja.
+  requirePermission("LOGISTICA_POSICOES_GERENCIAR"),
   wrap((r) =>
     s.tripStatus(
       r.storeId!,
@@ -256,6 +258,8 @@ logisticsRouter.get(
 );
 logisticsRouter.patch(
   "/suitcases/:id/status",
+  // PD-05: mudar status de viagem/mala é gestão logística, não só escopo de loja.
+  requirePermission("LOGISTICA_POSICOES_GERENCIAR"),
   wrap((r) =>
     s.suitcaseStatus(
       r.storeId!,

@@ -46,7 +46,30 @@ const KNOWN_ERROR_MESSAGES: Record<string, string> = {
     "Já existe compra importada com esta identidade.",
   buyer_candidate_cancelled: "Compra cancelada na origem.",
   approver_must_differ: "Quem propôs a correção não pode aprová-la.",
-  request_already_decided: "Esta solicitação já foi decidida."
+  request_already_decided: "Esta solicitação já foi decidida.",
+  historical_replay_incomplete:
+    "Há um replay histórico incompleto nesta conexão. Conclua o replay antes da sincronização incremental.",
+  package_not_found: "Pacote não encontrado nesta compra.",
+  sale_requires_sales_module: "Saída por venda só pelo módulo Vendas.",
+  sale_not_draft: "A venda não está mais em rascunho.",
+  lots_must_cover_item: "Os lotes escolhidos precisam cobrir a quantidade do item.",
+  lot_insufficient: "O lote escolhido não tem saldo suficiente.",
+  lot_not_eligible: "Lote inválido para este produto.",
+  receipt_exceeds_receivable: "O recebimento ultrapassa o valor previsto.",
+  statement_overpayment: "O pagamento ultrapassa o saldo da fatura.",
+  statement_not_open: "A fatura não está aberta.",
+  statement_already_paid: "A fatura já está quitada.",
+  entry_exceeds_payment: "As parcelas ultrapassam o pagamento de origem.",
+  installment_already_posted: "Esta parcela já foi lançada.",
+  payment_not_card: "Só pagamentos com cartão entram em fatura.",
+  payment_already_reconciled: "Este pagamento já está conciliado com outra fonte.",
+  amount_mismatch: "O valor da fonte é diferente do pagamento.",
+  reconciliation_already_reviewed: "Esta conciliação já foi revisada.",
+  source_superseded: "A fonte tem versão mais nova; revise a versão atual.",
+  expense_double_counting:
+    "Essa origem já é custo ou transferência; não pode virar despesa de resultado.",
+  expense_origin_already_classified: "Essa origem já foi classificada.",
+  order_cancelled: "O pedido está cancelado."
 };
 const STATUS_FALLBACK_MESSAGES: Record<number, string> = {
   400: "Dados inválidos. Verifique os campos e tente novamente.",
