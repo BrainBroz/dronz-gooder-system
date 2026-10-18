@@ -69,7 +69,13 @@ const KNOWN_ERROR_MESSAGES: Record<string, string> = {
   expense_double_counting:
     "Essa origem já é custo ou transferência; não pode virar despesa de resultado.",
   expense_origin_already_classified: "Essa origem já foi classificada.",
-  order_cancelled: "O pedido está cancelado."
+  order_cancelled: "O pedido está cancelado.",
+  sale_not_confirmed: "A venda não está confirmada.",
+  sale_has_returns: "A venda tem devolução registrada; use a conferência da devolução.",
+  receivable_has_receipts:
+    "A venda já teve recebimento; registre o reembolso no financeiro antes do estorno.",
+  return_exceeds_sold: "A devolução ultrapassa a quantidade vendida.",
+  return_already_checked: "Esta devolução já foi conferida."
 };
 const STATUS_FALLBACK_MESSAGES: Record<number, string> = {
   400: "Dados inválidos. Verifique os campos e tente novamente.",

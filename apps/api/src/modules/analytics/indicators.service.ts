@@ -52,6 +52,13 @@ export const DEFINITIONS: Definition[] = [
     financeiro: true
   },
   {
+    codigo: "VENDAS_ESTORNADAS",
+    descricao: "Vendas estornadas (PD-01), à parte das confirmadas",
+    fonte: "Venda.estornadaEm (ESTORNADA)",
+    formula: "contagem e receita líquida estornada por moeda",
+    financeiro: true
+  },
+  {
     codigo: "MARGEM_REALIZADA",
     descricao: "Margem das vendas com custo conhecido",
     fonte: "BaixaVenda (snapshot X-10)",
@@ -248,6 +255,34 @@ async function readIndicators(
             );
           })
         : [empty("VENDAS_POR_CANAL")])
+    );
+    const reversed = await db.venda.findMany({
+      where: {
+        lojaId,
+        estado: "ESTORNADA",
+        estornadaEm: period,
+        ...(moeda ? { moeda } : {})
+      },
+      include: saleInclude
+    });
+    const byReversed = new Map<
+      string,
+      { valor: Prisma.Decimal; amostra: number }
+    >();
+    for (const view of reversed.map((sale) => saleView(sale, true)))
+      add(byReversed, view.moeda, view.receitaLiquida);
+    rows.push(
+      ...(byReversed.size
+        ? [...byReversed].map(([currency, v]) =>
+            row(
+              "VENDAS_ESTORNADAS",
+              null,
+              currency,
+              v.valor.toFixed(2),
+              v.amostra
+            )
+          )
+        : [empty("VENDAS_ESTORNADAS")])
     );
     // Venda sem custo conhecido fica fora da margem e é contada à parte; nada de custo presumido.
     const margins = new Map<
