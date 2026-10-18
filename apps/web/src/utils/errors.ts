@@ -91,6 +91,8 @@ const KNOWN_ERROR_MESSAGES: Record<string, string> = {
   loss_within_limit: "A perda está dentro do limite; registre o movimento direto.",
   package_item_not_declared: "Este pacote não tem este item declarado.",
   package_quantity_exceeded: "A quantidade passa do saldo declarado no pacote.",
+  lot_cost_frozen:
+    "Lote de devolução: o custo vem da venda original e não pode ser religado.",
   package_receipt_required:
     "As unidades restantes estão declaradas em pacote: escolha o pacote no recebimento."
 };

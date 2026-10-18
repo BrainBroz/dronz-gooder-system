@@ -468,7 +468,9 @@ export async function lotSuggestion(lojaId: string, id: string) {
           quantidade: take,
           entradaEm: lot.createdAt,
           pedido: lot.pedidoItem?.pedido.numeroPedido ?? null,
-          custoConhecido: !!lot.pedidoItem || !!lot.baixaOrigem?.custoUnitario
+          custoConhecido: lot.baixaOrigem
+            ? lot.baixaOrigem.custoUnitario !== null
+            : !!lot.pedidoItem
         });
       }
       return {

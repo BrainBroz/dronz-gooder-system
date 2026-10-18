@@ -332,6 +332,10 @@ Continuam abertas e bloqueiam somente seus batches: vigência de cotação (`E-2
   - Lote de devolução: aponta para a baixa original (`MovimentacaoEstoque.baixaOrigemId`) e herda o custo congelado dela.
   - Relatório `costs`: filtra pela competência do pedido (`dataCompra`), não pela data do lançamento. `competencia=AAAA-MM` aplica o mês de America/Sao_Paulo com fim exclusivo; os outros relatórios recusam o parâmetro.
   - Regra comum de quantidades por posição: `positions/expectations.ts`.
+    - Recebimento antigo sem pacote abate o esperado da posição onde foi registrado.
+    - O pendente nunca passa do que falta receber do item; nenhum vínculo histórico é inventado.
+  - Conteúdo de pacote que diminui devolve o saldo ao destino do pedido, e esse destino também é reivindicado (posição encerrada recusa).
+  - Lote de devolução vale pelo custo congelado da baixa original, mesmo quando ele é desconhecido, e não pode ser religado a item de compra (`lot_cost_frozen`).
 - Identidade física unitária, compensação pós-materialização e anexos de evidência (D-6) são gaps de backend ou schema, não capacidades atuais.
 - As três projeções do contrato de UX não podem ser colapsadas no frontend. Materialização comercial não prova localização física e reembolso econômico não move mercadoria automaticamente.
 

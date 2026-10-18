@@ -55,7 +55,10 @@ export async function lotDiagnosis(lojaId: string, produtoId: string) {
       quantidade: lot.quantidade,
       restante: lot.restante,
       pedidoCompraItemId: lot.pedidoCompraItemId,
-      custoConhecido: !!lot.pedidoCompraItemId || !!lot.baixaOrigem
+      // Lote de devolução vale pelo custo congelado da baixa original, que pode ser desconhecido.
+      custoConhecido: lot.baixaOrigem
+        ? lot.baixaOrigem.custoUnitario !== null
+        : !!lot.pedidoCompraItemId
     })),
     saidasSemLote: await unlottedOutflows(prisma, lojaId, produtoId)
   };
@@ -160,6 +163,8 @@ export function linkLotPurchaseItem(
       });
       if (!lot) throw new AppError(404, "lot_not_found");
       if (lot.pedidoCompraItemId) throw new AppError(409, "lot_already_linked");
+      // O custo do lote de devolução está congelado na baixa original; religar mudaria a história.
+      if (lot.baixaOrigemId) throw new AppError(409, "lot_cost_frozen");
       await tx.$queryRaw`SELECT id FROM "PedidoCompraItem" WHERE id = ${data.pedidoCompraItemId} AND "lojaId" = ${lojaId} FOR UPDATE`;
       const item = await tx.pedidoCompraItem.findFirst({
         where: { id: data.pedidoCompraItemId, lojaId },

@@ -1043,3 +1043,243 @@ describe("auditoria PD (completo): competência dos custos", () => {
     ).toBe(400);
   });
 });
+
+describe("revisão local do Codex (5b1be86): achados corrigidos", () => {
+  it("P1: recebimento antigo sem pacote não faz o item voltar a pendente", async () => {
+    const ctx = await packages();
+    const { pendingAt } = await import("../src/modules/positions/expectations");
+    const { closurePendencies } =
+      await import("../src/modules/positions/positions.service");
+    const { expectationSelect } =
+      await import("../src/modules/positions/expectations");
+    expect((await ctx.content(ctx.a.id, 2)).status).toBe(200);
+    // Dados anteriores à correção: recebimentos na base, sem vínculo com o pacote.
+    await prisma.recebimentoMiami.createMany({
+      data: [1, 2].map(() => ({
+        lojaId: ctx.store.id,
+        pedidoCompraItemId: ctx.data.item.id,
+        quantidadeRecebida: 1,
+        recebidoEm: new Date(),
+        confirmadoPorId: ctx.data.admin.id,
+        posicaoId: ctx.base.id
+      }))
+    });
+    const item = await prisma.pedidoCompraItem.findUniqueOrThrow({
+      where: { id: ctx.data.item.id },
+      select: expectationSelect
+    });
+    expect(pendingAt(item, ctx.base.id)).toBe(0);
+    // Mesmo com o pacote redirecionado depois, o item já foi todo recebido: hotel sem pendência.
+    await prisma.pacoteExterno.update({
+      where: { id: ctx.a.id },
+      data: { destinoPosicaoId: ctx.hotel.id }
+    });
+    expect(await closurePendencies(prisma, ctx.hotel.id)).toEqual([]);
+  });
+
+  it("P1: recebimento antigo parcial deixa só o que falta", async () => {
+    const ctx = await packages();
+    const { pendingAt, expectationSelect } =
+      await import("../src/modules/positions/expectations");
+    expect(
+      (
+        await ctx.put(ctx.a.id, "destination", {
+          posicaoId: ctx.hotel.id,
+          motivo: "Hotel"
+        })
+      ).status
+    ).toBe(200);
+    expect((await ctx.content(ctx.a.id, 2)).status).toBe(200);
+    await prisma.recebimentoMiami.create({
+      data: {
+        lojaId: ctx.store.id,
+        pedidoCompraItemId: ctx.data.item.id,
+        quantidadeRecebida: 1,
+        recebidoEm: new Date(),
+        confirmadoPorId: ctx.data.admin.id,
+        posicaoId: ctx.base.id
+      }
+    });
+    const item = await prisma.pedidoCompraItem.findUniqueOrThrow({
+      where: { id: ctx.data.item.id },
+      select: expectationSelect
+    });
+    expect(pendingAt(item, ctx.hotel.id)).toBe(1);
+  });
+
+  it("P1 (2): reduzir conteúdo não devolve saldo a destino de pedido já encerrado", async () => {
+    const ctx = await packages();
+    const { transition } =
+      await import("../src/modules/positions/positions.service");
+    const base = ctx.base;
+    const orderDest = await prisma.posicaoOperacional.create({
+      data: {
+        localId: base.localId,
+        codigo: `AUD-ORD-${randomUUID()}`,
+        nome: "Destino do pedido",
+        tipo: "TEMPORARIA",
+        status: "ATIVA",
+        inicioEm: new Date(Date.now() - 86_400_000),
+        fimEm: new Date(Date.now() + 86_400_000)
+      }
+    });
+    cleanups.push(async () => {
+      await prisma.pedidoCompra.update({
+        where: { id: ctx.data.order.id },
+        data: { destinoPosicaoId: base.id }
+      });
+      await prisma.posicaoOperacional.delete({ where: { id: orderDest.id } });
+    });
+    await prisma.pedidoCompra.update({
+      where: { id: ctx.data.order.id },
+      data: { destinoPosicaoId: orderDest.id }
+    });
+    expect(
+      (
+        await ctx.put(ctx.a.id, "destination", {
+          posicaoId: ctx.hotel.id,
+          motivo: "Hotel"
+        })
+      ).status
+    ).toBe(200);
+    expect((await ctx.content(ctx.a.id, 2)).status).toBe(200);
+    // Todas as unidades vão para o hotel: o destino do pedido pode encerrar.
+    expect((await transition(ctx.admin, orderDest.id, "ENCERRAR")).status).toBe(
+      "ENCERRADA"
+    );
+    expect((await ctx.content(ctx.a.id, 1)).body.error).toBe("position_closed");
+    expect((await ctx.content(ctx.a.id, 0)).body.error).toBe("position_closed");
+    expect(await assigned(ctx.data.item.id)).toBe(2);
+  });
+
+  it("P2: lote de devolução de custo desconhecido segue sem custo e não pode ser religado", async () => {
+    const store = await prisma.loja.findUniqueOrThrow({
+      where: { slug: "dronz" }
+    });
+    const g = await createOperationalFixture(prisma, store.id);
+    const stock = await prisma.estoque.create({
+      data: { lojaId: store.id, produtoId: g.product.id, quantidadeFisica: 1 }
+    });
+    const unknown = await prisma.movimentacaoEstoque.create({
+      data: {
+        lojaId: store.id,
+        produtoId: g.product.id,
+        estoqueId: stock.id,
+        tipo: "ADJUSTMENT_POSITIVE",
+        motivo: "MANUAL_CORRECTION",
+        quantidade: 1,
+        quantidadeAnterior: 0,
+        quantidadePosterior: 1,
+        responsavelId: g.admin.id,
+        observacoes: "Lote legado sem custo"
+      }
+    });
+    cleanups.push(async () => {
+      const ids = (
+        await prisma.venda.findMany({
+          where: { itens: { some: { produtoId: g.product.id } } },
+          select: { id: true }
+        })
+      ).map((v) => v.id);
+      await prisma.devolucaoVenda.deleteMany({
+        where: { vendaId: { in: ids } }
+      });
+      await prisma.recebivelVenda.deleteMany({
+        where: { vendaId: { in: ids } }
+      });
+      await prisma.movimentacaoEstoque.updateMany({
+        where: { produtoId: g.product.id },
+        data: { baixaOrigemId: null }
+      });
+      await prisma.baixaVenda.deleteMany({
+        where: { item: { produtoId: g.product.id } }
+      });
+      await prisma.vendaItem.deleteMany({ where: { vendaId: { in: ids } } });
+      await prisma.venda.deleteMany({ where: { id: { in: ids } } });
+      await g.cleanup();
+    });
+    const app = createApp();
+    const login = await request(app)
+      .post("/auth/login")
+      .send({ email: "admin@example.com", password: "change-me" });
+    const headers = {
+      Authorization: `Bearer ${login.body.accessToken}`,
+      "x-store-id": store.id
+    };
+    const post = (url: string, body: object) =>
+      request(app)
+        .post(url)
+        .set(headers)
+        .set("idempotency-key", randomUUID())
+        .send(body);
+    const sale = (
+      await post("/sales", {
+        canal: "OUTRO",
+        dataVenda: new Date().toISOString(),
+        moeda: "USD",
+        itens: [{ produtoId: g.product.id, quantidade: 1, precoUnitario: 150 }]
+      })
+    ).body;
+    expect(
+      (
+        await post(`/sales/${sale.id}/confirm`, {
+          lotes: [
+            {
+              vendaItemId: sale.itens[0].id,
+              movimentoEntradaId: unknown.id,
+              quantidade: 1
+            }
+          ]
+        })
+      ).status
+    ).toBe(200);
+    const ret = (
+      await post(`/sales/${sale.id}/returns`, {
+        vendaItemId: sale.itens[0].id,
+        quantidade: 1,
+        motivo: "Sem custo"
+      })
+    ).body;
+    expect(
+      (
+        await post(`/sales/returns/${ret.id}/check`, {
+          apta: true,
+          condicaoComercial: "NOVO",
+          funcionamento: "FUNCIONAL"
+        })
+      ).status
+    ).toBe(200);
+    const returnLot = await prisma.movimentacaoEstoque.findFirstOrThrow({
+      where: { produtoId: g.product.id, tipo: "RETURN_ENTRY" }
+    });
+    const diagnosis = (
+      await request(app).get(`/inventory/lots/${g.product.id}`).set(headers)
+    ).body;
+    expect(
+      diagnosis.lotes.find(
+        (l: { movimentoEntradaId: string }) =>
+          l.movimentoEntradaId === returnLot.id
+      )
+    ).toMatchObject({ custoConhecido: false });
+    const link = await post(
+      `/inventory/lots/entries/${returnLot.id}/purchase-item`,
+      { pedidoCompraItemId: g.item.id, motivo: "Tentar religar" }
+    );
+    expect(link.body.error).toBe("lot_cost_frozen");
+    const again = (
+      await post("/sales", {
+        canal: "OUTRO",
+        dataVenda: new Date().toISOString(),
+        moeda: "USD",
+        itens: [{ produtoId: g.product.id, quantidade: 1, precoUnitario: 150 }]
+      })
+    ).body;
+    const suggestion = (
+      await request(app).get(`/sales/${again.id}/lot-suggestion`).set(headers)
+    ).body;
+    expect(suggestion.itens[0].lotes[0]).toMatchObject({
+      movimentoEntradaId: returnLot.id,
+      custoConhecido: false
+    });
+  });
+});

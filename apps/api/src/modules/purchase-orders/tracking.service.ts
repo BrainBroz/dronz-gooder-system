@@ -320,12 +320,25 @@ export async function setPackageItems(
       })
     )
       throw new AppError(409, "already_received");
-    // Conteúdo declarado vira pendência no destino efetivo do pacote.
-    if (input.itens.length)
-      await claimOpenPosition(
-        tx,
-        pkg.destinoPosicaoId ?? order.destinoPosicao!.id
-      );
+    // Conteúdo declarado vira pendência no destino efetivo do pacote; o que sai do pacote (redução ou
+    // remoção) volta a ser esperado no destino do pedido. Toda posição que ganha saldo é reivindicada.
+    const before = new Map(
+      pkg.itens.map((line) => [line.pedidoCompraItemId, line.quantidade])
+    );
+    const grows = input.itens.some(
+      (entry) => entry.quantidade > (before.get(entry.pedidoCompraItemId) ?? 0)
+    );
+    const shrinks = [...before].some(
+      ([itemId, quantidade]) =>
+        quantidade >
+        (input.itens.find((entry) => entry.pedidoCompraItemId === itemId)
+          ?.quantidade ?? 0)
+    );
+    const claims = new Set<string>();
+    if (grows) claims.add(pkg.destinoPosicaoId ?? order.destinoPosicao!.id);
+    if (shrinks) claims.add(order.destinoPosicao!.id);
+    for (const posicaoId of [...claims].sort())
+      await claimOpenPosition(tx, posicaoId);
     const items = await tx.pedidoCompraItem.findMany({
       where: { id: { in: ids }, lojaId, pedidoCompraId },
       include: { pacotes: { where: { pacoteExternoId: { not: pacoteId } } } }
