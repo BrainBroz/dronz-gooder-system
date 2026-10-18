@@ -1,13 +1,32 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { AppError } from "../../lib/app-error";
 
-export async function dashboard(lojaId: string, from?: Date, to?: Date) {
+// Soma valores só dentro da mesma moeda; moedas diferentes nunca são somadas entre si (B18).
+const byCurrency = (rows: { moeda: string; valor: Prisma.Decimal }[]) => {
+  const totals = new Map<string, Prisma.Decimal>();
+  for (const row of rows)
+    totals.set(
+      row.moeda,
+      (totals.get(row.moeda) ?? new Prisma.Decimal(0)).plus(row.valor)
+    );
+  return Object.fromEntries(
+    [...totals].map(([moeda, valor]) => [moeda, valor.toFixed(2)])
+  );
+};
+
+export async function dashboard(
+  lojaId: string,
+  from?: Date,
+  to?: Date,
+  financial = false
+) {
   const date = from || to ? { gte: from, lte: to } : undefined;
   const [orders, openTrips, pendingReceiving, stocks, payments, products] =
     await Promise.all([
       prisma.pedidoCompra.findMany({
         where: { lojaId, dataCompra: date },
-        select: { status: true, total: true }
+        select: { status: true, total: true, moeda: true }
       }),
       prisma.viagem.count({
         where: {
@@ -31,7 +50,7 @@ export async function dashboard(lojaId: string, from?: Date, to?: Date) {
       }),
       prisma.pagamento.findMany({
         where: { lojaId, createdAt: date },
-        select: { valor: true, status: true, estornoDeId: true }
+        select: { valor: true, status: true, estornoDeId: true, moeda: true }
       }),
       prisma.produto.findMany({ where: { lojaId }, select: { markup: true } })
     ]);
@@ -44,7 +63,10 @@ export async function dashboard(lojaId: string, from?: Date, to?: Date) {
   return {
     orders: {
       count: orders.length,
-      total: orders.reduce((s, x) => s + Number(x.total), 0),
+      // Valores só com acesso financeiro; null indica ausência de permissão, não zero.
+      total: financial
+        ? byCurrency(orders.map((x) => ({ moeda: x.moeda, valor: x.total })))
+        : null,
       byStatus
     },
     openTrips,
@@ -60,9 +82,9 @@ export async function dashboard(lojaId: string, from?: Date, to?: Date) {
       ).length
     },
     payments: {
-      paid: payments
-        .filter((x) => !x.estornoDeId)
-        .reduce((s, x) => s + Number(x.valor), 0),
+      paid: financial
+        ? byCurrency(payments.filter((x) => !x.estornoDeId))
+        : null,
       pending: payments.filter(
         (x) => x.status === "PENDING" || x.status === "PARTIAL"
       ).length
@@ -75,8 +97,21 @@ type ReportFilters = { from?: Date; to?: Date; status?: string };
 export async function report(
   lojaId: string,
   type: string,
-  filters: ReportFilters = {}
+  filters: ReportFilters = {},
+  financial = false
 ) {
+  const productSelect = {
+    id: true,
+    lojaId: true,
+    categoriaId: true,
+    codigo: true,
+    nome: true,
+    slug: true,
+    descricao: true,
+    peso: true,
+    ativo: true,
+    ...(financial ? { precoVenda: true, markup: true } : {})
+  } satisfies Prisma.ProdutoSelect;
   const period =
     filters.from || filters.to
       ? { gte: filters.from, lte: filters.to }
@@ -175,12 +210,12 @@ export async function report(
     case "inventory":
       return prisma.estoque.findMany({
         where: { lojaId, createdAt: period },
-        include: { produto: true }
+        include: { produto: { select: productSelect } }
       });
     case "movements":
       return prisma.movimentacaoEstoque.findMany({
         where: { lojaId, createdAt: period },
-        include: { produto: true },
+        include: { produto: { select: productSelect } },
         orderBy: { createdAt: "desc" }
       });
     case "payments":
@@ -212,15 +247,31 @@ export async function report(
         where: { lojaId },
         include: {
           pedidoCompraItens: {
-            include: { custosRateados: true },
+            include: {
+              custosRateados: {
+                include: { custo: { include: { cotacaoCambio: true } } }
+              },
+              pedido: { select: { moeda: true } }
+            },
             orderBy: { createdAt: "desc" },
             take: 1
           }
         }
       });
       return products.map((product) => {
-        const cost = product.pedidoCompraItens[0]?.custosRateados[0];
-        const custo = cost ? Number(cost.custoTotalUnitario) : null;
+        const item = product.pedidoCompraItens[0];
+        const cost = item?.custosRateados[0];
+        const rate = cost?.custo.cotacaoCambio;
+        // Preço de venda é BRL: custo em outra moeda só entra convertido pelo câmbio registrado.
+        const custo = !cost
+          ? null
+          : item.pedido.moeda === "BRL"
+            ? Number(cost.custoTotalUnitario)
+            : rate &&
+                rate.moedaOrigem === item.pedido.moeda &&
+                rate.moedaDestino === "BRL"
+              ? Number(cost.custoTotalUnitario.mul(rate.valor))
+              : null;
         const venda = Number(product.precoVenda);
         return {
           id: product.id,
@@ -229,6 +280,7 @@ export async function report(
           nome: product.nome,
           precoVenda: product.precoVenda,
           custoTotalUnitario: custo,
+          moedaCustoOriginal: item?.pedido.moeda ?? null,
           markup: custo && venda > 0 ? ((venda - custo) / custo) * 100 : null,
           margem: custo && venda > 0 ? ((venda - custo) / venda) * 100 : null,
           precoExibicao: venda === 0 ? "A definir" : product.precoVenda

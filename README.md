@@ -10,6 +10,9 @@ Status atual:
 - catálogo, Fornecedores e Pedidos Operacionais isolados por loja;
 - Compras Unificadas com staging global controlada, atribuição quantitativa e materialização independente por loja;
 - UI-3C, logística, recebimento, entrada definitiva, estoque, financeiro manual, Dashboard e Relatórios;
+- posições operacionais, remessas, recebimento parcial e Home operacional;
+- revisão humana de evidências multicanal, adapter eBay Buyer implementado (desabilitado até configuração segura) e painel mensal com CSV;
+- contas/faturas e conciliação financeira manual, vendas por lote e indicadores com acesso financeiro controlado;
 - migrations e testes de integração usam PostgreSQL real.
 
 ## Stack
@@ -64,18 +67,20 @@ implementador e revisores está em
 
 ## Roadmap
 
-O roadmap oficial está em `docs/PROJECT_CONTEXT_MASTER.md`. Dronz e Gooder usam marketplaces como compradores. O Batch 9 documenta um contrato multicanal: APIs buyer, e-mail autorizado, planilha e entrada manual produzem evidências imutáveis, eventos versionados e candidatos reconciliados antes da aprovação humana, atribuição e materialização. Um score explicável de confiança poderá priorizar a revisão, mas nunca aprovar ou operar automaticamente. O Gate eBay Buyer comprovou OAuth Production e Trading API `GetOrders` com `OrderRole=Buyer`, pedidos, itens e tracking reais; a especificação sanitizada está em `docs/EBAY_BUYER_SPECIFICATION_V1.md`. A sequência é pipeline comum de evidências, adapter eBay, e-mail autorizado Amazon/eBay, painel mensal com migração controlada da planilha, consolidação de remessas/pacotes e motor de tracking. A Amazon Business API permanece `PENDENTE_DE_ONBOARDING_EXTERNO` e será incorporada futuramente como evidência adicional, sem duplicar compras já criadas por e-mail.
+O roadmap oficial e seus bloqueios estão em `docs/PROJECT_CONTEXT_MASTER.md`. Dronz e Gooder usam marketplaces como compradores. O pipeline multicanal preserva evidências e exige revisão/aprovação humana antes de atribuir e materializar. O score explicável X-03 prioriza a revisão sem autorizar operações. O adapter eBay Buyer implementa Trading API `GetOrders` com `OrderRole=Buyer`; a especificação sanitizada está em `docs/EBAY_BUYER_SPECIFICATION_V1.md`. Painel mensal/CSV, tracking manual, Financeiro, Vendas e Analytics estão implementados. Mailbox autorizada (B12), migração da planilha real e motor de tracking (B15) mantêm dependências específicas. A Amazon Business API permanece `PENDENTE_DE_ONBOARDING_EXTERNO` e será incorporada como evidência adicional, sem duplicar compras já existentes.
 
 ## Itens não implementados ainda
 
-- adapter eBay buyer e futura retomada do adapter Amazon Business buyer após onboarding;
-- e-mail autorizado, reconciliação multicanal e migração da planilha;
-- painel mensal de compras reconciliadas;
+- ativação real do adapter eBay buyer depende de credenciais/configuração segura e homologação da conta;
+- adapter Amazon Business buyer após onboarding externo;
+- ingestão automática de mailbox autorizada (Batch 12) e migração da planilha histórica real;
 - adapters seller Amazon/eBay, adiados até existir necessidade específica de importar vendas recebidas;
 - tracking automático e integrações com transportadoras;
 - PayPal, bancos e cartões como integrações (PAYPAL atual é classificação manual);
 - e-mail e QR Code;
 - exportações PDF e Excel.
+
+Vendas com perdas/saídas antigas que não identificam lote ficam bloqueadas até reconciliação do saldo de origem. Recebimentos parciais são auditados individualmente; sua associação a transações-fonte do B16 permanece bloqueada até existir contrato de entrada financeira compatível. Tracking manual e códigos do marketplace não substituem o motor automático do Batch 15.
 
 ## Produção
 

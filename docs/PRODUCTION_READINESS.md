@@ -1,6 +1,20 @@
 # Prontidão para produção
 
-**Baseline integrada:** `caa148c` — merge da PR #4, incluindo a fila de compras e o drawer de compra manual/externa. A baseline histórica do Batch 8 é `8644188`. A fundação de integração permanece desabilitada para providers reais. O Gate eBay comprovou OAuth Production e Trading API `GetOrders` buyer, inclusive tracking e quota, mas o adapter, a conciliação multicanal completa e a política operacional de sincronização ainda não foram implementados. A Amazon Business Reporting API permanece `PENDENTE_DE_ONBOARDING_EXTERNO`. Publicação continua condicionada à infraestrutura, aos segredos do ambiente e aos riscos abaixo; testes verdes não equivalem à homologação operacional completa.
+**Estado funcional — 2026-10-18:** a linha validada em `5617800` foi preservada e integrada pela PR #5. As PRs #6–#14 acrescentaram posições, remessas, recebimento parcial, Home operacional, revisão multicanal, adapter eBay, painel mensal, tracking manual e Financeiro. Vendas e Analytics são as entregas das PRs #15 e #16; o histórico Git registra seus commits de integração. A ativação real do eBay ainda exige credenciais em referência segura e homologação da conta; Amazon Business permanece `PENDENTE_DE_ONBOARDING_EXTERNO`. Batch 12 (mailbox) e Batch 15 (motor de tracking) continuam bloqueados por dependências externas. Publicação permanece condicionada à infraestrutura e homologação; o ambiente autorizado pelo Product Owner é somente local.
+
+## Correções de auditoria B17/B18 — 2026-10-18
+
+- Confirmação de venda e replay filtram custo/lucro/margem pela permissão atual. O resultado idempotente da confirmação guarda somente a identidade da venda.
+- O saldo dos lotes precisa fechar com o físico antes de sugerir/confirmar venda; perdas/saídas antigas sem origem não recebem custo presumido. A sugestão respeita também as reservas. Reconciliação dessas origens continua pendência específica, sem edição do histórico.
+- Criação e recebimentos exigem chave idempotente; a UI conserva a chave e a data do payload após falha de rede. Recebimentos de vendas não aceitam transações de despesa do B16 como comprovação de entrada.
+- O fluxo mensal deriva as parcelas dos eventos imutáveis `RECEIVE_SALE` do AuditLog (diferença antes/depois e data efetiva), sem deslocar o acumulado para o mês da última parcela.
+- Relatórios de estoque/movimentos retiram preço e markup para usuários sem acesso financeiro. Datas de calendário dos indicadores usam America/Sao_Paulo; timestamps com offset explícito preservam o instante e períodos invertidos são rejeitados.
+- Repetir o cálculo com os mesmos filtros refaz a consulta, inclusive após erro. Os indicadores usam uma transação `REPEATABLE READ` e referência temporal do PostgreSQL para manter receita, estoque e demais leituras no mesmo estado; teste concorrente bloqueia a leitura de vendas enquanto outra transação grava a confirmação.
+- Se o armazenamento da sessão falhar antes do envio, a operação é bloqueada com mensagem explícita. Se falhar só depois de a API confirmar, a UI mantém o sucesso e a identidade confirmada em memória para navegação. Uma recarga completa durante falha total desse armazenamento exige conferir o recebível antes de registrar outra parcela; essa memória não sobrevive ao reinício da página.
+- Migrations e seed são verificados somente em banco exclusivo de testes. Atualização do banco operacional local exige backup verificável, `migrate deploy` e concessão idempotente das novas permissões; o seed não deve ser usado para esse upgrade, pois redefine a senha administrativa.
+- Validação local final: Node 22.23.1, npm 10.9.8, Prisma validate/generate, lint, typecheck e builds API/web passaram. Suíte global: 265 testes API + 230 web = 495, sem ignorados e sem o warning MUI de select vazio. As 44 migrations passaram em banco limpo e a migration B17 passou no upgrade de uma cópia restaurada do banco local com B16. O backup foi restaurado e verificado antes do upgrade. O CI de cada PR é verificado separadamente antes do merge.
+
+As seções datadas abaixo são evidência histórica e não substituem o estado funcional acima.
 
 ## Revalidação local — 2026-10-16
 
@@ -31,7 +45,7 @@
 
 - **Divergência antes da aprovação:** alterações materiais de quantidade, itens, valores, moeda, merchant ou data entre versões da mesma fonte mantêm as evidências e marcam o candidato pendente `COM_DIVERGENCIA`, inclusive quando a versão divergente chega atrasada. O detalhe informa `MATERIAL_DIVERGENCE`, não oferece aprovação e o POST também a rejeita; rejeição humana com motivo permanece possível e sincronizações posteriores não a revertem automaticamente. Candidatos já rejeitados permanecem rejeitados; cancelamento mais recente permanece cancelado mesmo que um snapshot ativo divergente chegue atrasado. Isso não constitui resolução de conflito: conciliação multicanal e aceite humano de divergências ainda faltam, então providers reais continuam desabilitados.
 
-## Segurança
+## Histórico de correções de segurança — 2026-10-16
 
 O Batch 10 agora persiste divergências de evidências em `BuyerReconciliationConflict` e permite consulta paginada e auditada dos tipos e versões envolvidas. A migration preserva vínculos conflitantes anteriores como `LEGACY_UNCLASSIFIED`. Isso torna o bloqueio inspecionável, mas não resolve a divergência nem autoriza aprovação; a decisão humana sobre resolução permanece aberta.
 
@@ -68,7 +82,7 @@ Replay histórico agora preserva o cursor incremental da conexão em falha parci
 4. Execute `npm run typecheck`, `npm run lint`, `npm run test` e `npm run build`.
 5. Inicie a API e valide `GET /health` atrás do proxy HTTPS.
 
-O seed cria dados administrativos e deve ser executado deliberadamente, somente com `SEED_ADMIN_*` definidos para o ambiente correto. O Batch 8 prepara conexões e sincronização explícita por adapters, mas ingestão automática de compras buyer, tracking automático, e-mail operacional, QR Code, PDF e Excel não fazem parte desta versão.
+O seed cria dados administrativos e deve ser executado deliberadamente, somente com `SEED_ADMIN_*` definidos para o ambiente correto. O adapter buyer eBay está implementado e requer ativação/homologação explícitas; tracking automático, mailbox operacional, QR Code, PDF e Excel permanecem fora desta versão.
 
 Referências `env:MARKETPLACE_*` não são credenciais: são ponteiros. Valores devem existir somente no ambiente/secret manager e nunca em banco, logs, respostas ou commits. Dronz e Gooder operam como compradores. Amazon SP-API e eBay Sell Fulfillment são seller-side e permanecem adiados. O Gate eBay validou consentimento, refresh, quota e resposta Production usando `GetOrders` com `OrderRole=Buyer`; os secrets usados no gate ficaram fora do Git, e produção ainda exige secret manager integrado ao `SecretProvider`. Para Amazon, e-mail autorizado é a fonte inicial planejada; a Amazon Business Reporting API permanece `PENDENTE_DE_ONBOARDING_EXTERNO` e será retomada futuramente. Gmail/Outlook exigirão OAuth, escopos mínimos, retenção e privacidade aprovados antes de qualquer ativação.
 

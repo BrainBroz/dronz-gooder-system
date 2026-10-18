@@ -26,7 +26,7 @@ type ItemInput = {
   frete?: number;
 };
 
-const saleInclude = {
+export const saleInclude = {
   itens: {
     include: {
       produto: { select: { id: true, nome: true } },
@@ -40,7 +40,7 @@ type SaleRow = Prisma.VendaGetPayload<{ include: typeof saleInclude }>;
 
 // Receita líquida = bruto − descontos e encargos informados; lucro só quando todo custo baixado
 // está na moeda da venda (direto ou por câmbio registrado). Sem custo conhecido, não há lucro presumido.
-function saleView(sale: SaleRow, includeCost: boolean) {
+export function saleView(sale: SaleRow, includeCost: boolean) {
   let bruto = zero(),
     liquido = zero(),
     custo: Prisma.Decimal | null = zero();

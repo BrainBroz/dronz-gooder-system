@@ -65,6 +65,7 @@ beforeEach(() => vi.restoreAllMocks());
 
 describe("Financeiro B16", () => {
   it("confirma conciliação com o pagamento sugerido, por ação humana", async () => {
+    const errors = vi.spyOn(console, "error");
     mockReads();
     const post = vi.spyOn(api, "post").mockResolvedValue({ data: {} });
     renderWithProviders(<FinancePage />, {
@@ -83,6 +84,11 @@ describe("Financeiro B16", () => {
         expect.anything()
       )
     );
+    expect(
+      errors.mock.calls.filter(([message]) =>
+        String(message).includes("children` must be passed")
+      )
+    ).toHaveLength(0);
   });
 
   it("sem capacidade de conciliar só lê; fatura fechada mostra saldo e permite pagamento parcial", async () => {

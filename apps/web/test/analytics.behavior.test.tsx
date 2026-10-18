@@ -8,11 +8,15 @@ import { ReportsPage } from "../src/pages/ReportsPage";
 import { renderWithProviders } from "./render";
 
 const summary = {
-  orders: { count: 7, total: 1234.5, byStatus: { COMPLETED: 2, CANCELLED: 1 } },
+  orders: {
+    count: 7,
+    total: { USD: "1234.50", BRL: "10.00" },
+    byStatus: { COMPLETED: 2, CANCELLED: 1 }
+  },
   inventory: { available: 9, reserved: 2, zero: 1 },
   openTrips: 3,
   pendingReceiving: 4,
-  payments: { pending: 5, paid: 600 },
+  payments: { pending: 5, paid: { USD: "600.00" } },
   belowMarkup: 6
 };
 const reportLabels: Record<string, string> = {
@@ -40,14 +44,26 @@ describe("Dashboard", () => {
     expect(screen.getByText("Carregando indicadores...")).toBeTruthy();
     resolve({ data: summary });
     await screen.findByText("Pedidos Totais");
-    expect(screen.getAllByText(/Pedidos Totais|Estoque Disponível|Estoque Reservado|Estoque Zerado|Viagens Abertas|Recebimentos Pendentes|Pagamentos Pendentes|Produtos Abaixo do Markup/)).toHaveLength(8);
+    expect(
+      screen.getAllByText(
+        /Pedidos Totais|Estoque Disponível|Estoque Reservado|Estoque Zerado|Viagens Abertas|Recebimentos Pendentes|Pagamentos Pendentes|Produtos Abaixo do Markup/
+      )
+    ).toHaveLength(8);
     expect(screen.getByText("COMPLETED")).toBeTruthy();
     expect(screen.getByText("CANCELLED")).toBeTruthy();
-    expect(screen.getByText("Pedidos Processados").nextElementSibling?.textContent).toBe("3");
+    expect(
+      screen.getByText("Pedidos Processados").nextElementSibling?.textContent
+    ).toBe("3");
+    expect(
+      screen.getByText("Total Investido").nextElementSibling?.textContent
+    ).toBe("USD 1.234,5 · BRL 10");
     expect(vi.mocked(api.get).mock.calls[0]).toEqual([
       "/analytics/dashboard",
       {
-        headers: { Authorization: "Bearer access-test", "x-store-id": "store-dronz" }
+        headers: {
+          Authorization: "Bearer access-test",
+          "x-store-id": "store-dronz"
+        }
       }
     ]);
   });
@@ -55,15 +71,32 @@ describe("Dashboard", () => {
   it("mostra erro", async () => {
     vi.mocked(api.get).mockRejectedValue(new Error("offline"));
     renderWithProviders(<DashboardPage />);
-    expect(await screen.findByText("Falha ao carregar dados do dashboard")).toBeTruthy();
+    expect(
+      await screen.findByText("Falha ao carregar dados do dashboard")
+    ).toBeTruthy();
   });
 
   it("mostra breakdown vazio sem inventar pedidos", async () => {
     vi.mocked(api.get).mockResolvedValue({
-      data: { ...summary, orders: { count: 0, total: 0, byStatus: {} } }
+      data: { ...summary, orders: { count: 0, total: {}, byStatus: {} } }
     });
     renderWithProviders(<DashboardPage />);
     expect(await screen.findByText("Nenhum pedido registrado")).toBeTruthy();
+  });
+
+  it("sem acesso financeiro não mostra valores como zero", async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      data: {
+        ...summary,
+        orders: { ...summary.orders, total: null },
+        payments: { pending: 5, paid: null }
+      }
+    });
+    renderWithProviders(<DashboardPage />);
+    expect(
+      (await screen.findByText("Total Investido")).nextElementSibling
+        ?.textContent
+    ).toBe("Sem acesso financeiro");
   });
 });
 
@@ -77,9 +110,17 @@ describe("Relatórios", () => {
   it("mostra loading, vazio e envia loja/filtros de data", async () => {
     vi.mocked(api.get).mockResolvedValue({ data: [] });
     renderWithProviders(<ReportsPage />);
-    expect(await screen.findByText("Nenhum registro encontrado para os filtros selecionados.")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("De"), { target: { value: "2026-01-02" } });
-    fireEvent.change(screen.getByLabelText("Até"), { target: { value: "2026-01-31" } });
+    expect(
+      await screen.findByText(
+        "Nenhum registro encontrado para os filtros selecionados."
+      )
+    ).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("De"), {
+      target: { value: "2026-01-02" }
+    });
+    fireEvent.change(screen.getByLabelText("Até"), {
+      target: { value: "2026-01-31" }
+    });
     await waitFor(() => {
       const last = vi.mocked(api.get).mock.calls.at(-1);
       expect(last?.[0]).toBe("/analytics/reports/purchase-orders");
@@ -131,8 +172,171 @@ describe("Relatórios", () => {
     await user.click(option);
     await waitFor(() =>
       expect(
-        vi.mocked(api.get).mock.calls.some(([url]) => url === `/analytics/reports/${type}`)
+        vi
+          .mocked(api.get)
+          .mock.calls.some(([url]) => url === `/analytics/reports/${type}`)
       ).toBe(true)
     );
+  });
+});
+
+describe("Indicadores B18", () => {
+  it("calcular outra vez com os mesmos filtros busca resultados novos", async () => {
+    const values = ["123", "456"];
+    vi.mocked(api.get).mockImplementation(async (url) =>
+      url === "/analytics/indicators"
+        ? {
+            data: {
+              versao: "B18-v1",
+              referenciaEm: "2032-03-01T03:00:00Z",
+              definicoes: [],
+              linhas: [
+                {
+                  codigo: "COMPRAS_PEDIDOS",
+                  dimensao: "CONFIRMED",
+                  moeda: null,
+                  valor: values.shift(),
+                  amostra: 1,
+                  status: "OK"
+                }
+              ]
+            }
+          }
+        : { data: [] }
+    );
+    renderWithProviders(<ReportsPage />, {
+      permissions: ["ANALYTICS_VISUALIZAR"]
+    });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Calcular indicadores" })
+    );
+    await screen.findByText("123");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Calcular indicadores" })
+    );
+    await screen.findByText("456");
+    expect(
+      vi
+        .mocked(api.get)
+        .mock.calls.filter(([url]) => url === "/analytics/indicators")
+    ).toHaveLength(2);
+  });
+
+  it("repetir os mesmos filtros após erro permite recuperar os indicadores", async () => {
+    let failure = true;
+    vi.mocked(api.get).mockImplementation(async (url) => {
+      if (url !== "/analytics/indicators") return { data: [] };
+      if (failure) {
+        failure = false;
+        throw new Error("network");
+      }
+      return {
+        data: {
+          versao: "B18-v1",
+          referenciaEm: "2032-03-01T03:00:00Z",
+          definicoes: [],
+          linhas: [
+            {
+              codigo: "COMPRAS_PEDIDOS",
+              dimensao: "CONFIRMED",
+              moeda: null,
+              valor: "456",
+              amostra: 1,
+              status: "OK"
+            }
+          ]
+        }
+      };
+    });
+    renderWithProviders(<ReportsPage />, {
+      permissions: ["ANALYTICS_VISUALIZAR"]
+    });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Calcular indicadores" })
+    );
+    await screen.findByText("Falha ao calcular indicadores.");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Calcular indicadores" })
+    );
+    await screen.findByText("456");
+    expect(screen.queryByText("Falha ao calcular indicadores.")).toBeNull();
+  });
+  it("envia os dias selecionados para conversão pelo backend no fuso operacional", async () => {
+    vi.mocked(api.get).mockImplementation(async (url) =>
+      url === "/analytics/indicators"
+        ? {
+            data: {
+              versao: "B18-v1",
+              referenciaEm: "2032-03-01T03:00:00Z",
+              definicoes: [],
+              linhas: []
+            }
+          }
+        : { data: [] }
+    );
+    renderWithProviders(<ReportsPage />, {
+      permissions: ["ANALYTICS_VISUALIZAR"]
+    });
+    fireEvent.change(screen.getByLabelText("Indicadores de"), {
+      target: { value: "2032-02-01" }
+    });
+    fireEvent.change(screen.getByLabelText("Indicadores até (exclusivo)"), {
+      target: { value: "2032-03-01" }
+    });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Calcular indicadores" })
+    );
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith("/analytics/indicators", {
+        headers: {
+          Authorization: "Bearer access-test",
+          "x-store-id": "store-dronz"
+        },
+        params: { from: "2032-02-01", to: "2032-03-01" }
+      })
+    );
+  });
+  it("calcula sob demanda, mostra 'Sem amostra' e não oferece CSV sem ANALYTICS_EXPORTAR", async () => {
+    vi.mocked(api.get).mockImplementation(async (url) =>
+      url === "/analytics/indicators"
+        ? {
+            data: {
+              versao: "B18-v1",
+              referenciaEm: "2032-02-01T00:00:00.000Z",
+              definicoes: [
+                {
+                  codigo: "LEAD_TIME_COMPRA_ENTRADA",
+                  descricao: "Dias até a entrada",
+                  formula: "média"
+                }
+              ],
+              linhas: [
+                {
+                  codigo: "LEAD_TIME_COMPRA_ENTRADA",
+                  dimensao: null,
+                  moeda: null,
+                  valor: null,
+                  amostra: 0,
+                  status: "SEM_AMOSTRA"
+                }
+              ]
+            }
+          }
+        : { data: [] }
+    );
+    renderWithProviders(<ReportsPage />, {
+      permissions: ["ANALYTICS_VISUALIZAR"]
+    });
+    expect(
+      vi
+        .mocked(api.get)
+        .mock.calls.some(([url]) => url === "/analytics/indicators")
+    ).toBe(false);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Calcular indicadores" })
+    );
+    expect(await screen.findByText("Sem amostra")).toBeTruthy();
+    expect(screen.getByText("Dias até a entrada")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Exportar CSV" })).toBeNull();
   });
 });

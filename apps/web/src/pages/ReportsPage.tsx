@@ -5,6 +5,7 @@ import { PageContainer } from "../components/ui/PageContainer";
 import { PageHeader } from "../components/ui/PageHeader";
 import { useAuthStore } from "../stores/auth";
 import { useReport, type ReportType } from "../hooks/useReport";
+import { IndicatorsPanel } from "../components/IndicatorsPanel";
 
 const reportConfigs: Array<{ value: ReportType; label: string; description: string }> = [
   { value: "purchase-orders", label: "Pedidos de Compra", description: "Lista de pedidos com status e totais" },
@@ -49,6 +50,8 @@ function ReportsContent() {
   return (
     <Stack gap={{ xs: 2.5, md: 3.5 }}>
       <PageHeader title="Relatórios" description="Dados operacionais por tipo e período" />
+
+      <IndicatorsPanel />
 
       <ContentCard title="Seleção de Relatório">
         <Stack gap={2}>

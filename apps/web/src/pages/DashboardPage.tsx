@@ -23,16 +23,24 @@ function DashboardContent() {
       ).data
   });
 
-  const formatNumber = (n: number | undefined) => {
-    if (!n) return "0";
-    return n.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+  // Cada moeda aparece separada; null significa sem acesso financeiro, não zero.
+  const formatByCurrency = (totals: Record<string, string> | null | undefined) => {
+    if (totals === null) return "Sem acesso financeiro";
+    const entries = Object.entries(totals ?? {});
+    if (!entries.length) return "0";
+    return entries
+      .map(
+        ([currency, value]) =>
+          `${currency} ${Number(value).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}`
+      )
+      .join(" · ");
   };
 
   const indicadores = [
     {
       title: "Pedidos Totais",
       value: summary.data?.orders.count,
-      subtitle: `Total: ${formatNumber(summary.data?.orders.total)}`
+      subtitle: `Total: ${formatByCurrency(summary.data?.orders.total)}`
     },
     {
       title: "Estoque Disponível",
@@ -156,7 +164,7 @@ function DashboardContent() {
                     Total Investido
                   </Typography>
                   <Typography variant="h6">
-                    {formatNumber(summary.data.orders.total)}
+                    {formatByCurrency(summary.data.orders.total)}
                   </Typography>
                 </Box>
                 <Box>
@@ -164,7 +172,7 @@ function DashboardContent() {
                     Pagamentos Confirmados
                   </Typography>
                   <Typography variant="h6">
-                    {formatNumber(summary.data.payments.paid)}
+                    {formatByCurrency(summary.data.payments.paid)}
                   </Typography>
                 </Box>
                 <Box>

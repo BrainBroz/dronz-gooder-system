@@ -1,6 +1,7 @@
 import { Prisma, type PlataformaCompraExterna } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { AppError } from "../../lib/app-error";
+import { zonedDayStart } from "../../lib/calendar";
 
 // Batch 13 (contrato buyer §9): projeção dinâmica das compras importadas por competência
 // `dataPedido`, sem tabela paralela. Moedas nunca são somadas entre si; custos de pedido sem
@@ -25,37 +26,9 @@ const money = (value: bigint) => {
   return `${negative ? "-" : ""}${abs / 100n}.${(abs % 100n).toString().padStart(2, "0")}`;
 };
 
-function zoneOffsetMs(instant: number, timeZone: string) {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      hourCycle: "h23",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit"
-    })
-      .formatToParts(new Date(instant))
-      .map((part) => [part.type, part.value])
-  );
-  return (
-    Date.UTC(
-      +parts.year!,
-      +parts.month! - 1,
-      +parts.day!,
-      +parts.hour!,
-      +parts.minute!,
-      +parts.second!
-    ) - instant
-  );
-}
 // Início do mês local (meia-noite no fuso) em UTC.
-const localMonthStart = (year: number, month: number, timeZone: string) => {
-  const guess = Date.UTC(year, month - 1, 1);
-  return new Date(guess - zoneOffsetMs(guess, timeZone));
-};
+const localMonthStart = (year: number, month: number, timeZone: string) =>
+  zonedDayStart(year, month, 1, timeZone);
 export function competenceRange(year: number, month: number) {
   if (
     !Number.isInteger(year) ||
