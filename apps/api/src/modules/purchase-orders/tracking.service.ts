@@ -248,8 +248,30 @@ export async function setPackageDestination(
       }
     });
     if (!pkg) throw new AppError(404, "package_not_found");
-    // Novo destino efetivo (do pacote, ou do pedido ao voltar ao padrão) recebe a pendência.
-    await claimOpenPosition(tx, input.posicaoId ?? order.destinoPosicao!.id);
+    // O pacote é físico e pode ter linhas das duas lojas. Trocar o destino muda o que cada item pode
+    // receber e onde: toca as linhas dos itens (ordem fixa) para serializar com recebimentos.
+    const lines = await tx.pacoteItem.findMany({
+      where: { pacoteExternoId: pacoteId },
+      select: {
+        pedidoCompraItemId: true,
+        item: { select: { pedido: { select: { destinoPosicaoId: true } } } }
+      }
+    });
+    for (const itemId of [
+      ...new Set(lines.map((line) => line.pedidoCompraItemId))
+    ].sort())
+      await tx.$executeRaw`UPDATE "PedidoCompraItem" SET "updatedAt" = (now() AT TIME ZONE 'UTC') WHERE id = ${itemId}`;
+    // Quem passa a esperar o pacote: a posição informada ou, ao voltar ao padrão, o destino do pedido
+    // de cada item presente no pacote (de qualquer loja).
+    const claims = input.posicaoId
+      ? [input.posicaoId]
+      : [
+          ...new Set([
+            order.destinoPosicao!.id,
+            ...lines.map((line) => line.item.pedido.destinoPosicaoId)
+          ])
+        ].sort();
+    for (const posicaoId of claims) await claimOpenPosition(tx, posicaoId);
     if (
       await tx.recebimentoMiami.count({
         where: {
@@ -310,8 +332,10 @@ export async function setPackageItems(
     const lockIds = [
       ...new Set([...ids, ...pkg.itens.map((line) => line.pedidoCompraItemId)])
     ].sort();
+    // UPDATE (e não só FOR UPDATE): um recebimento Serializable que esperava esta linha falha por
+    // serialização ao retomar, em vez de validar contra o conteúdo antigo.
     for (const itemId of lockIds)
-      await tx.$queryRaw`SELECT id FROM "PedidoCompraItem" WHERE id = ${itemId} AND "lojaId" = ${lojaId} FOR UPDATE`;
+      await tx.$executeRaw`UPDATE "PedidoCompraItem" SET "updatedAt" = (now() AT TIME ZONE 'UTC') WHERE id = ${itemId} AND "lojaId" = ${lojaId}`;
     if (
       await tx.recebimentoMiami.count({
         where: {

@@ -74,7 +74,7 @@ function validTimezone(timezone: string) {
 // outra transação e falha por serialização (409), e a nova tentativa enxerga a pendência.
 export async function claimOpenPosition(db: Db, posicaoId: string) {
   const claimed =
-    await db.$executeRaw`UPDATE "PosicaoOperacional" SET "updatedAt" = now() WHERE id = ${posicaoId} AND status NOT IN ('ENCERRADA', 'CANCELADA')`;
+    await db.$executeRaw`UPDATE "PosicaoOperacional" SET "updatedAt" = (now() AT TIME ZONE 'UTC') WHERE id = ${posicaoId} AND status NOT IN ('ENCERRADA', 'CANCELADA')`;
   if (!claimed) {
     const exists = await db.posicaoOperacional.count({
       where: { id: posicaoId }

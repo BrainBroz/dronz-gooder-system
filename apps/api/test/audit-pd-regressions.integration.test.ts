@@ -1283,3 +1283,193 @@ describe("revisão local do Codex (5b1be86): achados corrigidos", () => {
     });
   });
 });
+
+describe("revisão local do Codex (24eb581): achados corrigidos", () => {
+  it("P1: recebimento concorrente com edição de conteúdo não valida contra o conteúdo antigo", async () => {
+    const ctx = await packages();
+    const { confirmMiami } =
+      await import("../src/modules/logistics/logistics.service");
+    const { setPackageItems } =
+      await import("../src/modules/purchase-orders/tracking.service");
+    expect(
+      (
+        await ctx.put(ctx.a.id, "destination", {
+          posicaoId: ctx.hotel.id,
+          motivo: "Hotel"
+        })
+      ).status
+    ).toBe(200);
+    // setPackageItems toca (UPDATE) a linha do item, não só trava.
+    const before = (
+      await prisma.pedidoCompraItem.findUniqueOrThrow({
+        where: { id: ctx.data.item.id }
+      })
+    ).updatedAt;
+    await setPackageItems(
+      ctx.store.id,
+      ctx.data.admin.id,
+      ctx.data.order.id,
+      ctx.a.id,
+      {
+        itens: [{ pedidoCompraItemId: ctx.data.item.id, quantidade: 1 }],
+        motivo: "Toque"
+      }
+    );
+    expect(
+      (
+        await prisma.pedidoCompraItem.findUniqueOrThrow({
+          where: { id: ctx.data.item.id }
+        })
+      ).updatedAt > before
+    ).toBe(true);
+    await prisma.pacoteItem.deleteMany({
+      where: { pedidoCompraItemId: ctx.data.item.id }
+    });
+    // Edição em andamento (mesmo efeito de setPackageItems): toca a linha do item e declara as 2 unidades.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let holding!: () => void;
+    const held = new Promise<void>((resolve) => (holding = resolve));
+    const editor = prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`UPDATE "PedidoCompraItem" SET "updatedAt" = (now() AT TIME ZONE 'UTC') WHERE id = ${ctx.data.item.id}`;
+        await tx.pacoteItem.create({
+          data: {
+            lojaId: ctx.store.id,
+            pacoteExternoId: ctx.a.id,
+            pedidoCompraItemId: ctx.data.item.id,
+            quantidade: 2
+          }
+        });
+        holding();
+        await gate;
+      },
+      { timeout: 20_000 }
+    );
+    await held;
+    // Pelo conteúdo antigo (nada em pacote), receber 1 unidade sem pacote na base seria válido.
+    const receipt = confirmMiami(
+      ctx.store.id,
+      ctx.admin,
+      {
+        pedidoCompraItemId: ctx.data.item.id,
+        quantidadeRecebida: 1,
+        recebidoEm: new Date()
+      },
+      randomUUID()
+    ).then(
+      () => "accepted",
+      (error: { code?: string }) => error.code
+    );
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const [{ n }] = await prisma.$queryRaw<
+        { n: number }[]
+      >`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%PedidoCompraItem%FOR UPDATE%'`;
+      if (n > 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    release();
+    await editor;
+    expect(await receipt).toBe("concurrent_modification");
+    // Nova tentativa enxerga o conteúdo novo e exige o pacote.
+    await expect(
+      confirmMiami(
+        ctx.store.id,
+        ctx.admin,
+        {
+          pedidoCompraItemId: ctx.data.item.id,
+          quantidadeRecebida: 1,
+          recebidoEm: new Date()
+        },
+        randomUUID()
+      )
+    ).rejects.toMatchObject({ code: "package_receipt_required" });
+    expect(
+      await prisma.recebimentoMiami.count({
+        where: { pedidoCompraItemId: ctx.data.item.id }
+      })
+    ).toBe(0);
+  });
+
+  it("P1: limpar destino de pacote compartilhado valida o destino do pedido de cada loja", async () => {
+    const ctx = await packages();
+    const { transition } =
+      await import("../src/modules/positions/positions.service");
+    const gooderStore = await prisma.loja.findUniqueOrThrow({
+      where: { slug: "gooder" }
+    });
+    const gooder = await createOperationalFixture(prisma, gooderStore.id);
+    const gooderHotel = await prisma.posicaoOperacional.create({
+      data: {
+        localId: ctx.base.localId,
+        codigo: `AUD-G-${randomUUID()}`,
+        nome: "Hotel Gooder",
+        tipo: "TEMPORARIA",
+        status: "ATIVA",
+        inicioEm: new Date(Date.now() - 86_400_000),
+        fimEm: new Date(Date.now() + 86_400_000)
+      }
+    });
+    const purchaseId = (
+      await prisma.pedidoCompra.findUniqueOrThrow({
+        where: { id: ctx.data.order.id }
+      })
+    ).compraImportadaId!;
+    await prisma.pedidoCompra.update({
+      where: { id: gooder.order.id },
+      data: { compraImportadaId: purchaseId, destinoPosicaoId: gooderHotel.id }
+    });
+    cleanups.push(async () => {
+      await prisma.pacoteItem.deleteMany({
+        where: { pedidoCompraItemId: gooder.item.id }
+      });
+      await prisma.pedidoCompra.update({
+        where: { id: gooder.order.id },
+        data: {
+          compraImportadaId: null,
+          destinoPosicaoId: "posicao-miami-base"
+        }
+      });
+      await gooder.cleanup();
+      await prisma.posicaoOperacional.delete({ where: { id: gooderHotel.id } });
+    });
+    // Pacote A vai para o hotel da Dronz com todas as unidades das duas lojas.
+    expect(
+      (
+        await ctx.put(ctx.a.id, "destination", {
+          posicaoId: ctx.hotel.id,
+          motivo: "Hotel"
+        })
+      ).status
+    ).toBe(200);
+    expect((await ctx.content(ctx.a.id, 2)).status).toBe(200);
+    await prisma.pacoteItem.create({
+      data: {
+        lojaId: gooderStore.id,
+        pacoteExternoId: ctx.a.id,
+        pedidoCompraItemId: gooder.item.id,
+        quantidade: 2
+      }
+    });
+    // Nada mais é esperado no hotel da Gooder: ele encerra.
+    expect(
+      (await transition(ctx.admin, gooderHotel.id, "ENCERRAR")).status
+    ).toBe("ENCERRADA");
+    // Voltar ao padrão devolveria as unidades da Gooder ao hotel encerrado: recusado.
+    expect(
+      (
+        await ctx.put(ctx.a.id, "destination", {
+          posicaoId: null,
+          motivo: "Voltar ao padrão"
+        })
+      ).body.error
+    ).toBe("position_closed");
+    expect(
+      (
+        await prisma.pacoteExterno.findUniqueOrThrow({
+          where: { id: ctx.a.id }
+        })
+      ).destinoPosicaoId
+    ).toBe(ctx.hotel.id);
+  });
+});
