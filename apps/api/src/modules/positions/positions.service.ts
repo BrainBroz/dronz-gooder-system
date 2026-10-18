@@ -551,7 +551,8 @@ export async function availability(
         select: {
           quantidadeRecebida: true,
           posicaoId: true,
-          pacoteExternoId: true
+          pacoteExternoId: true,
+          atribuicaoPacoteConhecida: true
         }
       },
       alocacoesMala: {

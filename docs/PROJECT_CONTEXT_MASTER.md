@@ -340,6 +340,9 @@ Continuam abertas e bloqueiam somente seus batches: vigência de cotação (`E-2
   - Os comandos de pacote leem o destino dos pedidos sob a trava do pedido (a mesma de `setDestination`).
     - Ordem de travas nos comandos de pacote: pacote → pedidos → itens → posições.
     - Em `setDestination`: pedido → itens → posição; ele também toca as linhas dos itens, para serializar com recebimentos.
+    - O recebimento (`confirmMiami`) segue a mesma ordem: pedido → item. Não há impasse com redirecionamentos e edições de pacote.
+  - `RecebimentoMiami.atribuicaoPacoteConhecida` vale true nos recebimentos novos, com pacote citado ou explicitamente fora de pacote.
+    - Os recebimentos anteriores ficam false (atribuição desconhecida): não consomem o saldo fora de pacote e só contam no limite total do item.
   - Lote de devolução vale pelo custo congelado da baixa original, mesmo quando ele é desconhecido, e não pode ser religado a item de compra (`lot_cost_frozen`).
 - Identidade física unitária, compensação pós-materialização e anexos de evidência (D-6) são gaps de backend ou schema, não capacidades atuais.
 - As três projeções do contrato de UX não podem ser colapsadas no frontend. Materialização comercial não prova localização física e reembolso econômico não move mercadoria automaticamente.

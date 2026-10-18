@@ -450,8 +450,14 @@ export async function confirmMiami(
   return idempotentMutation({
     lojaId, operation: "CONFIRM_MIAMI", entityId: d.pedidoCompraItemId, key: idempotencyKey, payload: d,
     execute: async (tx, correlationId) => {
-    // A linha do item é o recurso compartilhado de quantidade: recebimento e conteúdo de pacote
-    // (setPackageItems) serializam por ela.
+    // Ordem de travas igual à dos comandos de pedido e pacote (pedido → item), sem impasse. A linha do
+    // item é o recurso compartilhado de quantidade: recebimento e conteúdo de pacote serializam por ela.
+    const owner = await tx.pedidoCompraItem.findFirst({
+      where: { id: d.pedidoCompraItemId, lojaId },
+      select: { pedidoCompraId: true }
+    });
+    if (!owner) throw new AppError(409, "conflict");
+    await tx.$queryRaw`SELECT id FROM "PedidoCompra" WHERE id = ${owner.pedidoCompraId} AND "lojaId" = ${lojaId} FOR UPDATE`;
     await tx.$queryRaw`SELECT id FROM "PedidoCompraItem" WHERE id = ${d.pedidoCompraItemId} AND "lojaId" = ${lojaId} FOR UPDATE`;
     const i = await tx.pedidoCompraItem.findFirst({
       where: { id: d.pedidoCompraItemId, lojaId },
@@ -490,6 +496,7 @@ export async function confirmMiami(
         tipoDivergencia: d.tipoDivergencia || "CORRETO",
         posicaoId: destino,
         pacoteExternoId: d.pacoteExternoId,
+        atribuicaoPacoteConhecida: true,
         condicaoComercial: d.condicaoComercial,
         funcionamento: d.funcionamento,
         acessoriosAusentes: d.acessoriosAusentes ?? [],

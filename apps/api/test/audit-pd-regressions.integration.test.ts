@@ -1563,3 +1563,94 @@ describe("revisão local do Codex (bd5e978): achado corrigido", () => {
     expect(await assigned(ctx.data.item.id)).toBe(2);
   });
 });
+
+describe("revisão local do Codex (0dea0d3): achados corrigidos", () => {
+  it("P2: recebimento antigo de atribuição desconhecida não bloqueia o recebimento fora de pacote", async () => {
+    const ctx = await packages();
+    const { confirmMiami } =
+      await import("../src/modules/logistics/logistics.service");
+    expect((await ctx.content(ctx.a.id, 1)).status).toBe(200);
+    // Recebimento anterior ao vínculo (era do pacote A, mas foi gravado sem pacote).
+    await prisma.recebimentoMiami.create({
+      data: {
+        lojaId: ctx.store.id,
+        pedidoCompraItemId: ctx.data.item.id,
+        quantidadeRecebida: 1,
+        recebidoEm: new Date(),
+        confirmadoPorId: ctx.data.admin.id,
+        posicaoId: ctx.base.id
+      }
+    });
+    await prisma.pedidoCompraItem.update({
+      where: { id: ctx.data.item.id },
+      data: { quantidadeRecebidaMiami: 1 }
+    });
+    await prisma.pedidoCompra.update({
+      where: { id: ctx.data.order.id },
+      data: { status: "PARTIALLY_RECEIVED_MIAMI" }
+    });
+    const receive = () =>
+      confirmMiami(
+        ctx.store.id,
+        ctx.admin,
+        {
+          pedidoCompraItemId: ctx.data.item.id,
+          quantidadeRecebida: 1,
+          recebidoEm: new Date()
+        },
+        randomUUID()
+      );
+    const unpackaged = await receive();
+    expect(unpackaged).toMatchObject({
+      pacoteExternoId: null,
+      atribuicaoPacoteConhecida: true
+    });
+    // Total do item atingido: nada mais entra, por nenhum caminho.
+    await expect(receive()).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("P2: recebimento e redirecionamento concorrentes não entram em impasse", async () => {
+    const { confirmMiami } =
+      await import("../src/modules/logistics/logistics.service");
+    const { setDestination } =
+      await import("../src/modules/purchase-orders/purchase-orders.service");
+    for (let round = 0; round < 6; round++) {
+      const ctx = await packages();
+      const results = await Promise.allSettled([
+        confirmMiami(
+          ctx.store.id,
+          ctx.admin,
+          {
+            pedidoCompraItemId: ctx.data.item.id,
+            quantidadeRecebida: 1,
+            recebidoEm: new Date()
+          },
+          randomUUID()
+        ),
+        setDestination(
+          ctx.store.id,
+          ctx.data.admin.id,
+          ctx.data.order.id,
+          ctx.hotel.id
+        )
+      ]);
+      for (const result of results)
+        if (result.status === "rejected")
+          expect(
+            (result.reason as { status?: number; code?: string }).status,
+            String(result.reason)
+          ).toBe(409);
+      // Nunca os dois: recebido na base com o pedido já redirecionado ao hotel.
+      const order = await prisma.pedidoCompra.findUniqueOrThrow({
+        where: { id: ctx.data.order.id }
+      });
+      const receipts = await prisma.recebimentoMiami.findMany({
+        where: { pedidoCompraItemId: ctx.data.item.id }
+      });
+      expect(
+        receipts.every((r) => r.posicaoId === order.destinoPosicaoId)
+      ).toBe(true);
+      for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+    }
+  });
+});

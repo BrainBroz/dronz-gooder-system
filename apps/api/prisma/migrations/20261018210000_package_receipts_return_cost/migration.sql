@@ -1,7 +1,8 @@
 -- Auditoria PD: recebimento por pacote e custo de origem do lote de devolução. Sem backfill: vínculos antigos não são inferidos.
 ALTER TABLE "MovimentacaoEstoque" ADD COLUMN     "baixaOrigemId" TEXT;
 
-ALTER TABLE "RecebimentoMiami" ADD COLUMN     "pacoteExternoId" TEXT;
+ALTER TABLE "RecebimentoMiami" ADD COLUMN     "pacoteExternoId" TEXT,
+ADD COLUMN     "atribuicaoPacoteConhecida" BOOLEAN NOT NULL DEFAULT false;
 
 CREATE INDEX "RecebimentoMiami_pacoteExternoId_idx" ON "RecebimentoMiami"("pacoteExternoId");
 

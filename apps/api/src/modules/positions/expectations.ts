@@ -26,6 +26,7 @@ export type ItemForExpectation = {
     pacoteExternoId: string | null;
     posicaoId: string;
     quantidadeRecebida: number;
+    atribuicaoPacoteConhecida: boolean;
   }[];
 };
 
@@ -56,7 +57,12 @@ export const expectationSelect = {
     }
   },
   recebimentosMiami: {
-    select: { pacoteExternoId: true, posicaoId: true, quantidadeRecebida: true }
+    select: {
+      pacoteExternoId: true,
+      posicaoId: true,
+      quantidadeRecebida: true,
+      atribuicaoPacoteConhecida: true
+    }
   }
 } as const;
 
@@ -85,15 +91,20 @@ export function receivedByPackage(item: ItemForExpectation) {
   return map;
 }
 
-// Saldo recebível sem citar pacote: unidades não declaradas em pacote menos o já recebido sem pacote.
+// Saldo recebível sem citar pacote: unidades não declaradas em pacote menos os recebimentos registrados
+// explicitamente como "fora de pacote". Recebimento antigo (atribuição desconhecida) não consome esse
+// saldo: só conta no limite total do item.
 export function unpackagedRemaining(item: ItemForExpectation) {
   const packaged = packagedLines(item).reduce(
     (sum, line) => sum + line.quantidade,
     0
   );
-  return Math.max(
-    0,
-    item.quantidade - packaged - (receivedByPackage(item).get(null) ?? 0)
+  const explicitUnpackaged = item.recebimentosMiami
+    .filter((r) => r.pacoteExternoId === null && r.atribuicaoPacoteConhecida)
+    .reduce((sum, r) => sum + r.quantidadeRecebida, 0);
+  return Math.min(
+    itemRemaining(item),
+    Math.max(0, item.quantidade - packaged - explicitUnpackaged)
   );
 }
 

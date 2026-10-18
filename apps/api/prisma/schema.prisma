@@ -1296,29 +1296,32 @@ model AlocacaoMala {
 }
 
 model RecebimentoMiami {
-  id                 String               @id @default(cuid())
-  lojaId             String
-  pedidoCompraItemId String
-  quantidadeRecebida Int
-  recebidoEm         DateTime
-  confirmadoPorId    String
-  observacao         String?
-  atraso             Boolean              @default(false)
-  tipoDivergencia    TipoDivergenciaMiami @default(CORRETO)
-  condicaoComercial  CondicaoComercial    @default(NAO_DEFINIDA)
-  funcionamento      Funcionamento        @default(NAO_TESTADO)
-  acessoriosAusentes String[]             @default([])
-  observacaoCondicao String?
-  registroTerceiro   Boolean              @default(false)
-  posicaoId          String               @default("posicao-miami-base")
-  posicao            PosicaoOperacional   @relation(fields: [posicaoId], references: [id], onDelete: Restrict)
+  id                        String               @id @default(cuid())
+  lojaId                    String
+  pedidoCompraItemId        String
+  quantidadeRecebida        Int
+  recebidoEm                DateTime
+  confirmadoPorId           String
+  observacao                String?
+  atraso                    Boolean              @default(false)
+  tipoDivergencia           TipoDivergenciaMiami @default(CORRETO)
+  condicaoComercial         CondicaoComercial    @default(NAO_DEFINIDA)
+  funcionamento             Funcionamento        @default(NAO_TESTADO)
+  acessoriosAusentes        String[]             @default([])
+  observacaoCondicao        String?
+  registroTerceiro          Boolean              @default(false)
+  posicaoId                 String               @default("posicao-miami-base")
+  posicao                   PosicaoOperacional   @relation(fields: [posicaoId], references: [id], onDelete: Restrict)
   // Auditoria PD-04: recebimento pode citar o pacote; o saldo do pacote limita a quantidade.
-  pacoteExternoId    String?
-  pacote             PacoteExterno?       @relation(fields: [pacoteExternoId], references: [id], onDelete: Restrict)
-  createdAt          DateTime             @default(now())
-  loja               Loja                 @relation(fields: [lojaId], references: [id], onDelete: Restrict)
-  item               PedidoCompraItem     @relation(fields: [pedidoCompraItemId, lojaId], references: [id, lojaId], onDelete: Restrict)
-  confirmadoPor      Usuario              @relation(fields: [confirmadoPorId], references: [id], onDelete: Restrict)
+  pacoteExternoId           String?
+  pacote                    PacoteExterno?       @relation(fields: [pacoteExternoId], references: [id], onDelete: Restrict)
+  // true quando o recebimento registrou explicitamente se veio de pacote (citado) ou de fora de pacote.
+  // Recebimentos anteriores ao vínculo ficam false: atribuição desconhecida, nunca inferida.
+  atribuicaoPacoteConhecida Boolean              @default(false)
+  createdAt                 DateTime             @default(now())
+  loja                      Loja                 @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  item                      PedidoCompraItem     @relation(fields: [pedidoCompraItemId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  confirmadoPor             Usuario              @relation(fields: [confirmadoPorId], references: [id], onDelete: Restrict)
 
   @@index([lojaId, pedidoCompraItemId])
   @@index([lojaId, tipoDivergencia])
