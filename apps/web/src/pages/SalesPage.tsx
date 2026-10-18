@@ -100,9 +100,7 @@ function useSalesPost() {
       try {
         saved = sessionStorage.getItem(storageKey);
       } catch {
-        throw new Error(
-          "Habilite o armazenamento da sessão para enviar com proteção contra duplicidade."
-        );
+        throw new Error("sales_session_storage_unavailable");
       }
       // Só chave e instante são persistidos; valores e tokens não saem da memória.
       const recovered = saved
@@ -121,9 +119,7 @@ function useSalesPost() {
       try {
         sessionStorage.setItem(storageKey, JSON.stringify(metadata));
       } catch {
-        throw new Error(
-          "Não foi possível preservar a tentativa na sessão. Nenhum envio foi realizado."
-        );
+        throw new Error("sales_session_storage_unavailable");
       }
       attempts.current.set(fingerprint, {
         fingerprint,

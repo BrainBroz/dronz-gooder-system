@@ -1,6 +1,8 @@
 import axios from "axios";
 
 const KNOWN_ERROR_MESSAGES: Record<string, string> = {
+  sales_session_storage_unavailable:
+    "Não foi possível preservar a tentativa. Habilite o armazenamento da sessão. Nenhum envio foi realizado.",
   bad_request: "Dados inválidos. Verifique os campos e tente novamente.",
   conflict: "Já existe um registro com esses dados.",
   not_found: "Registro não encontrado.",
@@ -54,6 +56,8 @@ const STATUS_FALLBACK_MESSAGES: Record<number, string> = {
 };
 
 export function extractErrorMessage(error: unknown): string {
+  if (error instanceof Error && KNOWN_ERROR_MESSAGES[error.message])
+    return KNOWN_ERROR_MESSAGES[error.message];
   if (axios.isAxiosError(error)) {
     const code = error.response?.data?.error;
     if (typeof code === "string" && KNOWN_ERROR_MESSAGES[code]) {
