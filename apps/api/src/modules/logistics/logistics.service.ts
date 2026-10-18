@@ -457,8 +457,8 @@ export async function confirmMiami(
       select: { pedidoCompraId: true }
     });
     if (!owner) throw new AppError(409, "conflict");
-    await tx.$queryRaw`SELECT id FROM "PedidoCompra" WHERE id = ${owner.pedidoCompraId} AND "lojaId" = ${lojaId} FOR UPDATE`;
-    await tx.$queryRaw`SELECT id FROM "PedidoCompraItem" WHERE id = ${d.pedidoCompraItemId} AND "lojaId" = ${lojaId} FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "PedidoCompra" WHERE id = ${owner.pedidoCompraId} AND "lojaId" = ${lojaId} FOR NO KEY UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "PedidoCompraItem" WHERE id = ${d.pedidoCompraItemId} AND "lojaId" = ${lojaId} FOR NO KEY UPDATE`;
     const i = await tx.pedidoCompraItem.findFirst({
       where: { id: d.pedidoCompraItemId, lojaId },
       select: { ...expectationSelect, pedidoCompraId: true, quantidadeRecebidaMiami: true, pedido: { select: { ...expectationSelect.pedido.select, status: true } } }

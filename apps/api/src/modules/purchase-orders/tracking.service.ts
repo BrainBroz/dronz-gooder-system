@@ -241,7 +241,7 @@ async function lockedOrderDestinations(
   for (const id of [...new Set(orderIds)].sort()) {
     const [row] = await tx.$queryRaw<
       { destinoPosicaoId: string }[]
-    >`SELECT "destinoPosicaoId" FROM "PedidoCompra" WHERE id = ${id} FOR UPDATE`;
+    >`SELECT "destinoPosicaoId" FROM "PedidoCompra" WHERE id = ${id} FOR NO KEY UPDATE`;
     if (row) destinations.set(id, row.destinoPosicaoId);
   }
   return destinations;
@@ -256,7 +256,9 @@ export async function setPackageDestination(
 ) {
   return prisma.$transaction(async (tx) => {
     const order = await orderWithPurchase(tx, lojaId, pedidoCompraId);
-    await tx.$queryRaw`SELECT id FROM "PacoteExterno" WHERE id = ${pacoteId} FOR UPDATE`;
+    // FOR NO KEY UPDATE: exclusivo entre editores, compatível com o KEY SHARE da FK de um recebimento
+    // por pacote (que já segura o pedido); FOR UPDATE fecharia um ciclo de espera.
+    await tx.$queryRaw`SELECT id FROM "PacoteExterno" WHERE id = ${pacoteId} FOR NO KEY UPDATE`;
     const pkg = await tx.pacoteExterno.findFirst({
       where: {
         id: pacoteId,
@@ -336,7 +338,9 @@ export async function setPackageItems(
 ) {
   return prisma.$transaction(async (tx) => {
     const order = await orderWithPurchase(tx, lojaId, pedidoCompraId);
-    await tx.$queryRaw`SELECT id FROM "PacoteExterno" WHERE id = ${pacoteId} FOR UPDATE`;
+    // FOR NO KEY UPDATE: exclusivo entre editores, compatível com o KEY SHARE da FK de um recebimento
+    // por pacote (que já segura o pedido); FOR UPDATE fecharia um ciclo de espera.
+    await tx.$queryRaw`SELECT id FROM "PacoteExterno" WHERE id = ${pacoteId} FOR NO KEY UPDATE`;
     const pkg = await tx.pacoteExterno.findFirst({
       where: {
         id: pacoteId,

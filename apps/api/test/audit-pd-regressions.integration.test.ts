@@ -1364,7 +1364,7 @@ describe("revisão local do Codex (24eb581): achados corrigidos", () => {
     for (let attempt = 0; attempt < 200; attempt++) {
       const [{ n }] = await prisma.$queryRaw<
         { n: number }[]
-      >`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%PedidoCompraItem%FOR UPDATE%'`;
+      >`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%PedidoCompraItem%UPDATE%'`;
       if (n > 0) break;
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
@@ -1539,7 +1539,7 @@ describe("revisão local do Codex (bd5e978): achado corrigido", () => {
     for (let attempt = 0; attempt < 200; attempt++) {
       const [{ n }] = await prisma.$queryRaw<
         { n: number }[]
-      >`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%PacoteExterno%FOR UPDATE%'`;
+      >`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%PacoteExterno%UPDATE%'`;
       if (n > 0) break;
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
@@ -1651,6 +1651,103 @@ describe("revisão local do Codex (0dea0d3): achados corrigidos", () => {
         receipts.every((r) => r.posicaoId === order.destinoPosicaoId)
       ).toBe(true);
       for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+    }
+  });
+});
+
+describe("revisão local do Codex (61a359f): achado corrigido", () => {
+  it("P2: recebimento por pacote sobreposto às edições de conteúdo e de destino não entra em impasse", async () => {
+    const { confirmMiami } =
+      await import("../src/modules/logistics/logistics.service");
+    const { setPackageItems, setPackageDestination } =
+      await import("../src/modules/purchase-orders/tracking.service");
+    for (const editor of ["items", "destination"] as const) {
+      for (let round = 0; round < 3; round++) {
+        const ctx = await packages();
+        expect((await ctx.content(ctx.a.id, 1)).status).toBe(200);
+        // Uma transação segura a linha do item: o recebimento pega o pedido e espera o item.
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => (release = resolve));
+        let holding!: () => void;
+        const held = new Promise<void>((resolve) => (holding = resolve));
+        const itemLock = prisma.$transaction(
+          async (tx) => {
+            await tx.$queryRaw`SELECT id FROM "PedidoCompraItem" WHERE id = ${ctx.data.item.id} FOR UPDATE`;
+            holding();
+            await gate;
+          },
+          { timeout: 20_000 }
+        );
+        await held;
+        const settle = <T>(p: Promise<T>) =>
+          p.then(
+            () => "ok",
+            (error: { status?: number; code?: string; message?: string }) =>
+              error.status === 409
+                ? `409:${error.code}`
+                : `ERRO:${error.message?.slice(0, 160)}`
+          );
+        const waiting = async (pattern: string, count: number) => {
+          for (let attempt = 0; attempt < 200; attempt++) {
+            const [{ n }] = await prisma.$queryRaw<
+              { n: number }[]
+            >`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE ${pattern}`;
+            if (n >= count) return;
+            await new Promise((resolve) => setTimeout(resolve, 25));
+          }
+        };
+        const receipt = settle(
+          confirmMiami(
+            ctx.store.id,
+            ctx.admin,
+            {
+              pedidoCompraItemId: ctx.data.item.id,
+              quantidadeRecebida: 1,
+              recebidoEm: new Date(),
+              pacoteExternoId: ctx.a.id
+            },
+            randomUUID()
+          )
+        );
+        await waiting("%PedidoCompraItem%UPDATE%", 1);
+        // O editor pega o pacote e espera o pedido (que o recebimento segura).
+        const edit = settle(
+          editor === "items"
+            ? setPackageItems(
+                ctx.store.id,
+                ctx.data.admin.id,
+                ctx.data.order.id,
+                ctx.a.id,
+                {
+                  itens: [
+                    { pedidoCompraItemId: ctx.data.item.id, quantidade: 2 }
+                  ],
+                  motivo: "Sobreposição"
+                }
+              )
+            : setPackageDestination(
+                ctx.store.id,
+                ctx.data.admin.id,
+                ctx.data.order.id,
+                ctx.a.id,
+                {
+                  posicaoId: ctx.hotel.id,
+                  motivo: "Sobreposição"
+                }
+              )
+        );
+        await waiting('%"PedidoCompra"%UPDATE%', 1);
+        // Liberado o item, o recebimento precisa do KEY SHARE no pacote que o editor segura.
+        release();
+        await itemLock;
+        const outcomes = await Promise.all([edit, receipt]);
+        // Nenhum erro de banco (impasse) vira 500: cada um conclui ou recusa com 409 de negócio/serialização.
+        for (const outcome of outcomes)
+          expect(outcome.startsWith("ERRO"), `${editor} ${outcome}`).toBe(
+            false
+          );
+        for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+      }
     }
   });
 });
