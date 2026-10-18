@@ -80,6 +80,7 @@ function useSalesPost() {
     fingerprint: string;
     body: object;
     key: string;
+    at: string;
     pending?: ReturnType<typeof api.post>;
   };
   const attempts = React.useRef(new Map<string, Attempt>());
@@ -95,18 +96,40 @@ function useSalesPost() {
     );
     const storageKey = `sales-attempt:${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
     if (!attempts.current.has(fingerprint)) {
-      const saved = sessionStorage.getItem(storageKey);
+      let saved: string | null;
+      try {
+        saved = sessionStorage.getItem(storageKey);
+      } catch {
+        throw new Error(
+          "Habilite o armazenamento da sessão para enviar com proteção contra duplicidade."
+        );
+      }
       // Só chave e instante são persistidos; valores e tokens não saem da memória.
-      const metadata = saved
+      const recovered = saved
         ? z
-            .object({ key: z.string().uuid(), at: z.string().datetime() })
+            .object({
+              key: z.string().uuid(),
+              at: z.string().datetime(),
+              confirmed: z.boolean().optional()
+            })
             .parse(JSON.parse(saved))
-        : { key: crypto.randomUUID(), at: new Date().toISOString() };
-      sessionStorage.setItem(storageKey, JSON.stringify(metadata));
+        : null;
+      const metadata =
+        recovered && !recovered.confirmed
+          ? recovered
+          : { key: crypto.randomUUID(), at: new Date().toISOString() };
+      try {
+        sessionStorage.setItem(storageKey, JSON.stringify(metadata));
+      } catch {
+        throw new Error(
+          "Não foi possível preservar a tentativa na sessão. Nenhum envio foi realizado."
+        );
+      }
       attempts.current.set(fingerprint, {
         fingerprint,
         body: dateField ? { ...body, [dateField]: metadata.at } : body,
-        key: metadata.key
+        key: metadata.key,
+        at: metadata.at
       });
     }
     const current = attempts.current.get(fingerprint)!;
@@ -116,7 +139,22 @@ function useSalesPost() {
     });
     try {
       const result = await current.pending;
-      sessionStorage.removeItem(storageKey);
+      try {
+        sessionStorage.removeItem(storageKey);
+      } catch {
+        try {
+          sessionStorage.setItem(
+            storageKey,
+            JSON.stringify({
+              key: current.key,
+              at: current.at,
+              confirmed: true
+            })
+          );
+        } catch {
+          // A API já confirmou; falha de limpeza local não pode transformar sucesso em erro financeiro.
+        }
+      }
       attempts.current.delete(fingerprint);
       return result;
     } finally {
