@@ -305,6 +305,32 @@ async function lotsFor(db: Db, lojaId: string, produtoIds: string[]) {
 }
 type Lot = Awaited<ReturnType<typeof lotsFor>>[number];
 
+async function lotBalances(
+  db: Db,
+  lojaId: string,
+  produtoIds: string[],
+  lots: Lot[]
+) {
+  const stocks = await db.estoque.findMany({
+    where: { lojaId, produtoId: { in: produtoIds } }
+  });
+  return new Map(
+    stocks.map((stock) => {
+      const remaining = lots
+        .filter((lot) => lot.produtoId === stock.produtoId)
+        .reduce((sum, lot) => sum + lot.restante, 0);
+      return [
+        stock.produtoId,
+        {
+          stock,
+          // Perdas e saídas antigas não identificam lote. Não presumir de qual entrada saíram.
+          reconciled: remaining === stock.quantidadeFisica
+        }
+      ];
+    })
+  );
+}
+
 function lotCost(lot: Lot, moedaVenda: string) {
   const item = lot.pedidoItem;
   if (!item)
@@ -358,19 +384,37 @@ export async function lotSuggestion(lojaId: string, id: string) {
     lojaId,
     sale.itens.map((item) => item.produtoId)
   );
+  const balances = await lotBalances(
+    prisma,
+    lojaId,
+    sale.itens.map((item) => item.produtoId),
+    lots
+  );
   const used = new Map<string, number>();
+  const usedProducts = new Map<string, number>();
   return {
     politica: COST_POLICY,
     itens: sale.itens.map((item) => {
+      const balance = balances.get(item.produtoId);
       let missing = item.quantidade;
       const lotes = [];
       for (const lot of lots) {
         if (!missing) break;
         if (lot.produtoId !== item.produtoId) continue;
-        const free = lot.restante - (used.get(lot.id) ?? 0);
+        if (!balance?.reconciled) break;
+        const free = Math.min(
+          lot.restante - (used.get(lot.id) ?? 0),
+          balance.stock.quantidadeFisica -
+            balance.stock.quantidadeReservada -
+            (usedProducts.get(item.produtoId) ?? 0)
+        );
         if (free <= 0) continue;
         const take = Math.min(free, missing);
         used.set(lot.id, (used.get(lot.id) ?? 0) + take);
+        usedProducts.set(
+          item.produtoId,
+          (usedProducts.get(item.produtoId) ?? 0) + take
+        );
         missing -= take;
         lotes.push({
           movimentoEntradaId: lot.id,
@@ -383,6 +427,10 @@ export async function lotSuggestion(lojaId: string, id: string) {
       return {
         vendaItemId: item.id,
         produtoId: item.produtoId,
+        blockedReason:
+          balance && !balance.reconciled
+            ? "stock_lots_require_reconciliation"
+            : null,
         lotes,
         faltante: missing
       };
@@ -390,7 +438,7 @@ export async function lotSuggestion(lojaId: string, id: string) {
   };
 }
 
-export function confirmSale(
+export async function confirmSale(
   lojaId: string,
   userId: string,
   id: string,
@@ -403,9 +451,10 @@ export function confirmSale(
     recebivelPrevisto?: number;
     dataPrevista?: Date;
   },
-  key?: string
+  key?: string,
+  includeCost = false
 ) {
-  return idempotentMutation({
+  await idempotentMutation({
     lojaId,
     operation: "CONFIRM_SALE",
     entityId: id,
@@ -425,9 +474,11 @@ export function confirmSale(
       // Trava os saldos em ordem fixa: vendas concorrentes do mesmo produto são serializadas.
       for (const produtoId of productIds)
         await tx.$queryRaw`SELECT id FROM "Estoque" WHERE "lojaId" = ${lojaId} AND "produtoId" = ${produtoId} FOR UPDATE`;
-      const lots = new Map(
-        (await lotsFor(tx, lojaId, productIds)).map((lot) => [lot.id, lot])
-      );
+      const eligibleLots = await lotsFor(tx, lojaId, productIds);
+      const balances = await lotBalances(tx, lojaId, productIds, eligibleLots);
+      if ([...balances.values()].some((balance) => !balance.reconciled))
+        throw new AppError(409, "stock_lots_require_reconciliation");
+      const lots = new Map(eligibleLots.map((lot) => [lot.id, lot]));
       const consumed = new Map<string, number>();
       for (const item of sale.itens) {
         const chosen = data.lotes.filter(
@@ -551,12 +602,14 @@ export function confirmSale(
         after: result,
         origin: ORIGIN
       });
-      return saleView(result, true);
+      // O replay guarda só a identidade; a resposta é filtrada pela permissão atual do chamador.
+      return result.id;
     }
   });
+  return getSale(lojaId, id, includeCost);
 }
 
-// Recebimento liquida o recebível; pode citar a transação-fonte do B16, sem registrar nova receita.
+// Recebimento liquida o recebível e preserva cada parcela no AuditLog, sem registrar receita duplicada.
 export function receive(
   lojaId: string,
   userId: string,
@@ -564,6 +617,9 @@ export function receive(
   data: { valor: number; recebidoEm: Date; transacaoFonteId?: string },
   key?: string
 ) {
+  // As fontes do B16 representam despesas, não entradas de venda. Não conciliá-las por mera referência.
+  if (data.transacaoFonteId)
+    throw new AppError(409, "sale_receipt_source_not_supported");
   return idempotentMutation({
     lojaId,
     operation: "RECEIVE_SALE",
@@ -576,13 +632,6 @@ export function receive(
         where: { vendaId: id, lojaId }
       });
       if (!receivable) throw new AppError(404, "receivable_not_found");
-      if (
-        data.transacaoFonteId &&
-        !(await tx.transacaoFinanceiraFonte.findFirst({
-          where: { id: data.transacaoFonteId, lojaId }
-        }))
-      )
-        throw new AppError(404, "source_not_found");
       const total = receivable.valorRecebido.plus(money(data.valor));
       if (total.greaterThan(receivable.valorPrevisto))
         throw new AppError(409, "receipt_exceeds_receivable");
@@ -591,8 +640,6 @@ export function receive(
         data: {
           valorRecebido: total,
           dataRecebida: data.recebidoEm,
-          transacaoFonteId:
-            data.transacaoFonteId ?? receivable.transacaoFonteId,
           status: total.equals(receivable.valorPrevisto)
             ? "RECEBIDO"
             : "PARCIAL"

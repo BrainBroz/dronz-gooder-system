@@ -98,4 +98,130 @@ describe("Vendas B17", () => {
       screen.queryByRole("button", { name: "Confirmar venda e baixar estoque" })
     ).toBeNull();
   });
+
+  it("explica o bloqueio de lote sem saldo reconciliado", async () => {
+    mockReads({
+      itens: [
+        {
+          vendaItemId: "item-1",
+          faltante: 2,
+          lotes: [],
+          blockedReason: "stock_lots_require_reconciliation"
+        }
+      ]
+    });
+    renderWithProviders(<SalesPage />, {
+      permissions: ["VENDA_VISUALIZAR", "VENDA_CONFIRMAR"]
+    });
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Sugerir lotes (FIFO)" })
+    );
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "reconciliação"
+    );
+    expect(
+      screen.queryByRole("button", { name: "Confirmar venda e baixar estoque" })
+    ).toBeNull();
+  });
+
+  it("retry de criação mantém payload, data e chave após erro de rede", async () => {
+    vi.spyOn(api, "get").mockImplementation(async (url) => {
+      if (url === "/sales") return { data: [] };
+      if (url === "/products")
+        return { data: { items: [{ id: "product-1", nome: "Drone" }] } };
+      throw new Error(`GET inesperado: ${url}`);
+    });
+    const post = vi
+      .spyOn(api, "post")
+      .mockRejectedValueOnce(new Error("network"))
+      .mockResolvedValue({ data: {} });
+    renderWithProviders(<SalesPage />, {
+      permissions: ["VENDA_VISUALIZAR", "VENDA_CRIAR"]
+    });
+    await userEvent.click(screen.getByRole("combobox", { name: "Produto" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Drone" }));
+    await userEvent.type(
+      screen.getByRole("spinbutton", { name: "Preço unitário" }),
+      "100"
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Criar rascunho" })
+    );
+    await screen.findByRole("alert");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Criar rascunho" })
+    );
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+    expect(post.mock.calls[1]).toEqual(post.mock.calls[0]);
+    expect(post.mock.calls[0][2]?.headers).toMatchObject({
+      "x-store-id": "store-dronz",
+      "idempotency-key": expect.any(String)
+    });
+    expect(post.mock.calls[0][1].dataVenda).toEqual(expect.any(String));
+  });
+
+  it("retry de recebimento sobrevive ao filtro sem duplicar; outra parcela recebe chave nova", async () => {
+    vi.spyOn(api, "get").mockImplementation(async (url, config) => {
+      if (url === "/sales")
+        return {
+          data:
+            config?.params?.estado === "RASCUNHO"
+              ? []
+              : [
+                  {
+                    ...draft,
+                    estado: "CONFIRMADA",
+                    recebivel: {
+                      valorPrevisto: "100",
+                      valorRecebido: "0",
+                      status: "PENDENTE"
+                    }
+                  }
+                ]
+        };
+      if (url === "/products") return { data: { items: [] } };
+      throw new Error(`GET inesperado: ${url}`);
+    });
+    const post = vi
+      .spyOn(api, "post")
+      .mockRejectedValueOnce(new Error("network"))
+      .mockResolvedValue({ data: {} });
+    renderWithProviders(<SalesPage />, {
+      permissions: ["VENDA_VISUALIZAR", "FINANCEIRO_REGISTRAR"]
+    });
+    const input = await screen.findByRole("spinbutton", {
+      name: "Valor recebido"
+    });
+    await userEvent.type(input, "25");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Registrar recebimento" })
+    );
+    await screen.findByRole("alert");
+    await userEvent.click(screen.getByRole("combobox", { name: "Estado" }));
+    await userEvent.click(screen.getByRole("option", { name: "Rascunho" }));
+    await screen.findByText("Nenhuma venda neste filtro.");
+    await userEvent.click(screen.getByRole("combobox", { name: "Estado" }));
+    await userEvent.click(screen.getByRole("option", { name: "Todos" }));
+    const remountedInput = await screen.findByRole("spinbutton", {
+      name: "Valor recebido"
+    });
+    await userEvent.type(remountedInput, "25");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Registrar recebimento" })
+    );
+    await screen.findByText("Recebimento registrado.");
+    expect(post.mock.calls[1]).toEqual(post.mock.calls[0]);
+    expect(post.mock.calls[0][1]).toMatchObject({
+      valor: 25,
+      recebidoEm: expect.any(String)
+    });
+    await userEvent.type(remountedInput, "25");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Registrar recebimento" })
+    );
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(3));
+    expect(post.mock.calls[2][2]?.headers?.["idempotency-key"]).not.toBe(
+      post.mock.calls[0][2]?.headers?.["idempotency-key"]
+    );
+  });
 });
