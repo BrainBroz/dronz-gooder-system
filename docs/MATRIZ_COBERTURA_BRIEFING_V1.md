@@ -2,10 +2,10 @@
 
 ## 1. Status e uso
 
-**Consolidada em:** 2026-07-13
-**Baseline:** `f413791`
+**Atualizada em:** 2026-10-18
+**Baseline funcional:** `5b39eb8` (merge da PR #16, incluindo B17/B18). A matriz original de 2026-07-13 usava `f413791`.
 
-Esta matriz compara o resumo disponível do briefing “Sistema de Gestão de Compras e Logística” com a baseline após os Batches 0–7. O briefing integral continua não localizado; portanto, `NÃO LOCALIZADO` indica ausência de requisito canônico suficiente e não autoriza implementação por suposição.
+Esta matriz compara o resumo disponível do briefing “Sistema de Gestão de Compras e Logística” e as decisões de produto aprovadas com a baseline integrada até B18. O briefing integral continua não localizado; portanto, não se declara cobertura integral de um documento indisponível. `NÃO LOCALIZADO` indica ausência de requisito canônico suficiente e não autoriza implementação por suposição.
 
 Fontes de estado: `AGENTS.md`, `PROJECT_CONTEXT_MASTER.md`, contratos normativos, schema, migrations, código e testes. Os detalhes permanecem nos contratos; esta matriz registra somente cobertura e lacuna.
 
@@ -16,30 +16,30 @@ Classificações: `IMPLEMENTADO`, `PARCIAL`, `PLANEJADO`, `FORA DO ESCOPO ATUAL`
 | IDs              | Área                              | Situação atual               | Evidência ou limite                                                                                         |
 | ---------------- | --------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | B-01             | Compra nos EUA                    | IMPLEMENTADO                 | staging global, compra manual, atribuição quantitativa e materialização por loja nos Batches 5–6            |
-| B-02             | Plataformas e contas externas     | PARCIAL                      | fundação de conexões e contrato buyer existem; adapters Amazon Business/eBay/e-mail não foram implementados |
+| B-02             | Plataformas e contas externas     | PARCIAL                      | evidências/revisão multicanal e adapter eBay Buyer implementados; ativação real depende de configuração segura; mailbox e Amazon API continuam pendentes |
 | B-03, B-05, B-06 | Miami, conferência e divergências | IMPLEMENTADO                 | UI-3C possui read models, RBAC, eventos corretivos, auditoria e interface operacional                       |
 | B-04             | Galpão nos EUA                    | NÃO LOCALIZADO               | localização genérica existe, mas operação específica de galpão não possui contrato canônico                 |
-| B-07             | Consolidação física               | PARCIAL                      | viagens, malas, volumes e checkpoints existem; regras adicionais do briefing integral não foram localizadas |
+| B-07             | Consolidação física               | PARCIAL                      | posições, remessas, malas, volumes, handoff e checkpoints implementados; identidade física unitária e anexos continuam fora da capacidade atual |
 | B-08             | Malas                             | IMPLEMENTADO                 | limite, tara, cálculo backend, alocação e interface estão cobertos                                          |
-| B-09, B-10       | Remessas e viajantes              | PARCIAL                      | modelos operacionais existem; responsabilidades adicionais não foram comprovadas pelo briefing              |
+| B-09, B-10       | Remessas e viajantes              | IMPLEMENTADO NO ESCOPO ATUAL | posições, responsabilidades contextuais, vigência e remessas implementadas conforme D-2/D-7…D-14; anexos dependem de D-6 |
 | B-11             | Frete integrado                   | PLANEJADO                    | rateio/provider e conciliação exigem contrato futuro                                                        |
 | B-12, B-13, B-14 | Rota, Paraguai e Brasil           | IMPLEMENTADO                 | snapshot de rota, aplicabilidade, checkpoints e histórico tenant-safe concluídos                            |
 | B-15, B-16       | Recebimento Brasil e estoque real | IMPLEMENTADO                 | conferência não cria saldo; somente entrada definitiva gera `ENTRY`                                         |
-| B-17, B-35       | Venda e baixa patrimonial         | FORA DO ESCOPO ATUAL         | roadmap posterior às fontes buyer, tracking e Financeiro                                                    |
+| B-17, B-35       | Venda e baixa patrimonial         | PARCIAL                      | B17 cria rascunho, confirma baixa por lote, preserva custo e registra recebimentos; devolução física/correção de venda confirmada e reconciliação de lotes legados exigem contrato próprio |
 | B-18             | Fornecedores internos             | IMPLEMENTADO                 | CRUD tenantado e mapping merchant→fornecedor por loja                                                       |
 | B-19             | Produtos internos                 | IMPLEMENTADO                 | catálogo tenantado e mapping item externo→Produto por loja                                                  |
-| B-20             | Pagamentos e conciliação          | PARCIAL                      | financeiro manual existe; integrações externas permanecem futuras                                           |
+| B-20             | Pagamentos e conciliação          | PARCIAL                      | B16 implementa contas/faturas, pagamentos, reembolsos e conciliação humana; fontes bancárias/PayPal automáticas e vínculo de recebimento de venda com fonte B16 continuam fora do contrato atual |
 | B-21             | Custos em USD                     | IMPLEMENTADO                 | USD é moeda consolidada; origem externa é preservada                                                        |
-| B-22, B-23, B-24 | BRL, câmbio e lucratividade       | PARCIAL                      | fluxo manual e indicadores existem; evolução financeira/analítica exige contratos próprios                  |
-| B-25, B-36       | Responsabilidades por pessoa      | NÃO LOCALIZADO               | RBAC usa funções; nomes de pessoas nunca viram autorização                                                  |
+| B-22, B-23, B-24 | BRL, câmbio e lucratividade       | IMPLEMENTADO NO ESCOPO ATUAL | câmbio informado, snapshot do custo por lote e margem realizada B17/B18; sem taxa presumida ou integração cambial automática |
+| B-25, B-36       | Responsabilidades por pessoa      | IMPLEMENTADO NO ESCOPO ATUAL | responsabilidades contextuais e delegações por vínculo/vigência (D-8/D-9/D-12), sem nomes pessoais hardcoded |
 | B-26             | Auditoria                         | IMPLEMENTADO NO ESCOPO ATUAL | `AuditLog` cobre UI-3C e Compras Unificadas sem sistema paralelo                                            |
-| B-27             | Permissões                        | IMPLEMENTADO NO ESCOPO ATUAL | RBAC granular de UI-3C e Compras Unificadas está semeado e testado                                          |
+| B-27             | Permissões                        | IMPLEMENTADO NO ESCOPO ATUAL | RBAC funcional, contexto operacional e isolamento por loja; dados financeiros são filtrados também na confirmação/replay e nos relatórios aninhados |
 | B-28             | Documentos e comprovantes         | FORA DO ESCOPO ATUAL         | exige storage, retenção e contrato tenant-safe                                                              |
-| B-29, B-30       | Alertas e deadlines               | PARCIAL                      | timezone e terça 14h existem; janela P-08 de quinta permanece não computável                                |
-| B-31             | Relatórios                        | PARCIAL                      | relatórios atuais existem; contratos avançados e exportações permanecem futuros                             |
+| B-29, B-30       | Alertas e deadlines               | PARCIAL                      | alertas operacionais/deadline Miami existem; motor automático de transportadora e janela P-08 de quinta continuam pendentes |
+| B-31             | Relatórios                        | PARCIAL                      | painel mensal/CSV B13 e indicadores/CSV B18 implementados; PDF, Excel, metas e fechamento mensal oficial não estão implementados |
 | B-32             | Status operacionais               | IMPLEMENTADO NO ESCOPO ATUAL | backend governa estados, `allowedActions`, bloqueios e projeções efetivas                                   |
-| B-33             | Transporte por viajante           | PARCIAL                      | fundação existe; custódia e responsabilidades adicionais exigem briefing canônico                           |
-| B-34             | Transporte por frete e tracking   | PLANEJADO                    | será tratado após ingestão buyer e consolidação de envios/pacotes                                           |
+| B-33             | Transporte por viajante           | IMPLEMENTADO NO ESCOPO ATUAL | viajante sem usuário, vínculo contextual, malas, handoff e checkpoints; homologação física real permanece necessária |
+| B-34             | Transporte por frete e tracking   | PARCIAL                      | B14 mantém pacotes, múltiplos códigos e atualização manual auditada; tracking não confirma recebimento; motor de transportadora B15 ainda não existe |
 
 ## 3. Decisões de produto incorporadas
 
@@ -64,7 +64,9 @@ Classificações: `IMPLEMENTADO`, `PARCIAL`, `PLANEJADO`, `FORA DO ESCOPO ATUAL`
 - cancelamento, reembolso, compra pessoal, duplicidade e legado possuem classificação/auditoria separadas;
 - conta compartilhada permite split quantitativo e saldo pendente.
 
-### 3.2 Matriz de bloqueios do questionário
+### 3.2 Matriz de bloqueios do questionário — registro histórico do Batch 9
+
+Estado no complemento daquele batch. Decisões posteriores estão em [DECISOES_PRODUTO_2026-10-17.md](DECISOES_PRODUTO_2026-10-17.md); o estado atual está nas seções 2 e 4–6, não nas pendências históricas abaixo.
 
 | ID | Decisão | Estado após complemento | Dependência restante |
 | --- | --- | --- | --- |
@@ -87,16 +89,16 @@ Classificações: `IMPLEMENTADO`, `PARCIAL`, `PLANEJADO`, `FORA DO ESCOPO ATUAL`
 | F2 | conta dedicada | FECHADA COMO REGRA GERAL | não aplicável à conta inicial `SHARED` |
 | F3 | split e saldo pendente | FECHADA | invariante quantitativa confirmada |
 
-## 4. Roadmap oficial
+## 4. Roadmap e estado de execução
 
 1. Gate eBay Buyer — concluído; OAuth Production, `GetOrders` buyer, resposta, tracking, paginação do recorte e quota comprovados;
-2. Batch 10 — pipeline comum de evidências, conciliação e aprovação;
-3. Batch 11 — adapter eBay Buyer;
-4. Batch 12 — ingestão autorizada por e-mail Amazon/eBay e reconciliação multicanal;
-5. Batch 13 — painel mensal e migração da planilha histórica;
-6. Batch 14 — consolidação de remessas, pacotes e tracking;
-7. Batch 15 — motor de tracking e alertas;
-8. Batches 16–18 — Financeiro/conciliação, Vendas/baixa patrimonial e Analytics;
+2. Batch 10 — pipeline comum de evidências, conciliação e aprovação: implementado;
+3. Batch 11 — adapter eBay Buyer: implementado, desabilitado até configuração e homologação seguras;
+4. Batch 12 — ingestão autorizada por e-mail: bloqueada pela definição/autorizações da mailbox (X-12); entrada controlada de evidência já existe no B10;
+5. Batch 13 — painel mensal/CSV: implementado; migração histórica aguarda a planilha real;
+6. Batch 14 — pacotes, códigos e tracking manual: implementado;
+7. Batch 15 — motor de tracking e alertas: bloqueado pela integração oficial de transportadora;
+8. Batches 16–18 — Financeiro/conciliação, Vendas/baixa patrimonial e Analytics: integrados; limitações constam nas linhas de cobertura;
 9. Amazon Business API — retomar após onboarding externo, sem substituir evidência de e-mail.
 
 O tracking automático depende de dados ingeridos por fontes autorizadas, mas seu domínio não depende de marketplace, e-mail ou documento. Ordem sem tracking é válida; tracking pode surgir ou mudar depois; pedidos podem possuir múltiplos envios, pacotes e códigos; e o fallback manual deve permanecer auditável.
@@ -105,6 +107,16 @@ O tracking automático depende de dados ingeridos por fontes autorizadas, mas se
 
 - briefing integral não localizado;
 - definição horária P-08 ainda pendente;
-- responsabilidades adicionais de galpão, remessa, viajante e frete não comprovadas;
-- contrato buyer, evidências imutáveis, eventos/projeções, aprovação humana e decisões iniciais Amazon estão definidos; a API Amazon está `PENDENTE_DE_ONBOARDING_EXTERNO` e não bloqueia o roadmap; OAuth e `GetOrders` eBay foram comprovados, enquanto quantidade/escopo futuro de contas, secret manager, frequência, autorização de e-mail/caixa, pesos/faixas de confiança, privacidade, retenção, rateio, arredondamento, eventual fechamento mensal e planilha histórica permanecem pendentes nos trabalhos que dependem deles;
-- Financeiro ampliado, Vendas, Patrimônio e Analytics exigem contratos próprios.
+- operações adicionais de galpão/frete não descritas por contrato canônico;
+- X-01 (tolerância zero), X-03 (score explicável), X-13 (competência mensal) e D-1…D-17 já foram decididos: não reabri-los como bloqueios. X-02 não foi adotada; vale F-2. A matriz de perguntas da seção 3.2 é o registro histórico do complemento do Batch 9, não o estado atual desses parâmetros;
+- a API Amazon permanece `PENDENTE_DE_ONBOARDING_EXTERNO`; configuração segura e homologação real eBay, mailbox/OAuth/retenção, planilha histórica e APIs de transportadoras continuam dependências próprias;
+- identidade física unitária, destino por pacote individual, anexos privados, reconciliação de lotes legados e correção/devolução de venda confirmada não devem ser inferidos das telas existentes;
+- Financeiro, Vendas e Analytics estão implementados nos limites descritos acima; integração financeira externa, fechamento mensal oficial, metas e novas exportações exigem escopo próprio.
+
+## 6. Sequência de encerramento
+
+1. Concluir provas automatizadas entre módulos sem alterar regras: pedido → checkpoints → entrada definitiva → venda por lote → recebimentos → indicadores, nas duas lojas.
+2. Manter pendências externas separadas: B12 (provider/mailbox dedicada, OAuth, responsável e retenção), B15 (transportadoras/API/credenciais), ativação eBay, onboarding Amazon e planilha histórica real. Não registrar secrets em documentação.
+3. Delimitar contratos faltantes antes de codificar correções patrimoniais, reconciliação de lotes, destino por pacote e anexos. A decisão D-6 não escolhe automaticamente um provider de armazenamento ou retenção.
+4. Executar a conferência visual e a homologação operacional ao final, conforme orientação do Product Owner nesta continuidade. Adiar a conferência não equivale a declarar as telas homologadas.
+5. Publicação depende de autorização própria, infraestrutura/HTTPS e tratamento dos riscos de dependências; o ambiente autorizado continua somente local.

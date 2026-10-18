@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
+import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { createOperationalFixture } from "./helpers/operational-fixture";
 process.env.DATABASE_URL =
@@ -16,7 +17,23 @@ beforeAll(async () => {
   ({ createApp } = await import("../src/app"));
 });
 let fixture: Awaited<ReturnType<typeof createOperationalFixture>> | undefined;
+const mutationKeys: string[] = [];
 afterEach(async () => {
+  await prisma.auditLog.deleteMany({ where: { idempotencyKey: { in: mutationKeys } } });
+  await prisma.idempotencyRecord.deleteMany({ where: { idempotencyKey: { in: mutationKeys.splice(0) } } });
+  if (fixture) {
+    const sales = await prisma.venda.findMany({
+      where: { itens: { some: { produtoId: fixture.product.id } } },
+      select: { id: true }
+    });
+    const vendaId = { in: sales.map((sale) => sale.id) };
+    await prisma.recebivelVenda.deleteMany({ where: { vendaId } });
+    await prisma.baixaVenda.deleteMany({
+      where: { item: { produtoId: fixture.product.id } }
+    });
+    await prisma.vendaItem.deleteMany({ where: { vendaId } });
+    await prisma.venda.deleteMany({ where: { id: vendaId } });
+  }
   await fixture?.cleanup();
   fixture = undefined;
 });
@@ -39,6 +56,16 @@ const headers = (token: string, id: string) => ({
   Authorization: `Bearer ${token}`,
   "x-store-id": id
 });
+type Indicator = {
+  codigo: string;
+  dimensao: string | null;
+  valor: string | null;
+};
+const indicatorValue = (rows: Indicator[], code: string, dimension: string) =>
+  rows
+    .filter((row) => row.codigo === code && row.dimensao === dimension)
+    .reduce((sum, row) => sum + Number(row.valor ?? 0), 0);
+
 describe("receiving and inventory", () => {
   it("rejeita confirmação Miami fora dos estados permitidos", async () => {
     const { app, token, dronz } = await session();
@@ -55,13 +82,23 @@ describe("receiving and inventory", () => {
     expect(await prisma.recebimentoMiami.count({ where: { pedidoCompraItemId: item.id } })).toBe(0);
   });
 
-  it("percorre pedido, Miami, Paraguai, Brasil e entrada definitiva sem estoque antecipado", async () => {
-    const { app, token, dronz } = await session();
-    fixture = await createOperationalFixture(prisma, dronz.id, "MIAMI_PARAGUAI_BRASIL");
+  it.each(["dronz", "gooder"] as const)("percorre pedido, checkpoints, estoque, venda e recebimentos em %s sem duplicar nem misturar lojas", async (slug) => {
+    const { app, token, ...stores } = await session();
+    const store = stores[slug];
+    const otherStore = stores[slug === "dronz" ? "gooder" : "dronz"];
+    const storeHeaders = headers(token, store.id);
+    const indicators = (storeId: string) => request(app)
+      .get("/analytics/indicators")
+      .set(headers(token, storeId))
+      .query({ from: "2026-01-01", to: "2100-01-01", moeda: "USD" });
+    const before = await indicators(store.id);
+    const otherBefore = await indicators(otherStore.id);
+    expect(before.status).toBe(200);
+    expect(otherBefore.status).toBe(200);
+    fixture = await createOperationalFixture(prisma, store.id, "MIAMI_PARAGUAI_BRASIL");
     const { order, item, trip, bag, volume, allocation, product } = fixture;
     await prisma.alocacaoMala.delete({ where: { id: allocation.id } });
     await prisma.pedidoCompra.update({ where: { id: order.id }, data: { status: "DRAFT" } });
-    const storeHeaders = headers(token, dronz.id);
     for (const status of ["PLACED", "CONFIRMED"]) {
       const result = await request(app).patch(`/purchase-orders/${order.id}/status`)
         .set(storeHeaders).send({ status });
@@ -112,18 +149,101 @@ describe("receiving and inventory", () => {
     expect(confirmed.status).toBe(200);
     expect(confirmed.body.status).toBe("COMPLETED");
     expect(await prisma.estoque.findUnique({
-      where: { lojaId_produtoId: { lojaId: dronz.id, produtoId: product.id } }
+      where: { lojaId_produtoId: { lojaId: store.id, produtoId: product.id } }
     })).toBeNull();
     expect(await prisma.movimentacaoEstoque.count({ where: { produtoId: product.id, tipo: "ENTRY" } })).toBe(0);
     const entry = await request(app).post("/receiving/entrada-definitiva")
       .set(storeHeaders).send({ viagemId: trip.id, malaId: bag.id, confirmadoEm: new Date().toISOString() });
     expect(entry.status).toBe(200);
     expect((await prisma.estoque.findUniqueOrThrow({
-      where: { lojaId_produtoId: { lojaId: dronz.id, produtoId: product.id } }
+      where: { lojaId_produtoId: { lojaId: store.id, produtoId: product.id } }
     })).quantidadeFisica).toBe(2);
     expect(await prisma.movimentacaoEstoque.count({
       where: { recebimentoId: receiving.body.id, produtoId: product.id, tipo: "ENTRY" }
     })).toBe(1);
+
+    const lots = await prisma.movimentacaoEstoque.findMany({
+      where: { produtoId: product.id, tipo: "ENTRY" }
+    });
+    expect(lots).toHaveLength(1);
+    expect(lots[0]).toMatchObject({ lojaId: store.id, pedidoCompraItemId: item.id, quantidade: 2 });
+    const salePayload = {
+      canal: "OUTRO",
+      dataVenda: new Date().toISOString(),
+      moeda: "USD",
+      itens: [{ produtoId: product.id, quantidade: 1, precoUnitario: 100 }]
+    };
+    const saleKey = randomUUID();
+    mutationKeys.push(saleKey);
+    const createSale = () => request(app).post("/sales").set(storeHeaders)
+      .set("idempotency-key", saleKey).send(salePayload);
+    const sale = await createSale();
+    expect(sale.status).toBe(201);
+    expect((await createSale()).body.id).toBe(sale.body.id);
+    expect(await prisma.estoque.findUniqueOrThrow({
+      where: { lojaId_produtoId: { lojaId: store.id, produtoId: product.id } }
+    })).toMatchObject({ quantidadeFisica: 2, quantidadeReservada: 0 });
+    expect((await request(app).get(`/sales/${sale.body.id}`)
+      .set(headers(token, otherStore.id))).status).toBe(404);
+
+    const suggestion = await request(app).get(`/sales/${sale.body.id}/lot-suggestion`).set(storeHeaders);
+    expect(suggestion.status).toBe(200);
+    expect(suggestion.body.itens).toEqual([expect.objectContaining({
+      vendaItemId: sale.body.itens[0].id,
+      faltante: 0,
+      lotes: [expect.objectContaining({ movimentoEntradaId: lots[0].id, quantidade: 1, custoConhecido: true })]
+    })]);
+    const confirmationKey = randomUUID();
+    mutationKeys.push(confirmationKey);
+    const confirmSale = () => request(app).post(`/sales/${sale.body.id}/confirm`).set(storeHeaders)
+      .set("idempotency-key", confirmationKey).send({ lotes: [{
+        vendaItemId: sale.body.itens[0].id, movimentoEntradaId: lots[0].id, quantidade: 1
+      }] });
+    const sold = await confirmSale();
+    expect(sold.status).toBe(200);
+    expect(sold.body).toMatchObject({
+      estado: "CONFIRMADA", receitaLiquida: "100.00", custo: "50.00", lucro: "50.00", margem: "50.00"
+    });
+    expect((await confirmSale()).body.id).toBe(sale.body.id);
+    expect(await prisma.estoque.findUniqueOrThrow({
+      where: { lojaId_produtoId: { lojaId: store.id, produtoId: product.id } }
+    })).toMatchObject({ quantidadeFisica: 1, quantidadeReservada: 0 });
+    expect(await prisma.movimentacaoEstoque.count({
+      where: { produtoId: product.id, tipo: "EXIT", motivo: "SALE" }
+    })).toBe(1);
+    expect(await prisma.baixaVenda.count({ where: { movimentoEntradaId: lots[0].id } })).toBe(1);
+
+    for (const [amount, expectedStatus] of [[40, "PARCIAL"], [60, "RECEBIDO"]] as const) {
+      const receiptKey = randomUUID();
+      mutationKeys.push(receiptKey);
+      const payload = { valor: amount, recebidoEm: new Date().toISOString() };
+      const receive = () => request(app).post(`/sales/${sale.body.id}/receipts`).set(storeHeaders)
+        .set("idempotency-key", receiptKey).send(payload);
+      const result = await receive();
+      expect(result.status).toBe(201);
+      expect(result.body.status).toBe(expectedStatus);
+      expect((await receive()).body).toEqual(result.body);
+    }
+    const receivable = await prisma.recebivelVenda.findUniqueOrThrow({ where: { vendaId: sale.body.id } });
+    expect(receivable.valorRecebido.toFixed(2)).toBe("100.00");
+    expect(await prisma.auditLog.count({
+      where: { entity: "RecebivelVenda", entityId: receivable.id, action: "RECEIVE_SALE" }
+    })).toBe(2);
+
+    const after = await indicators(store.id);
+    const otherAfter = await indicators(otherStore.id);
+    expect(after.status).toBe(200);
+    expect(otherAfter.status).toBe(200);
+    for (const [code, dimension, delta] of [
+      ["ESTOQUE_BR", "DISPONIVEL", 1],
+      ["VENDAS_POR_CANAL", "OUTRO", 100],
+      ["FLUXO_FINANCEIRO", "RECEBIMENTO_VENDA", 100]
+    ] as const) {
+      expect(indicatorValue(after.body.linhas, code, dimension))
+        .toBe(indicatorValue(before.body.linhas, code, dimension) + delta);
+      expect(indicatorValue(otherAfter.body.linhas, code, dimension))
+        .toBe(indicatorValue(otherBefore.body.linhas, code, dimension));
+    }
   });
 
   it("agrega alocações do mesmo item em volumes distintos até a entrada em estoque", async () => {
