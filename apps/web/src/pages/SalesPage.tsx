@@ -73,6 +73,9 @@ function useSalesContext() {
   return { store, headers, can };
 }
 
+// Só identidades de tentativas confirmadas cuja limpeza falhou; sobrevive à navegação, sem dados de venda.
+const confirmedSalesAttempts = new Set<string>();
+
 function useSalesPost() {
   const { store, headers } = useSalesContext();
   const userId = useAuthStore((state) => state.user?.id);
@@ -113,11 +116,14 @@ function useSalesPost() {
             .parse(JSON.parse(saved))
         : null;
       const metadata =
-        recovered && !recovered.confirmed
+        recovered &&
+        !recovered.confirmed &&
+        !confirmedSalesAttempts.has(recovered.key)
           ? recovered
           : { key: crypto.randomUUID(), at: new Date().toISOString() };
       try {
         sessionStorage.setItem(storageKey, JSON.stringify(metadata));
+        if (recovered) confirmedSalesAttempts.delete(recovered.key);
       } catch {
         throw new Error("sales_session_storage_unavailable");
       }
@@ -135,8 +141,10 @@ function useSalesPost() {
     });
     try {
       const result = await current.pending;
+      confirmedSalesAttempts.add(current.key);
       try {
         sessionStorage.removeItem(storageKey);
+        confirmedSalesAttempts.delete(current.key);
       } catch {
         try {
           sessionStorage.setItem(
@@ -147,6 +155,7 @@ function useSalesPost() {
               confirmed: true
             })
           );
+          confirmedSalesAttempts.delete(current.key);
         } catch {
           // A API já confirmou; falha de limpeza local não pode transformar sucesso em erro financeiro.
         }
