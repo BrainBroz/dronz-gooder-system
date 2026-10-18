@@ -26,8 +26,11 @@ type LogisticsBag = {
   id: string;
   codigo: string;
   status: string;
-  limitePesoKg: string;
+  limitePesoKg: string | null;
+  tipo: "MALA" | "CAIXA";
   posicaoId: string;
+  grupoFisico: { id: string; codigo: string } | null;
+  handoffs: { id: string; recebidoPor: string; referencia: string | null; ocorridoEm: string; entreguePor: { name: string } }[];
   volumes: { id: string; codigo: string }[];
   alocacoes: { id: string }[];
   allowedStatusTransitions: string[];
@@ -40,7 +43,7 @@ const statusLabels: Record<string, string> = {
   ARRIVED_BRAZIL: "Registrar chegada ao Brasil",
   CLOSED: "Fechar mala",
   PLANNING: "Reabrir composição",
-  CHECKED_IN: "Registrar embarque da mala",
+  CHECKED_IN: "Registrar entrega (handoff)",
   RECEIVED: "Registrar mala recebida"
 };
 
@@ -70,10 +73,14 @@ function LogisticsContent() {
     version: number;
   } | null>(null);
   const [statusReason, setStatusReason] = useState("");
+  const [handoff, setHandoff] = useState({ recebidoPor: "", referencia: "" });
+  const [groupForm, setGroupForm] = useState({ codigo: "", tipo: "MALA" });
   const travelerForm = useForm<{ nome: string; email: string }>({
     defaultValues: { nome: "", email: "" }
   });
   const tripForm = useForm<{
+    modalidade: string;
+    transportadora: string;
     viajanteId: string;
     origem: string;
     destino: string;
@@ -81,6 +88,8 @@ function LogisticsContent() {
     chegadaPrevistaEm: string;
   }>({
     defaultValues: {
+      modalidade: "MALA_VIAJANTE",
+      transportadora: "",
       viajanteId: "",
       origem: "",
       destino: "",
@@ -108,6 +117,7 @@ function LogisticsContent() {
     }
   });
   const allocationBagId = useWatch({ control: allocationForm.control, name: "malaId" });
+  const tripModality = useWatch({ control: tripForm.control, name: "modalidade" });
   const travelers = useQuery({
     queryKey: logisticsQueryKeys.travelers(store),
     enabled: !!store,
@@ -155,13 +165,22 @@ function LogisticsContent() {
     }
   });
   const createTrip = useMutation({
-    mutationFn: (data: {
+    mutationFn: ({ modalidade, transportadora, viajanteId, ...data }: {
+      modalidade: string;
+      transportadora: string;
       viajanteId: string;
       origem: string;
       destino: string;
       partidaEm: string;
       chegadaPrevistaEm: string;
-    }) => api.post("/logistics/trips", data, { headers }),
+    }) =>
+      api.post(
+        "/logistics/trips",
+        modalidade === "CAIXA_AEREA"
+          ? { ...data, modalidade, transportadora }
+          : { ...data, modalidade, viajanteId },
+        { headers }
+      ),
     onSuccess: async () => {
       tripForm.reset();
       await client.invalidateQueries({
@@ -212,13 +231,22 @@ function LogisticsContent() {
     mutationFn: (request: NonNullable<typeof statusRequest>) =>
       api.patch(
         `/logistics/${request.kind}/${request.id}/status`,
-        // D-14: reabrir mala fechada exige motivo auditado.
-        request.status === "PLANNING" ? { status: request.status, motivo: statusReason } : { status: request.status },
+        // D-14: reabrir mala fechada exige motivo auditado; D-13: entrega registra quem recebeu.
+        request.status === "PLANNING"
+          ? { status: request.status, motivo: statusReason }
+          : request.status === "CHECKED_IN"
+            ? {
+                status: request.status,
+                ...(handoff.recebidoPor.trim() ? { recebidoPor: handoff.recebidoPor } : {}),
+                ...(handoff.referencia.trim() ? { referencia: handoff.referencia } : {})
+              }
+            : { status: request.status },
         { headers }
       ),
     onSuccess: () => {
       setStatusRequest(null);
       setStatusReason("");
+      setHandoff({ recebidoPor: "", referencia: "" });
     },
     onSettled: async () => {
       await Promise.all([
@@ -229,12 +257,31 @@ function LogisticsContent() {
     }
   });
   const allocationBag = bags.data?.find((bag) => bag.id === allocationBagId);
+  const groups = useQuery<{ id: string; codigo: string; tipo: string; partes: number }[]>({
+    queryKey: logisticsQueryKeys.physicalGroups(),
+    queryFn: async () => (await api.get("/logistics/physical-groups", { headers })).data
+  });
+  const createGroup = useMutation({
+    mutationFn: () => api.post("/logistics/physical-groups", groupForm, { headers }),
+    onSuccess: () => setGroupForm({ codigo: "", tipo: "MALA" }),
+    onSettled: () => client.invalidateQueries({ queryKey: logisticsQueryKeys.physicalGroups() })
+  });
+  const linkGroup = useMutation({
+    mutationFn: ({ malaId, grupoFisicoId }: { malaId: string; grupoFisicoId: string | null }) =>
+      api.put(`/logistics/suitcases/${malaId}/physical-group`, { grupoFisicoId }, { headers }),
+    onSettled: async () => {
+      await client.invalidateQueries({ queryKey: logisticsQueryKeys.suitcases(store) });
+      await client.invalidateQueries({ queryKey: logisticsQueryKeys.physicalGroups() });
+    }
+  });
   const searchedOrders = draftOrderNumber.trim() === orderNumber ? orders.data : undefined;
   const activeStatusRequest = statusRequest && (
     statusRequest.kind === "trips"
       ? statusRequest.version === trips.dataUpdatedAt && trips.data?.find((trip) => trip.id === statusRequest.id)?.allowedStatusTransitions.includes(statusRequest.status)
       : statusRequest.version === bags.dataUpdatedAt && bags.data?.find((bag) => bag.id === statusRequest.id)?.allowedStatusTransitions.includes(statusRequest.status)
   ) ? statusRequest : null;
+  const handoffNeedsReference = activeStatusRequest?.status === "CHECKED_IN" &&
+    bags.data?.find((bag) => bag.id === activeStatusRequest.id)?.tipo === "CAIXA";
 
   return (
     <Stack gap={{ xs: 2.5, md: 3.5 }}>
@@ -286,19 +333,39 @@ function LogisticsContent() {
         >
           <TextField
             select
-            label="Viajante"
-            defaultValue=""
-            {...tripForm.register("viajanteId", { required: true })}
+            label="Modalidade"
+            defaultValue="MALA_VIAJANTE"
+            {...tripForm.register("modalidade")}
           >
-            <MenuItem value="" disabled>
-              Selecione
-            </MenuItem>
-            {travelers.data?.map((v: { id: string; nome: string }) => (
-              <MenuItem key={v.id} value={v.id}>
-                {v.nome}
-              </MenuItem>
-            ))}
+            <MenuItem value="MALA_VIAJANTE">Mala com viajante</MenuItem>
+            <MenuItem value="CAIXA_AEREA">Caixa aérea</MenuItem>
           </TextField>
+          {tripModality === "CAIXA_AEREA" ? (
+            <TextField
+              label="Transportadora"
+              {...tripForm.register("transportadora", {
+                validate: (value, form) => form.modalidade !== "CAIXA_AEREA" || !!value.trim()
+              })}
+            />
+          ) : (
+            <TextField
+              select
+              label="Viajante"
+              defaultValue=""
+              {...tripForm.register("viajanteId", {
+                validate: (value, form) => form.modalidade !== "MALA_VIAJANTE" || !!value
+              })}
+            >
+              <MenuItem value="" disabled>
+                Selecione
+              </MenuItem>
+              {travelers.data?.map((v: { id: string; nome: string }) => (
+                <MenuItem key={v.id} value={v.id}>
+                  {v.nome}
+                </MenuItem>
+              ))}
+            </TextField>
+          )}
           <TextField
             label="Origem"
             {...tripForm.register("origem", { required: true })}
@@ -399,8 +466,36 @@ function LogisticsContent() {
                   {b.codigo} — {b.status}
                 </Typography>
                 <Typography variant="body2">Posição: {positionName(b.posicaoId)}</Typography>
+                {b.grupoFisico && (
+                  <Typography variant="body2">Volume físico compartilhado: {b.grupoFisico.codigo}</Typography>
+                )}
+                {b.handoffs.map((entry) => (
+                  <Typography key={entry.id} variant="body2">
+                    Entregue por {entry.entreguePor.name} a {entry.recebidoPor}
+                    {entry.referencia ? ` (ref. ${entry.referencia})` : ""} em{" "}
+                    {new Date(entry.ocorridoEm).toLocaleString("pt-BR")}
+                  </Typography>
+                ))}
+                {b.status === "PLANNING" && !!groups.data?.length && (
+                  <TextField
+                    select
+                    size="small"
+                    label="Agrupar em volume físico"
+                    value={b.grupoFisico?.id ?? ""}
+                    disabled={linkGroup.isPending}
+                    onChange={(event) => linkGroup.mutate({ malaId: b.id, grupoFisicoId: event.target.value || null })}
+                  >
+                    <MenuItem value="">Sem agrupamento</MenuItem>
+                    {groups.data
+                      .filter((group) => group.tipo === b.tipo)
+                      .map((group) => (
+                        <MenuItem key={group.id} value={group.id}>{group.codigo} ({group.partes} parte(s))</MenuItem>
+                      ))}
+                  </TextField>
+                )}
                 <Typography>
-                  Limite {b.limitePesoKg} kg · {b.volumes.length} volume(s) ·{" "}
+                  {b.tipo === "CAIXA" ? "Caixa" : "Mala"} · Limite{" "}
+                  {b.limitePesoKg ? `${b.limitePesoKg} kg` : "não informado"} · {b.volumes.length} volume(s) ·{" "}
                   {b.alocacoes.length} alocação(ões)
                 </Typography>
                 <Button onClick={() => setSelectedMalaId(b.id)}>
@@ -416,6 +511,25 @@ function LogisticsContent() {
             </Card>
           )
         )}
+      </ContentCard>
+      <ContentCard title="Volume físico compartilhado entre lojas">
+        <Typography variant="body2" color="text.secondary">
+          Reúne a parte Dronz e a parte Gooder de uma mesma mala ou caixa; o limite de peso vale para o total físico.
+        </Typography>
+        <Stack direction={{ xs: "column", md: "row" }} gap={1} mt={1}>
+          <TextField label="Código do volume físico" value={groupForm.codigo}
+            onChange={(event) => setGroupForm((current) => ({ ...current, codigo: event.target.value }))} />
+          <TextField select label="Tipo" value={groupForm.tipo}
+            onChange={(event) => setGroupForm((current) => ({ ...current, tipo: event.target.value }))}>
+            <MenuItem value="MALA">Mala</MenuItem>
+            <MenuItem value="CAIXA">Caixa</MenuItem>
+          </TextField>
+          <Button disabled={createGroup.isPending || !groupForm.codigo.trim()} onClick={() => createGroup.mutate()}>
+            Criar volume físico
+          </Button>
+        </Stack>
+        <MutationStatus mutation={createGroup} successMessage="Volume físico criado." />
+        <MutationStatus mutation={linkGroup} successMessage="Agrupamento atualizado." />
       </ContentCard>
       <ContentCard title="Adicionar volume à mala">
         <Stack component="form" direction={{ xs: "column", md: "row" }} gap={1}
@@ -502,6 +616,22 @@ function LogisticsContent() {
           <Typography>
             {activeStatusRequest ? `${statusLabels[activeStatusRequest.status] ?? activeStatusRequest.status}: ${activeStatusRequest.name}?` : ""}
           </Typography>
+          {activeStatusRequest?.status === "CHECKED_IN" && (
+            <Stack gap={1} mt={1}>
+              <TextField
+                label="Recebido por"
+                helperText="Em branco usa o viajante ou a transportadora da viagem."
+                value={handoff.recebidoPor}
+                onChange={(event) => setHandoff((current) => ({ ...current, recebidoPor: event.target.value }))}
+              />
+              <TextField
+                label="Referência do recibo"
+                required={handoffNeedsReference}
+                value={handoff.referencia}
+                onChange={(event) => setHandoff((current) => ({ ...current, referencia: event.target.value }))}
+              />
+            </Stack>
+          )}
           {activeStatusRequest?.status === "PLANNING" && (
             <TextField
               label="Motivo da reabertura"
@@ -515,7 +645,7 @@ function LogisticsContent() {
         </DialogContent>
         <DialogActions>
           <Button disabled={changeStatus.isPending} onClick={() => setStatusRequest(null)}>Voltar</Button>
-          <Button disabled={changeStatus.isPending || !activeStatusRequest || (activeStatusRequest.status === "PLANNING" && !statusReason.trim())} onClick={() => {
+          <Button disabled={changeStatus.isPending || !activeStatusRequest || (activeStatusRequest.status === "PLANNING" && !statusReason.trim()) || (handoffNeedsReference && !handoff.referencia.trim())} onClick={() => {
             if (activeStatusRequest) changeStatus.mutate(activeStatusRequest);
           }}>Confirmar</Button>
         </DialogActions>

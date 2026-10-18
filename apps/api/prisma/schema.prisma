@@ -38,6 +38,7 @@ model Loja {
   despesas                      Despesa[]
   pagamentos                    Pagamento[]
   custosPedido                  CustoPedido[]
+  handoffsVolume                HandoffVolume[]
   simulacoesViagem              SimulacaoViagem[]
   atribuicoes                   AtribuicaoItem[]
   comprasImportadas             CompraImportada[]
@@ -80,6 +81,7 @@ model Usuario {
   conexoesMarketplaceCriadas     ConexaoMarketplace[]
   decisoesBuyerCompra            BuyerApprovalDecision[]
   responsabilidadesContextuais   ResponsabilidadeContextual[]
+  handoffsEntregues              HandoffVolume[]
   reservasMala                   AlocacaoMala[]
 }
 
@@ -1157,7 +1159,9 @@ model Viajante {
 model Viagem {
   id                      String               @id @default(cuid())
   lojaId                  String
-  viajanteId              String
+  viajanteId              String?
+  modalidade              ModalidadeEnvio      @default(MALA_VIAJANTE)
+  transportadora          String?
   origem                  String
   destino                 String
   partidaEm               DateTime
@@ -1172,7 +1176,7 @@ model Viagem {
   createdAt               DateTime             @default(now())
   updatedAt               DateTime             @updatedAt
   loja                    Loja                 @relation(fields: [lojaId], references: [id], onDelete: Restrict)
-  viajante                Viajante             @relation(fields: [viajanteId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  viajante                Viajante?            @relation(fields: [viajanteId, lojaId], references: [id, lojaId], onDelete: Restrict)
   malas                   Mala[]
   checkpointsParaguai     CheckpointParaguai[]
   checkpointsBrasil       CheckpointBrasil[]
@@ -1189,7 +1193,11 @@ model Mala {
   lojaId              String
   viagemId            String
   codigo              String
-  limitePesoKg        Decimal              @default(23) @db.Decimal(8, 3)
+  tipo                TipoVolumeEnvio      @default(MALA)
+  limitePesoKg        Decimal?             @default(23) @db.Decimal(8, 3)
+  grupoFisicoId       String?
+  grupoFisico         GrupoFisico?         @relation(fields: [grupoFisicoId], references: [id], onDelete: Restrict)
+  handoffs            HandoffVolume[]
   posicaoId           String               @default("posicao-miami-base")
   posicao             PosicaoOperacional   @relation(fields: [posicaoId], references: [id], onDelete: Restrict)
   status              MalaStatus           @default(PLANNING)
@@ -1209,6 +1217,7 @@ model Mala {
   @@unique([id, lojaId])
   @@index([lojaId, status])
   @@index([posicaoId])
+  @@index([grupoFisicoId])
 }
 
 model VolumeLogistico {
@@ -1804,4 +1813,42 @@ model ResponsabilidadeContextual {
   usuario    Usuario               @relation(fields: [usuarioId], references: [id], onDelete: Restrict)
 
   @@index([posicaoId, usuarioId])
+}
+
+enum ModalidadeEnvio {
+  MALA_VIAJANTE
+  CAIXA_AEREA
+}
+
+enum TipoVolumeEnvio {
+  MALA
+  CAIXA
+}
+
+// D-11: um volume físico pode reunir as partes (por loja) de uma mesma mala ou caixa;
+// o limite de peso vale para o total físico, e cada parte mantém loja e custos próprios.
+model GrupoFisico {
+  id           String          @id @default(cuid())
+  codigo       String          @unique
+  tipo         TipoVolumeEnvio
+  limitePesoKg Decimal?        @db.Decimal(8, 3)
+  createdAt    DateTime        @default(now())
+  partes       Mala[]
+}
+
+// D-13: entrega de volume a transportador ou viajante, com responsáveis e instante do servidor.
+model HandoffVolume {
+  id            String   @id @default(cuid())
+  lojaId        String
+  malaId        String
+  entreguePorId String
+  recebidoPor   String
+  referencia    String?
+  observacao    String?
+  ocorridoEm    DateTime @default(now())
+  loja          Loja     @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  mala          Mala     @relation(fields: [malaId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  entreguePor   Usuario  @relation(fields: [entreguePorId], references: [id], onDelete: Restrict)
+
+  @@index([lojaId, malaId])
 }

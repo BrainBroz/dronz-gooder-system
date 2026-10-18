@@ -91,7 +91,9 @@ logisticsRouter.post(
       parse(
         z
           .object({
-            viajanteId: z.string(),
+            modalidade: z.enum(["MALA_VIAJANTE", "CAIXA_AEREA"]).optional(),
+            viajanteId: z.string().optional(),
+            transportadora: z.string().trim().max(120).optional(),
             origem: z.string(),
             destino: z.string(),
             partidaEm: z.coerce.date(),
@@ -168,7 +170,7 @@ logisticsRouter.post(
           .object({
             viagemId: z.string(),
             codigo: z.string(),
-            limitePesoKg: z.number().positive().max(23).optional(),
+            limitePesoKg: z.number().positive().max(1000).optional(),
             posicaoId: z.string().optional()
           })
           .strict(),
@@ -270,12 +272,20 @@ logisticsRouter.patch(
               "RECEIVED",
               "CANCELLED"
             ]),
-            motivo: z.string().trim().max(2000).optional()
+            motivo: z.string().trim().max(2000).optional(),
+            recebidoPor: z.string().trim().max(200).optional(),
+            referencia: z.string().trim().max(200).optional(),
+            observacao: z.string().trim().max(2000).optional()
           })
           .strict(),
         r.body
       ).status,
-      typeof r.body?.motivo === "string" ? r.body.motivo : undefined
+      typeof r.body?.motivo === "string" ? r.body.motivo : undefined,
+      {
+        recebidoPor: typeof r.body?.recebidoPor === "string" ? r.body.recebidoPor : undefined,
+        referencia: typeof r.body?.referencia === "string" ? r.body.referencia : undefined,
+        observacao: typeof r.body?.observacao === "string" ? r.body.observacao : undefined
+      }
     )
   )
 );
@@ -401,6 +411,45 @@ logisticsRouter.post(
         r.body
       ),
       typeof r.headers["idempotency-key"] === "string" ? r.headers["idempotency-key"] : undefined
+    )
+  )
+);
+
+const storesOf = (r: AuthenticatedRequest) => r.identity!.lojas.map((store) => store.id);
+logisticsRouter.post(
+  "/physical-groups",
+  wrap((r) =>
+    s.createPhysicalGroup(
+      parse(
+        z
+          .object({
+            codigo: z.string().trim().min(1).max(60),
+            tipo: z.enum(["MALA", "CAIXA"]),
+            limitePesoKg: z.number().positive().max(1000).optional()
+          })
+          .strict(),
+        r.body
+      )
+    )
+  )
+);
+logisticsRouter.get(
+  "/physical-groups",
+  wrap(() => s.physicalGroups())
+);
+logisticsRouter.get(
+  "/physical-groups/:id",
+  wrap((r) => s.physicalGroup(storesOf(r), String(r.params.id)))
+);
+logisticsRouter.put(
+  "/suitcases/:id/physical-group",
+  wrap((r) =>
+    s.setPhysicalGroup(
+      r.storeId!,
+      r.identity!.user.id,
+      storesOf(r),
+      String(r.params.id),
+      parse(z.object({ grupoFisicoId: z.string().nullable() }).strict(), r.body).grupoFisicoId
     )
   )
 );

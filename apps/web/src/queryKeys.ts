@@ -18,6 +18,7 @@ export const logisticsQueryKeys = {
   trips: (id: string | null) => ["trips", id] as const,
   suitcases: (id: string | null) => ["suitcases", id] as const,
   positions: () => ["positions"] as const,
+  physicalGroups: () => ["physical-groups"] as const,
   availability: (storeId: string | null, positionId: string | null) =>
     ["position-availability", storeId, positionId] as const,
   suitcaseWeight: (storeId: string | null, malaId: string | null) =>
