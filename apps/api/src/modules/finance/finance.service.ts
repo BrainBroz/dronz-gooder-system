@@ -39,6 +39,8 @@ export async function createExchange(
     moedaOrigem: string;
     moedaDestino: string;
     valorMercado: number;
+    margem: number;
+    fonte: string;
     cotadoEm: Date;
   },
   key?: string
@@ -53,7 +55,10 @@ export async function createExchange(
       const valorMercado = new Prisma.Decimal(
         data.valorMercado
       ).toDecimalPlaces(6, Prisma.Decimal.ROUND_HALF_UP);
-      const margem = new Prisma.Decimal("0.20");
+      const margem = new Prisma.Decimal(data.margem).toDecimalPlaces(
+        6,
+        Prisma.Decimal.ROUND_HALF_UP
+      );
       const valor = valorMercado.plus(margem);
       const created = await tx.cotacaoCambio.create({
         data: {
@@ -64,7 +69,8 @@ export async function createExchange(
           cotadoEm: data.cotadoEm,
           valorMercado,
           margem,
-          valor
+          valor,
+          fonte: data.fonte
         }
       });
       await audit(tx, {

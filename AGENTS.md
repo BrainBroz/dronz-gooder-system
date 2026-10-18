@@ -98,6 +98,7 @@ Evidências externas são imutáveis e versionadas; a situação corrente é pro
 ## Documentação
 
 - `docs/PROJECT_CONTEXT_MASTER.md` é o índice oficial de continuidade e deve refletir somente o que o código e os testes comprovam.
+- `docs/DECISOES_PRODUTO_2026-10-17.md` registra as decisões D-1…D-17 e X-01…X-15 aprovadas e a ordem de entrega vigente.
 - `docs/BUYER_PURCHASE_INGESTION_CONTRACT_V1.md` é o contrato normativo para os Batches 10–13; decisões de produto nele marcadas como bloqueadoras não podem ser preenchidas por suposição.
 - Contratos normativos específicos preservam as regras do domínio; documentos iniciais ou de investigação devem ser marcados como históricos quando superados.
 - Atualizações relevantes registram estado implementado, commit, riscos, limitações e roadmap sem duplicar contratos completos.

@@ -5,7 +5,7 @@ import { evaluateDefinitiveEntry, evaluateReceivingTransition } from "../operati
 export const list = (lojaId: string) =>
   prisma.recebimento.findMany({
     where: { lojaId, supersededAt: null },
-    include: { viagem: true, mala: true, itens: { include: { produto: true } } }
+    include: { viagem: true, mala: true, itens: { include: { produto: { omit: { precoVenda: true, markup: true } } } } }
   });
 export async function create(
   lojaId: string,

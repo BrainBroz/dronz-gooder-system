@@ -344,6 +344,23 @@ describe("autorização por capacidade nos módulos operacionais", () => {
     expect(found.itens[0].quantidade).toBe(data.item.quantidade);
   });
 
+  it("logística e recebimento não devolvem valores de item ou produto (F-10)", async () => {
+    const data = await fixture();
+    const { app, headers } = await userWith({ code: "GESTOR_LOJA" });
+    const suitcases = await request(app)
+      .get("/logistics/suitcases")
+      .set(headers);
+    const bag = suitcases.body.find(
+      (entry: { id: string }) => entry.id === data.bag.id
+    );
+    const item = bag.alocacoes[0].item;
+    expect(item.quantidade).toBe(data.item.quantidade);
+    expect(item).not.toHaveProperty("precoUnitario");
+    expect(item).not.toHaveProperty("totalItem");
+    expect(item.produto).not.toHaveProperty("precoVenda");
+    expect(item.produto.peso).toBeDefined();
+  });
+
   it("gestor de loja vê valores na busca por número", async () => {
     const data = await fixture();
     const { app, headers } = await userWith({ code: "GESTOR_LOJA" });

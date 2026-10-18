@@ -21,12 +21,15 @@ function FinanceContent() {
     moedaOrigem: string;
     moedaDestino: string;
     valor: number;
+    margem: number;
+    fonte: string;
     cotadoEm: string;
   }>({
     defaultValues: {
       moedaOrigem: "BRL",
       moedaDestino: "USD",
       valor: 0,
+      fonte: "",
       cotadoEm: ""
     }
   });
@@ -79,6 +82,8 @@ function FinanceContent() {
       moedaOrigem: string;
       moedaDestino: string;
       valor: number;
+      margem: number;
+      fonte: string;
       cotadoEm: string;
     }) =>
       api.post(
@@ -87,6 +92,8 @@ function FinanceContent() {
           moedaOrigem: v.moedaOrigem,
           moedaDestino: v.moedaDestino,
           valorMercado: Number(v.valor),
+          margem: Number(v.margem),
+          fonte: v.fonte,
           cotadoEm: v.cotadoEm || new Date().toISOString()
         },
         { headers }
@@ -167,6 +174,20 @@ function FinanceContent() {
               valueAsNumber: true,
               min: 0.000001
             })}
+          />
+          <TextField
+            type="number"
+            inputProps={{ step: "0.000001" }}
+            label="Margem"
+            {...exchangeForm.register("margem", {
+              valueAsNumber: true,
+              required: true,
+              min: 0
+            })}
+          />
+          <TextField
+            label="Fonte"
+            {...exchangeForm.register("fonte", { required: true })}
           />
           <TextField
             type="datetime-local"

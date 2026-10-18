@@ -39,6 +39,8 @@ financeRouter.post(
         moedaOrigem: z.string().length(3),
         moedaDestino: z.string().length(3),
         valorMercado: z.number().positive(),
+        margem: z.number().min(0),
+        fonte: z.string().trim().min(1).max(200),
         cotadoEm: z.coerce.date()
       })
       .strict()
