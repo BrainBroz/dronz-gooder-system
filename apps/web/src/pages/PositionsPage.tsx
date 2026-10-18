@@ -55,6 +55,7 @@ type Position = {
 
 type AvailabilityRow = {
   pedidoCompraItemId: string;
+  trackings?: { codigo: string; transportadora: string | null }[];
   pedido: { numeroPedido: string };
   produto: { codigo: number; nome: string };
   recebido: number;
@@ -337,6 +338,7 @@ function Availability({ positionId }: { positionId: string }) {
           <TableCell align="right">Reservado</TableCell>
           <TableCell align="right">Alocado</TableCell>
           <TableCell align="right">Disponível</TableCell>
+          <TableCell>Tracking esperado</TableCell>
         </TableRow>
       </TableHead>
       <TableBody>
@@ -351,6 +353,10 @@ function Availability({ positionId }: { positionId: string }) {
             <TableCell align="right">{row.reservado}</TableCell>
             <TableCell align="right">{row.alocado}</TableCell>
             <TableCell align="right">{row.disponivel}</TableCell>
+            <TableCell>
+              {row.trackings?.map((tracking) => tracking.codigo).join(", ") ||
+                "—"}
+            </TableCell>
           </TableRow>
         ))}
       </TableBody>
@@ -371,6 +377,77 @@ type PositionForm = {
   timezone: string;
   endereco: string;
 };
+
+// Leitura de etiqueta (scanner atua como teclado): localiza o pedido da loja ativa; não confirma recebimento.
+function LabelLookup() {
+  const store = useAuthStore((s) => s.activeStoreId);
+  const [code, setCode] = useState("");
+  const lookup = useMutation({
+    mutationFn: async () =>
+      (
+        await api.get("/purchase-orders/tracking/lookup", {
+          headers: { ...authHeader(), "x-store-id": store! },
+          params: { codigo: code }
+        })
+      ).data as {
+        trackingId: string;
+        codigo: string;
+        transportadora: string | null;
+        exato: boolean;
+        pedidos: {
+          id: string;
+          numeroPedido: string;
+          status: string;
+          destinoPosicao: { nome: string };
+        }[];
+      }[]
+  });
+  return (
+    <ContentCard title="Ler etiqueta">
+      <Stack
+        component="form"
+        direction={{ xs: "column", md: "row" }}
+        gap={1}
+        onSubmit={(event) => {
+          event.preventDefault();
+          lookup.mutate();
+        }}
+      >
+        <TextField
+          label="Código de tracking"
+          value={code}
+          onChange={(event) => setCode(event.target.value)}
+          autoComplete="off"
+        />
+        <Button
+          type="submit"
+          disabled={lookup.isPending || code.replace(/\s/g, "").length < 6}
+        >
+          Buscar
+        </Button>
+      </Stack>
+      <MutationStatus
+        mutation={lookup}
+        successMessage=""
+        loadingMessage="Buscando…"
+      />
+      {lookup.data && !lookup.data.length && (
+        <Typography>Código não encontrado.</Typography>
+      )}
+      {lookup.data?.map((match) => (
+        <Typography key={match.trackingId} variant="body2">
+          {match.transportadora ?? "—"} {match.codigo}
+          {match.exato ? "" : " (por últimos dígitos)"}:{" "}
+          {match.pedidos
+            .map(
+              (order) => `${order.numeroPedido} → ${order.destinoPosicao.nome}`
+            )
+            .join("; ")}
+        </Typography>
+      ))}
+    </ContentCard>
+  );
+}
 
 function CreatePosition() {
   const client = useQueryClient();
@@ -535,6 +612,7 @@ export function PositionsPage() {
             <Availability positionId={selected} />
           </ContentCard>
         )}
+        <LabelLookup />
         {canManage && <CreatePosition />}
       </Stack>
     </PageContainer>

@@ -1,0 +1,211 @@
+import { randomUUID } from "node:crypto";
+import { Prisma } from "@prisma/client";
+import { prisma } from "../../lib/prisma";
+import { AppError } from "../../lib/app-error";
+import { audit } from "../operations/operations.persistence";
+
+// Batch 14: tracking por pedido operacional. Tracking é evidência de envio, nunca confirma
+// recebimento, checkpoint ou estoque. Fallback manual auditável quando o marketplace não informa.
+const MANUAL_SHIPMENT = "MANUAL";
+const normalizeCode = (value: string) =>
+  value.replace(/\s+/g, "").normalize("NFC");
+
+async function orderWithPurchase(
+  db: Prisma.TransactionClient | typeof prisma,
+  lojaId: string,
+  id: string
+) {
+  const order = await db.pedidoCompra.findFirst({
+    where: { id, lojaId },
+    select: { id: true, compraImportadaId: true }
+  });
+  if (!order) throw new AppError(404, "not_found");
+  if (!order.compraImportadaId)
+    throw new AppError(409, "order_without_purchase");
+  return order as { id: string; compraImportadaId: string };
+}
+
+export async function listTrackings(lojaId: string, pedidoCompraId: string) {
+  const order = await orderWithPurchase(prisma, lojaId, pedidoCompraId);
+  const trackings = await prisma.trackingExterno.findMany({
+    where: {
+      pacote: { envio: { compraImportadaId: order.compraImportadaId } }
+    },
+    include: {
+      pacote: {
+        select: {
+          externalPackageId: true,
+          envio: { select: { externalShipmentId: true, enviadoEm: true } }
+        }
+      }
+    },
+    orderBy: { createdAt: "asc" }
+  });
+  return trackings.map((tracking) => ({
+    id: tracking.id,
+    codigo: tracking.codigo,
+    transportadora: tracking.transportadora,
+    origem: tracking.origem,
+    ativo: tracking.ativo,
+    statusExterno: tracking.statusExterno,
+    substituiTrackingId: tracking.substituiTrackingId,
+    pacote: tracking.pacote.externalPackageId,
+    enviadoEm: tracking.pacote.envio.enviadoEm,
+    registradoEm: tracking.createdAt
+  }));
+}
+
+export async function addManualTracking(
+  lojaId: string,
+  userId: string,
+  pedidoCompraId: string,
+  input: {
+    codigo: string;
+    transportadora?: string;
+    substituiTrackingId?: string;
+  }
+) {
+  const codigo = normalizeCode(input.codigo);
+  if (!codigo) throw new AppError(400, "bad_request");
+  return prisma.$transaction(async (tx) => {
+    const order = await orderWithPurchase(tx, lojaId, pedidoCompraId);
+    await tx.$queryRaw`SELECT id FROM "CompraImportada" WHERE id = ${order.compraImportadaId} FOR UPDATE`;
+    const replaced = input.substituiTrackingId
+      ? await tx.trackingExterno.findFirst({
+          where: {
+            id: input.substituiTrackingId,
+            pacote: { envio: { compraImportadaId: order.compraImportadaId } }
+          }
+        })
+      : null;
+    if (input.substituiTrackingId && !replaced)
+      throw new AppError(404, "tracking_not_found");
+    const now = new Date();
+    const shipment = await tx.envioExterno.upsert({
+      where: {
+        compraImportadaId_externalShipmentId: {
+          compraImportadaId: order.compraImportadaId,
+          externalShipmentId: MANUAL_SHIPMENT
+        }
+      },
+      update: { ultimaAtualizacaoEm: now },
+      create: {
+        compraImportadaId: order.compraImportadaId,
+        externalShipmentId: MANUAL_SHIPMENT,
+        ultimaAtualizacaoEm: now
+      }
+    });
+    const packageId = `${MANUAL_SHIPMENT}:${input.transportadora ?? "SEM_TRANSPORTADORA"}:${codigo}`;
+    const pkg = await tx.pacoteExterno.upsert({
+      where: {
+        envioExternoId_externalPackageId: {
+          envioExternoId: shipment.id,
+          externalPackageId: packageId
+        }
+      },
+      update: {},
+      create: {
+        envioExternoId: shipment.id,
+        externalPackageId: packageId,
+        transportadora: input.transportadora
+      }
+    });
+    const duplicate = await tx.trackingExterno.findFirst({
+      where: {
+        pacoteExternoId: pkg.id,
+        codigo,
+        transportadora: input.transportadora ?? null
+      }
+    });
+    if (duplicate) throw new AppError(409, "tracking_already_registered");
+    // Correção cria registro novo ligado ao anterior; o código antigo fica inativo, nunca apagado.
+    if (replaced)
+      await tx.trackingExterno.update({
+        where: { id: replaced.id },
+        data: { ativo: false }
+      });
+    const created = await tx.trackingExterno.create({
+      data: {
+        pacoteExternoId: pkg.id,
+        codigo,
+        transportadora: input.transportadora,
+        origem: "MANUAL",
+        ativo: true,
+        substituiTrackingId: replaced?.id,
+        ultimaAtualizacaoEm: now
+      }
+    });
+    await audit(tx, {
+      usuarioId: userId,
+      lojaId,
+      permissionCode: "PEDIDOS_COMPRA_GERENCIAR",
+      action: replaced ? "REPLACE_TRACKING" : "ADD_MANUAL_TRACKING",
+      entity: "TrackingExterno",
+      entityId: created.id,
+      correlationId: randomUUID(),
+      origin: "API_PURCHASE_ORDERS",
+      before: replaced
+        ? { id: replaced.id, codigo: replaced.codigo }
+        : undefined,
+      after: {
+        codigo,
+        transportadora: input.transportadora ?? null,
+        pedidoCompraId
+      }
+    });
+    return created;
+  });
+}
+
+// Leitura de etiqueta: código completo ou últimos dígitos (≥ 6), só entre pedidos da loja ativa.
+// Código de outra loja ou desconhecido devolve vazio, sem revelar existência.
+export async function lookupTracking(lojaId: string, rawCode: string) {
+  const codigo = normalizeCode(rawCode);
+  if (codigo.length < 6) throw new AppError(400, "tracking_code_too_short");
+  const trackings = await prisma.trackingExterno.findMany({
+    where: {
+      OR: [
+        { codigo: { equals: codigo, mode: "insensitive" } },
+        { codigo: { endsWith: codigo, mode: "insensitive" } }
+      ],
+      pacote: {
+        envio: {
+          compraImportada: { pedidosOperacionais: { some: { lojaId } } }
+        }
+      }
+    },
+    include: {
+      pacote: {
+        include: {
+          envio: {
+            include: {
+              compraImportada: {
+                include: {
+                  pedidosOperacionais: {
+                    where: { lojaId },
+                    select: {
+                      id: true,
+                      numeroPedido: true,
+                      status: true,
+                      destinoPosicao: { select: { id: true, nome: true } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    take: 20
+  });
+  return trackings.map((tracking) => ({
+    trackingId: tracking.id,
+    codigo: tracking.codigo,
+    transportadora: tracking.transportadora,
+    ativo: tracking.ativo,
+    origem: tracking.origem,
+    exato: tracking.codigo.toLowerCase() === codigo.toLowerCase(),
+    pedidos: tracking.pacote.envio.compraImportada.pedidosOperacionais
+  }));
+}
