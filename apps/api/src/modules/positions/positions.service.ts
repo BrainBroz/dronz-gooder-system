@@ -471,7 +471,27 @@ export async function availability(
       quantidade: true,
       quantidadeRecebidaMiami: true,
       pedido: {
-        select: { id: true, numeroPedido: true, destinoPosicaoId: true }
+        select: {
+          id: true,
+          numeroPedido: true,
+          destinoPosicaoId: true,
+          compraImportada: {
+            select: {
+              enviosExternos: {
+                select: {
+                  pacotes: {
+                    select: {
+                      trackings: {
+                        where: { ativo: true },
+                        select: { codigo: true, transportadora: true }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       },
       produto: { select: { id: true, codigo: true, nome: true, peso: true } },
       recebimentosMiami: {
@@ -503,6 +523,10 @@ export async function availability(
     return {
       pedidoCompraItemId: item.id,
       pedido: { id: item.pedido.id, numeroPedido: item.pedido.numeroPedido },
+      // Códigos esperados para conferir a etiqueta; tracking não confirma recebimento.
+      trackings: (item.pedido.compraImportada?.enviosExternos ?? []).flatMap(
+        (envio) => envio.pacotes.flatMap((pkg) => pkg.trackings)
+      ),
       produto: item.produto,
       recebido,
       reservado,

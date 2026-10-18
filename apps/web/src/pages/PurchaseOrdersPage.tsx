@@ -14,9 +14,11 @@ import { logisticsQueryKeys, purchasingQueryKeys } from "../queryKeys";
 import { operationsKeys } from "../hooks/useOperations";
 import type { Supplier, PurchaseOrder } from "../types/purchasing";
 import { useProducts } from "../hooks/useCatalog";
+import { OrderTrackings } from "../components/OrderTrackings";
 
 function PurchaseOrdersContent() {
   const store = useAuthStore((s) => s.activeStoreId);
+  const permissions = useAuthStore((s) => s.permissions);
   const client = useQueryClient();
   const [page, setPage] = useState(1);
   const [selectedAction, setSelectedAction] = useState<{ id: string; number: string; status: "PLACED" | "CONFIRMED" } | null>(null);
@@ -244,6 +246,13 @@ function PurchaseOrdersContent() {
                     <MenuItem key={position.id} value={position.id}>{position.nome}</MenuItem>
                   ))}
               </TextField>
+            )}
+            {store && (
+              <OrderTrackings
+                orderId={o.id}
+                store={store}
+                canManage={permissions.includes("SYSTEM_ADMIN") || permissions.includes("PEDIDOS_COMPRA_GERENCIAR")}
+              />
             )}
             {(["PLACED", "CONFIRMED"] as const).filter((status) =>
               o.allowedStatusTransitions?.includes(status)
