@@ -231,6 +231,22 @@ export async function lookupTracking(lojaId: string, rawCode: string) {
 
 // D-15: destino por pacote. Alteração auditada só antes de qualquer recebimento da compra; depois,
 // o caminho é transferência operacional. O pacote é físico e pode servir pedidos das duas lojas.
+// Trava os pedidos (ordem fixa) e devolve o destino atual de cada um. Ordem de travas nos comandos de
+// pacote: pacote → pedidos → itens → posições; setDestination: pedido → itens → posição.
+async function lockedOrderDestinations(
+  tx: Prisma.TransactionClient,
+  orderIds: string[]
+) {
+  const destinations = new Map<string, string>();
+  for (const id of [...new Set(orderIds)].sort()) {
+    const [row] = await tx.$queryRaw<
+      { destinoPosicaoId: string }[]
+    >`SELECT "destinoPosicaoId" FROM "PedidoCompra" WHERE id = ${id} FOR UPDATE`;
+    if (row) destinations.set(id, row.destinoPosicaoId);
+  }
+  return destinations;
+}
+
 export async function setPackageDestination(
   lojaId: string,
   userId: string,
@@ -254,9 +270,14 @@ export async function setPackageDestination(
       where: { pacoteExternoId: pacoteId },
       select: {
         pedidoCompraItemId: true,
-        item: { select: { pedido: { select: { destinoPosicaoId: true } } } }
+        item: { select: { pedidoCompraId: true } }
       }
     });
+    // Destinos dos pedidos lidos só depois de travar os pedidos (mesma trava de setDestination).
+    const destinations = await lockedOrderDestinations(tx, [
+      pedidoCompraId,
+      ...lines.map((line) => line.item.pedidoCompraId)
+    ]);
     for (const itemId of [
       ...new Set(lines.map((line) => line.pedidoCompraItemId))
     ].sort())
@@ -267,8 +288,8 @@ export async function setPackageDestination(
       ? [input.posicaoId]
       : [
           ...new Set([
-            order.destinoPosicao!.id,
-            ...lines.map((line) => line.item.pedido.destinoPosicaoId)
+            destinations.get(pedidoCompraId)!,
+            ...lines.map((line) => destinations.get(line.item.pedidoCompraId)!)
           ])
         ].sort();
     for (const posicaoId of claims) await claimOpenPosition(tx, posicaoId);
@@ -324,6 +345,10 @@ export async function setPackageItems(
       include: { itens: { where: { lojaId } } }
     });
     if (!pkg) throw new AppError(404, "package_not_found");
+    // O destino do pedido é relido sob a trava do pedido: um redirecionamento concorrente não fica de fora.
+    const orderDestination = (
+      await lockedOrderDestinations(tx, [pedidoCompraId])
+    ).get(pedidoCompraId)!;
     const ids = input.itens.map((entry) => entry.pedidoCompraItemId);
     if (new Set(ids).size !== ids.length)
       throw new AppError(400, "bad_request");
@@ -359,8 +384,8 @@ export async function setPackageItems(
           ?.quantidade ?? 0)
     );
     const claims = new Set<string>();
-    if (grows) claims.add(pkg.destinoPosicaoId ?? order.destinoPosicao!.id);
-    if (shrinks) claims.add(order.destinoPosicao!.id);
+    if (grows) claims.add(pkg.destinoPosicaoId ?? orderDestination);
+    if (shrinks) claims.add(orderDestination);
     for (const posicaoId of [...claims].sort())
       await claimOpenPosition(tx, posicaoId);
     const items = await tx.pedidoCompraItem.findMany({

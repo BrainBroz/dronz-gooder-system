@@ -250,6 +250,11 @@ export async function setDestination(
     await tx.$queryRaw`SELECT id FROM "PedidoCompra" WHERE id = ${id} AND "lojaId" = ${lojaId} FOR UPDATE`;
     const order = await tx.pedidoCompra.findFirst({ where: { id, lojaId } });
     if (!order) throw new AppError(404, "not_found");
+    // Redirecionar o pedido muda onde suas unidades podem ser recebidas: toca as linhas dos itens
+    // (ordem fixa) para que um recebimento concorrente falhe por serialização em vez de usar o destino antigo.
+    const items = await tx.pedidoCompraItem.findMany({ where: { pedidoCompraId: id, lojaId }, select: { id: true }, orderBy: { id: "asc" } });
+    for (const item of items)
+      await tx.$executeRaw`UPDATE "PedidoCompraItem" SET "updatedAt" = (now() AT TIME ZONE 'UTC') WHERE id = ${item.id}`;
     await claimOpenPosition(tx, posicaoId);
     if (await tx.recebimentoMiami.count({ where: { lojaId, item: { pedidoCompraId: id } } }))
       throw new AppError(409, "already_received");

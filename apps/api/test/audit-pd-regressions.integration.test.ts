@@ -1473,3 +1473,93 @@ describe("revisão local do Codex (24eb581): achados corrigidos", () => {
     ).toBe(ctx.hotel.id);
   });
 });
+
+describe("revisão local do Codex (bd5e978): achado corrigido", () => {
+  it("P1: redução de conteúdo relê o destino do pedido sob trava e não devolve saldo a posição recém-encerrada", async () => {
+    const ctx = await packages();
+    const { transition } =
+      await import("../src/modules/positions/positions.service");
+    const { setPackageItems } =
+      await import("../src/modules/purchase-orders/tracking.service");
+    const newDest = await prisma.posicaoOperacional.create({
+      data: {
+        localId: ctx.base.localId,
+        codigo: `AUD-C-${randomUUID()}`,
+        nome: "Novo destino do pedido",
+        tipo: "TEMPORARIA",
+        status: "ATIVA",
+        inicioEm: new Date(Date.now() - 86_400_000),
+        fimEm: new Date(Date.now() + 86_400_000)
+      }
+    });
+    cleanups.push(async () => {
+      await prisma.pedidoCompra.update({
+        where: { id: ctx.data.order.id },
+        data: { destinoPosicaoId: ctx.base.id }
+      });
+      await prisma.posicaoOperacional.delete({ where: { id: newDest.id } });
+    });
+    // Todas as unidades num pacote destinado ao hotel.
+    expect(
+      (
+        await ctx.put(ctx.a.id, "destination", {
+          posicaoId: ctx.hotel.id,
+          motivo: "Hotel"
+        })
+      ).status
+    ).toBe(200);
+    expect((await ctx.content(ctx.a.id, 2)).status).toBe(200);
+    // A edição começa e fica parada na trava do pacote (outra edição em curso segura o pacote).
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let holding!: () => void;
+    const held = new Promise<void>((resolve) => (holding = resolve));
+    const otherEdit = prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "PacoteExterno" WHERE id = ${ctx.a.id} FOR UPDATE`;
+        holding();
+        await gate;
+      },
+      { timeout: 20_000 }
+    );
+    await held;
+    const edit = setPackageItems(
+      ctx.store.id,
+      ctx.data.admin.id,
+      ctx.data.order.id,
+      ctx.a.id,
+      {
+        itens: [{ pedidoCompraItemId: ctx.data.item.id, quantidade: 1 }],
+        motivo: "Redução concorrente"
+      }
+    ).then(
+      () => "accepted",
+      (error: { code?: string }) => error.code
+    );
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const [{ n }] = await prisma.$queryRaw<
+        { n: number }[]
+      >`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%PacoteExterno%FOR UPDATE%'`;
+      if (n > 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    // Enquanto isso, o pedido é redirecionado (comando real) e o novo destino encerra: todas as unidades
+    // estão no pacote do hotel, então nada é esperado lá.
+    const { setDestination } =
+      await import("../src/modules/purchase-orders/purchase-orders.service");
+    await setDestination(
+      ctx.store.id,
+      ctx.data.admin.id,
+      ctx.data.order.id,
+      newDest.id
+    );
+    expect((await transition(ctx.admin, newDest.id, "ENCERRAR")).status).toBe(
+      "ENCERRADA"
+    );
+    release();
+    await otherEdit;
+    // A edição relê o destino atual (encerrado) e recusa; o conteúdo continua com as 2 unidades.
+    expect(await edit).toBe("position_closed");
+    expect(await assigned(ctx.data.item.id)).toBe(2);
+  });
+});
