@@ -1819,3 +1819,89 @@ describe("revisão local do Codex (3db5c4f): achado corrigido", () => {
     }
   });
 });
+
+describe("revisão local do Codex (2658b1a): achado corrigido", () => {
+  it("P2: aumentar quantidade ou incluir item não cria pendência em destino de pedido encerrado", async () => {
+    const ctx = await packages();
+    const { transition } =
+      await import("../src/modules/positions/positions.service");
+    const { updateItem, addItem } =
+      await import("../src/modules/purchase-orders/purchase-orders.service");
+    const orderDest = await prisma.posicaoOperacional.create({
+      data: {
+        localId: ctx.base.localId,
+        codigo: `AUD-QTY-${randomUUID()}`,
+        nome: "Destino do pedido",
+        tipo: "TEMPORARIA",
+        status: "ATIVA",
+        inicioEm: new Date(Date.now() - 86_400_000),
+        fimEm: new Date(Date.now() + 86_400_000)
+      }
+    });
+    cleanups.push(async () => {
+      await prisma.pedidoCompra.update({
+        where: { id: ctx.data.order.id },
+        data: { destinoPosicaoId: ctx.base.id }
+      });
+      await prisma.posicaoOperacional.delete({ where: { id: orderDest.id } });
+    });
+    await prisma.pedidoCompra.update({
+      where: { id: ctx.data.order.id },
+      data: { destinoPosicaoId: orderDest.id }
+    });
+    expect(
+      (
+        await ctx.put(ctx.a.id, "destination", {
+          posicaoId: ctx.hotel.id,
+          motivo: "Hotel"
+        })
+      ).status
+    ).toBe(200);
+    expect((await ctx.content(ctx.a.id, 2)).status).toBe(200);
+    expect((await transition(ctx.admin, orderDest.id, "ENCERRAR")).status).toBe(
+      "ENCERRADA"
+    );
+    await expect(
+      updateItem(ctx.store.id, ctx.data.order.id, ctx.data.item.id, {
+        quantidade: 3
+      })
+    ).rejects.toMatchObject({
+      code: "position_closed"
+    });
+    // Reduzir não cria pendência: continua permitido pela regra existente.
+    await expect(
+      updateItem(ctx.store.id, ctx.data.order.id, ctx.data.item.id, {
+        observacoes: "Só observação"
+      })
+    ).resolves.toBeTruthy();
+    const otherProduct = await prisma.produto.create({
+      data: {
+        lojaId: ctx.store.id,
+        categoriaId: ctx.data.category.id,
+        codigo: 9_000_000 + Math.floor(Math.random() * 900_000),
+        nome: `Produto extra ${randomUUID()}`,
+        slug: `extra-${randomUUID()}`,
+        precoVenda: 10,
+        markup: 25
+      }
+    });
+    cleanups.push(() =>
+      prisma.produto.delete({ where: { id: otherProduct.id } })
+    );
+    await expect(
+      addItem(ctx.store.id, ctx.data.order.id, {
+        produtoId: otherProduct.id,
+        quantidade: 1,
+        precoUnitario: 10,
+        descontoItem: 0
+      })
+    ).rejects.toMatchObject({ code: "position_closed" });
+    expect(
+      (
+        await prisma.pedidoCompraItem.findUniqueOrThrow({
+          where: { id: ctx.data.item.id }
+        })
+      ).quantidade
+    ).toBe(2);
+  });
+});

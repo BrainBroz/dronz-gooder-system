@@ -155,14 +155,17 @@ export async function changeStatus(
 // Ordem única de travas para quem escreve pedido e itens: pedido → item (recebimento, pacotes,
 // redirecionamento e edição de itens). Itens alterados antes do pedido fechariam ciclo de espera.
 async function lockOrder(tx: Prisma.TransactionClient, lojaId: string, id: string) {
-  await tx.$queryRaw`SELECT id FROM "PedidoCompra" WHERE id = ${id} AND "lojaId" = ${lojaId} FOR NO KEY UPDATE`;
+  const [row] = await tx.$queryRaw<{ destinoPosicaoId: string }[]>`SELECT "destinoPosicaoId" FROM "PedidoCompra" WHERE id = ${id} AND "lojaId" = ${lojaId} FOR NO KEY UPDATE`;
+  return row?.destinoPosicaoId;
 }
 
 export async function addItem(lojaId: string, id: string, d: Item) {
   const o = await get(lojaId, id);
   await product(lojaId, d.produtoId);
   return prisma.$transaction(async (tx) => {
-    await lockOrder(tx, lojaId, o.id);
+    // Unidades novas passam a ser esperadas no destino do pedido: ele precisa estar aberto.
+    const destino = await lockOrder(tx, lojaId, o.id);
+    if (destino) await claimOpenPosition(tx, destino);
     await tx.pedidoCompraItem.create({
       data: {
         pedidoCompraId: o.id,
@@ -186,11 +189,14 @@ export async function updateItem(
 ) {
   await get(lojaId, id);
   return prisma.$transaction(async (tx) => {
-    await lockOrder(tx, lojaId, id);
+    const destino = await lockOrder(tx, lojaId, id);
     const i = await tx.pedidoCompraItem.findFirst({
       where: { id: itemId, pedidoCompraId: id, lojaId }
     });
     if (!i) throw new AppError(404, "not_found");
+    // Aumentar a quantidade cria unidades esperadas no destino do pedido: ele precisa estar aberto.
+    if (destino && d.quantidade !== undefined && d.quantidade > i.quantidade)
+      await claimOpenPosition(tx, destino);
     const q = d.quantidade ?? i.quantidade,
       p = Number(d.precoUnitario ?? i.precoUnitario),
       di = Number(d.descontoItem ?? i.descontoItem);
