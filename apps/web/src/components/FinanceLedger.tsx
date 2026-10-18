@@ -170,6 +170,9 @@ export function ReconciliationPanel() {
                 setSource({ ...source, contaId: e.target.value })
               }
             >
+              <MenuItem value="" disabled>
+                Selecione uma conta
+              </MenuItem>
               {accounts.data?.map((a) => (
                 <MenuItem key={a.id} value={a.id}>
                   {a.apelido}

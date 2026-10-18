@@ -42,7 +42,7 @@ As seções datadas abaixo são evidência histórica e não substituem o estado
 
 - **Divergência antes da aprovação:** alterações materiais de quantidade, itens, valores, moeda, merchant ou data entre versões da mesma fonte mantêm as evidências e marcam o candidato pendente `COM_DIVERGENCIA`, inclusive quando a versão divergente chega atrasada. O detalhe informa `MATERIAL_DIVERGENCE`, não oferece aprovação e o POST também a rejeita; rejeição humana com motivo permanece possível e sincronizações posteriores não a revertem automaticamente. Candidatos já rejeitados permanecem rejeitados; cancelamento mais recente permanece cancelado mesmo que um snapshot ativo divergente chegue atrasado. Isso não constitui resolução de conflito: conciliação multicanal e aceite humano de divergências ainda faltam, então providers reais continuam desabilitados.
 
-## Segurança
+## Histórico de correções de segurança — 2026-10-16
 
 O Batch 10 agora persiste divergências de evidências em `BuyerReconciliationConflict` e permite consulta paginada e auditada dos tipos e versões envolvidas. A migration preserva vínculos conflitantes anteriores como `LEGACY_UNCLASSIFIED`. Isso torna o bloqueio inspecionável, mas não resolve a divergência nem autoriza aprovação; a decisão humana sobre resolução permanece aberta.
 
@@ -79,7 +79,7 @@ Replay histórico agora preserva o cursor incremental da conexão em falha parci
 4. Execute `npm run typecheck`, `npm run lint`, `npm run test` e `npm run build`.
 5. Inicie a API e valide `GET /health` atrás do proxy HTTPS.
 
-O seed cria dados administrativos e deve ser executado deliberadamente, somente com `SEED_ADMIN_*` definidos para o ambiente correto. O Batch 8 prepara conexões e sincronização explícita por adapters, mas ingestão automática de compras buyer, tracking automático, e-mail operacional, QR Code, PDF e Excel não fazem parte desta versão.
+O seed cria dados administrativos e deve ser executado deliberadamente, somente com `SEED_ADMIN_*` definidos para o ambiente correto. O adapter buyer eBay está implementado e requer ativação/homologação explícitas; tracking automático, mailbox operacional, QR Code, PDF e Excel permanecem fora desta versão.
 
 Referências `env:MARKETPLACE_*` não são credenciais: são ponteiros. Valores devem existir somente no ambiente/secret manager e nunca em banco, logs, respostas ou commits. Dronz e Gooder operam como compradores. Amazon SP-API e eBay Sell Fulfillment são seller-side e permanecem adiados. O Gate eBay validou consentimento, refresh, quota e resposta Production usando `GetOrders` com `OrderRole=Buyer`; os secrets usados no gate ficaram fora do Git, e produção ainda exige secret manager integrado ao `SecretProvider`. Para Amazon, e-mail autorizado é a fonte inicial planejada; a Amazon Business Reporting API permanece `PENDENTE_DE_ONBOARDING_EXTERNO` e será retomada futuramente. Gmail/Outlook exigirão OAuth, escopos mínimos, retenção e privacidade aprovados antes de qualquer ativação.
 
