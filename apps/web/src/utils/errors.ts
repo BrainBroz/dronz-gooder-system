@@ -83,7 +83,9 @@ const KNOWN_ERROR_MESSAGES: Record<string, string> = {
   lots_still_unbalanced: "Mesmo reconciliados, os lotes não batem com o físico; investigue os ajustes.",
   lot_already_linked: "Este lote já está ligado a um item de compra.",
   lot_exceeds_purchase_item: "O item de compra não tem unidades suficientes para este lote.",
-  product_mismatch: "O item de compra é de outro produto."
+  product_mismatch: "O item de compra é de outro produto.",
+  package_exceeds_item: "Os pacotes somam mais unidades do que o item comprado.",
+  purchase_item_not_found: "Item de compra não encontrado neste pedido."
 };
 const STATUS_FALLBACK_MESSAGES: Record<number, string> = {
   400: "Dados inválidos. Verifique os campos e tente novamente.",

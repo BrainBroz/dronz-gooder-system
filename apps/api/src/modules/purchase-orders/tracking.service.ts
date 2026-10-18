@@ -41,6 +41,10 @@ export async function listTrackings(lojaId: string, pedidoCompraId: string) {
           id: true,
           externalPackageId: true,
           destinoPosicao: { select: { id: true, nome: true } },
+          itens: {
+            where: { lojaId },
+            select: { pedidoCompraItemId: true, quantidade: true }
+          },
           envio: { select: { externalShipmentId: true, enviadoEm: true } }
         }
       }
@@ -57,6 +61,7 @@ export async function listTrackings(lojaId: string, pedidoCompraId: string) {
     substituiTrackingId: tracking.substituiTrackingId,
     pacote: tracking.pacote.externalPackageId,
     pacoteId: tracking.pacote.id,
+    pacoteItens: tracking.pacote.itens,
     // Destino efetivo: o do pacote quando definido, senão o padrão do pedido (D-15).
     destino: tracking.pacote.destinoPosicao
       ? { ...tracking.pacote.destinoPosicao, origem: "PACOTE" as const }
@@ -276,5 +281,84 @@ export async function setPackageDestination(
       after: { destinoPosicaoId: input.posicaoId, pedidoCompraId }
     });
     return updated;
+  });
+}
+
+// PD-04: conteúdo do pacote (substitui o conjunto da loja). Só antes do primeiro recebimento da compra;
+// a soma de um item em todos os pacotes não passa da quantidade comprada.
+export async function setPackageItems(
+  lojaId: string,
+  userId: string,
+  pedidoCompraId: string,
+  pacoteId: string,
+  input: {
+    itens: { pedidoCompraItemId: string; quantidade: number }[];
+    motivo: string;
+  }
+) {
+  return prisma.$transaction(async (tx) => {
+    const order = await orderWithPurchase(tx, lojaId, pedidoCompraId);
+    await tx.$queryRaw`SELECT id FROM "PacoteExterno" WHERE id = ${pacoteId} FOR UPDATE`;
+    const pkg = await tx.pacoteExterno.findFirst({
+      where: {
+        id: pacoteId,
+        envio: { compraImportadaId: order.compraImportadaId }
+      },
+      include: { itens: { where: { lojaId } } }
+    });
+    if (!pkg) throw new AppError(404, "package_not_found");
+    if (
+      await tx.recebimentoMiami.count({
+        where: {
+          item: { pedido: { compraImportadaId: order.compraImportadaId } }
+        }
+      })
+    )
+      throw new AppError(409, "already_received");
+    const ids = input.itens.map((entry) => entry.pedidoCompraItemId);
+    if (new Set(ids).size !== ids.length)
+      throw new AppError(400, "bad_request");
+    const items = await tx.pedidoCompraItem.findMany({
+      where: { id: { in: ids }, lojaId, pedidoCompraId },
+      include: { pacotes: { where: { pacoteExternoId: { not: pacoteId } } } }
+    });
+    if (items.length !== ids.length)
+      throw new AppError(404, "purchase_item_not_found");
+    for (const entry of input.itens) {
+      const item = items.find((i) => i.id === entry.pedidoCompraItemId)!;
+      const elsewhere = item.pacotes.reduce((sum, p) => sum + p.quantidade, 0);
+      if (elsewhere + entry.quantidade > item.quantidade)
+        throw new AppError(409, "package_exceeds_item");
+    }
+    await tx.pacoteItem.deleteMany({
+      where: { pacoteExternoId: pacoteId, lojaId }
+    });
+    if (input.itens.length)
+      await tx.pacoteItem.createMany({
+        data: input.itens.map((entry) => ({
+          lojaId,
+          pacoteExternoId: pacoteId,
+          ...entry
+        }))
+      });
+    await audit(tx, {
+      usuarioId: userId,
+      lojaId,
+      permissionCode: "PEDIDOS_COMPRA_GERENCIAR",
+      action: "SET_PACKAGE_ITEMS",
+      entity: "PacoteExterno",
+      entityId: pacoteId,
+      correlationId: randomUUID(),
+      origin: "API_PURCHASE_ORDERS",
+      reason: input.motivo,
+      before: {
+        itens: pkg.itens.map((i) => ({
+          pedidoCompraItemId: i.pedidoCompraItemId,
+          quantidade: i.quantidade
+        }))
+      },
+      after: { itens: input.itens }
+    });
+    return { pacoteId, itens: input.itens };
   });
 }

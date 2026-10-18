@@ -48,6 +48,7 @@ model Loja {
   recebiveisVenda               RecebivelVenda[]
   devolucoesVenda               DevolucaoVenda[]
   reconciliacoesLote            ReconciliacaoLote[]
+  pacoteItens                   PacoteItem[]
   pagamentos                    Pagamento[]
   custosPedido                  CustoPedido[]
   handoffsVolume                HandoffVolume[]
@@ -1036,6 +1037,7 @@ model PacoteExterno {
   envio          EnvioExterno        @relation(fields: [envioExternoId], references: [id], onDelete: Restrict)
   destinoPosicao PosicaoOperacional? @relation(fields: [destinoPosicaoId], references: [id], onDelete: Restrict)
   trackings      TrackingExterno[]
+  itens          PacoteItem[]
 
   @@unique([envioExternoId, externalPackageId])
   @@index([envioExternoId])
@@ -1143,6 +1145,7 @@ model PedidoCompraItem {
   atribuicoes             AtribuicaoItem[]
   materializacaoOrigem    MaterializacaoCompraItem?
   lotesEstoque            MovimentacaoEstoque[]
+  pacotes                 PacoteItem[]
 
   @@unique([pedidoCompraId, produtoId])
   @@unique([id, lojaId])
@@ -2302,4 +2305,21 @@ model ReconciliacaoLote {
 
   @@index([lojaId, movimentoEntradaId])
   @@index([movimentoSaidaId])
+}
+
+// PD-04: conteúdo declarado do pacote (quantidade por item do pedido da loja). Opcional: sem ele,
+// "a caminho" segue o destino do pedido.
+model PacoteItem {
+  id                 String           @id @default(cuid())
+  lojaId             String
+  pacoteExternoId    String
+  pedidoCompraItemId String
+  quantidade         Int
+  createdAt          DateTime         @default(now())
+  loja               Loja             @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  pacote             PacoteExterno    @relation(fields: [pacoteExternoId], references: [id], onDelete: Restrict)
+  item               PedidoCompraItem @relation(fields: [pedidoCompraItemId, lojaId], references: [id, lojaId], onDelete: Restrict)
+
+  @@unique([pacoteExternoId, pedidoCompraItemId])
+  @@index([pedidoCompraItemId])
 }

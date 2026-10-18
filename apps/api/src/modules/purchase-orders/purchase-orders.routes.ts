@@ -110,3 +110,37 @@ purchaseOrdersRouter.put(
     }
   }
 );
+purchaseOrdersRouter.put(
+  "/:id/packages/:pacoteId/items",
+  async (r: AuthenticatedRequest, x: Response, n: NextFunction) => {
+    try {
+      const d = z
+        .object({
+          itens: z
+            .array(
+              z
+                .object({
+                  pedidoCompraItemId: z.string().min(1),
+                  quantidade: z.number().int().positive().max(100000)
+                })
+                .strict()
+            )
+            .max(200),
+          motivo: z.string().trim().min(3).max(500)
+        })
+        .strict()
+        .parse(r.body);
+      x.json(
+        await tracking.setPackageItems(
+          r.storeId!,
+          r.identity!.user.id,
+          String(r.params.id),
+          String(r.params.pacoteId),
+          d
+        )
+      );
+    } catch (e) {
+      n(e);
+    }
+  }
+);
