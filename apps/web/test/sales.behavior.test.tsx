@@ -317,4 +317,47 @@ describe("Vendas B17", () => {
       post.mock.calls[0][2]?.headers?.["idempotency-key"]
     );
   });
+
+  it("preserva confirmação quando as duas limpezas falham e não perde outra parcela após navegar", async () => {
+    mockReceiptReads();
+    const post = vi
+      .spyOn(api, "post")
+      .mockImplementationOnce(async () => {
+        vi.spyOn(Storage.prototype, "setItem").mockImplementationOnce(() => {
+          throw new DOMException("unavailable", "SecurityError");
+        });
+        return { data: {} };
+      })
+      .mockResolvedValue({ data: {} });
+    const firstMount = renderWithProviders(<SalesPage />, {
+      permissions: ["VENDA_VISUALIZAR", "FINANCEIRO_REGISTRAR"]
+    });
+    await userEvent.type(
+      await screen.findByRole("spinbutton", { name: "Valor recebido" }),
+      "25"
+    );
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementationOnce(() => {
+      throw new DOMException("unavailable", "SecurityError");
+    });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Registrar recebimento" })
+    );
+    await screen.findByText("Recebimento registrado.");
+    firstMount.unmount();
+    renderWithProviders(<SalesPage />, {
+      permissions: ["VENDA_VISUALIZAR", "FINANCEIRO_REGISTRAR"]
+    });
+    await userEvent.type(
+      await screen.findByRole("spinbutton", { name: "Valor recebido" }),
+      "25"
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Registrar recebimento" })
+    );
+    await screen.findByText("Recebimento registrado.");
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(post.mock.calls[1][2]?.headers?.["idempotency-key"]).not.toBe(
+      post.mock.calls[0][2]?.headers?.["idempotency-key"]
+    );
+  });
 });
