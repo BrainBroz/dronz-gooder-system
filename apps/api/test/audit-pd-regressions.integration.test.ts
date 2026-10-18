@@ -1751,3 +1751,71 @@ describe("revisão local do Codex (61a359f): achado corrigido", () => {
     }
   });
 });
+
+describe("revisão local do Codex (3db5c4f): achado corrigido", () => {
+  it("P2: recebimento e edição de item do pedido não entram em impasse (ordem pedido → item)", async () => {
+    const { confirmMiami } =
+      await import("../src/modules/logistics/logistics.service");
+    const { updateItem } =
+      await import("../src/modules/purchase-orders/purchase-orders.service");
+    for (let round = 0; round < 3; round++) {
+      const ctx = await packages();
+      // Segura o pedido: o recebimento entra primeiro na fila; a edição do item vem depois.
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      let holding!: () => void;
+      const held = new Promise<void>((resolve) => (holding = resolve));
+      const orderLock = prisma.$transaction(
+        async (tx) => {
+          await tx.$queryRaw`SELECT id FROM "PedidoCompra" WHERE id = ${ctx.data.order.id} FOR UPDATE`;
+          holding();
+          await gate;
+        },
+        { timeout: 20_000 }
+      );
+      await held;
+      const settle = <T>(p: Promise<T>) =>
+        p.then(
+          () => "ok",
+          (error: { status?: number; code?: string; message?: string }) =>
+            error.status === 409
+              ? `409:${error.code}`
+              : `ERRO:${error.message?.slice(0, 160)}`
+        );
+      const waiting = async (count: number) => {
+        for (let attempt = 0; attempt < 200; attempt++) {
+          const [{ n }] = await prisma.$queryRaw<
+            { n: number }[]
+          >`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%PedidoCompra%'`;
+          if (n >= count) return;
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+      };
+      const receipt = settle(
+        confirmMiami(
+          ctx.store.id,
+          ctx.admin,
+          {
+            pedidoCompraItemId: ctx.data.item.id,
+            quantidadeRecebida: 1,
+            recebidoEm: new Date()
+          },
+          randomUUID()
+        )
+      );
+      await waiting(1);
+      const edit = settle(
+        updateItem(ctx.store.id, ctx.data.order.id, ctx.data.item.id, {
+          observacoes: "Edição concorrente"
+        })
+      );
+      await waiting(2);
+      release();
+      await orderLock;
+      const outcomes = await Promise.all([receipt, edit]);
+      for (const outcome of outcomes)
+        expect(outcome.startsWith("ERRO"), outcome).toBe(false);
+      for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+    }
+  });
+});

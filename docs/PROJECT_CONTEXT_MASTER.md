@@ -342,6 +342,8 @@ Continuam abertas e bloqueiam somente seus batches: vigência de cotação (`E-2
     - Em `setDestination`: pedido → itens → posição; ele também toca as linhas dos itens, para serializar com recebimentos.
     - O recebimento (`confirmMiami`) segue a mesma ordem: pedido → item. Não há impasse com redirecionamentos e edições de pacote.
     - As travas de pacote, pedido e item nesses comandos usam `FOR NO KEY UPDATE`: exclusivas entre editores e compatíveis com o `KEY SHARE` das chaves estrangeiras de recebimentos por pacote.
+    - Edição de itens do pedido (`addItem`/`updateItem`/`removeItem`) também trava o pedido antes do item.
+    - Impasse do PostgreSQL (`40P01`) é tratado como conflito de concorrência (409), não como erro interno.
   - `RecebimentoMiami.atribuicaoPacoteConhecida` vale true nos recebimentos novos, com pacote citado ou explicitamente fora de pacote.
     - Os recebimentos anteriores ficam false (atribuição desconhecida): não consomem o saldo fora de pacote e só contam no limite total do item.
   - Lote de devolução vale pelo custo congelado da baixa original, mesmo quando ele é desconhecido, e não pode ser religado a item de compra (`lot_cost_frozen`).

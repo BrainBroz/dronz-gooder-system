@@ -28,7 +28,9 @@ let auditFailureForTests: ((input: AuditInput) => boolean) | undefined;
 const isSerializationConflict = (error: unknown) =>
   error instanceof Prisma.PrismaClientKnownRequestError &&
   (error.code === "P2034" ||
-    (error.code === "P2010" && error.meta?.code === "40001"));
+    // 40P01 (impasse) também é conflito de concorrência: a operação pode ser repetida, não é erro interno.
+    (error.code === "P2010" &&
+      (error.meta?.code === "40001" || error.meta?.code === "40P01")));
 
 export function setAuditFailureForTests(
   predicate?: (input: AuditInput) => boolean

@@ -152,10 +152,17 @@ export async function changeStatus(
   if (!updated.count) throw new AppError(409, "conflict");
   return get(lojaId, id);
 }
+// Ordem única de travas para quem escreve pedido e itens: pedido → item (recebimento, pacotes,
+// redirecionamento e edição de itens). Itens alterados antes do pedido fechariam ciclo de espera.
+async function lockOrder(tx: Prisma.TransactionClient, lojaId: string, id: string) {
+  await tx.$queryRaw`SELECT id FROM "PedidoCompra" WHERE id = ${id} AND "lojaId" = ${lojaId} FOR NO KEY UPDATE`;
+}
+
 export async function addItem(lojaId: string, id: string, d: Item) {
   const o = await get(lojaId, id);
   await product(lojaId, d.produtoId);
   return prisma.$transaction(async (tx) => {
+    await lockOrder(tx, lojaId, o.id);
     await tx.pedidoCompraItem.create({
       data: {
         pedidoCompraId: o.id,
@@ -179,6 +186,7 @@ export async function updateItem(
 ) {
   await get(lojaId, id);
   return prisma.$transaction(async (tx) => {
+    await lockOrder(tx, lojaId, id);
     const i = await tx.pedidoCompraItem.findFirst({
       where: { id: itemId, pedidoCompraId: id, lojaId }
     });
@@ -196,6 +204,7 @@ export async function updateItem(
 export async function removeItem(lojaId: string, id: string, itemId: string) {
   await get(lojaId, id);
   return prisma.$transaction(async (tx) => {
+    await lockOrder(tx, lojaId, id);
     const r = await tx.pedidoCompraItem.deleteMany({
       where: { id: itemId, pedidoCompraId: id, lojaId }
     });
