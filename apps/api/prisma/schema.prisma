@@ -1026,14 +1026,18 @@ model PacoteExterno {
   externalPackageId String
   transportadora    String?
   payloadSnapshot   Json?
+  // D-15: destino físico do pacote; nulo herda o destino do pedido operacional.
+  destinoPosicaoId  String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  envio     EnvioExterno      @relation(fields: [envioExternoId], references: [id], onDelete: Restrict)
-  trackings TrackingExterno[]
+  envio          EnvioExterno        @relation(fields: [envioExternoId], references: [id], onDelete: Restrict)
+  destinoPosicao PosicaoOperacional? @relation(fields: [destinoPosicaoId], references: [id], onDelete: Restrict)
+  trackings      TrackingExterno[]
 
   @@unique([envioExternoId, externalPackageId])
   @@index([envioExternoId])
+  @@index([destinoPosicaoId])
 }
 
 model TrackingExterno {
@@ -2019,6 +2023,7 @@ model PosicaoOperacional {
   local             Local                        @relation(fields: [localId], references: [id], onDelete: Restrict)
   responsabilidades ResponsabilidadeContextual[]
   pedidosDestinados PedidoCompra[]
+  pacotesDestinados PacoteExterno[]
   malas             Mala[]
   recebimentosMiami RecebimentoMiami[]
 

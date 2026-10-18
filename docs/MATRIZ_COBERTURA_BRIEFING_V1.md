@@ -110,13 +110,13 @@ O tracking automático depende de dados ingeridos por fontes autorizadas, mas se
 - operações adicionais de galpão/frete não descritas por contrato canônico;
 - X-01 (tolerância zero), X-03 (score explicável), X-13 (competência mensal) e D-1…D-17 já foram decididos: não reabri-los como bloqueios. X-02 não foi adotada; vale F-2. A matriz de perguntas da seção 3.2 é o registro histórico do complemento do Batch 9, não o estado atual desses parâmetros;
 - a API Amazon permanece `PENDENTE_DE_ONBOARDING_EXTERNO`; configuração segura e homologação real eBay, mailbox/OAuth/retenção, planilha histórica e APIs de transportadoras continuam dependências próprias;
-- identidade física unitária, destino por pacote individual, anexos privados, reconciliação de lotes legados e correção/devolução de venda confirmada não devem ser inferidos das telas existentes;
+- identidade física unitária, quantidade por pacote, anexos privados, reconciliação de lotes legados e correção/devolução de venda confirmada não devem ser inferidos das telas existentes;
 - Financeiro, Vendas e Analytics estão implementados nos limites descritos acima; integração financeira externa, fechamento mensal oficial, metas e novas exportações exigem escopo próprio.
 
 ## 6. Sequência de encerramento
 
 1. Concluir provas automatizadas entre módulos sem alterar regras: pedido → checkpoints → entrada definitiva → venda por lote → recebimentos → indicadores, nas duas lojas.
 2. Manter pendências externas separadas: B12 (provider/mailbox dedicada, OAuth, responsável e retenção), B15 (transportadoras/API/credenciais), ativação eBay, onboarding Amazon e planilha histórica real. Não registrar secrets em documentação.
-3. Delimitar contratos faltantes antes de codificar correções patrimoniais, reconciliação de lotes, destino por pacote e anexos. A decisão D-6 não escolhe automaticamente um provider de armazenamento ou retenção.
+3. Delimitar contratos faltantes antes de codificar correções patrimoniais, reconciliação de lotes, quantidade por pacote e anexos. O destino por pacote (D-15) já está implementado. A decisão D-6 não escolhe automaticamente um provider de armazenamento ou retenção.
 4. Executar a conferência visual e a homologação operacional ao final, conforme orientação do Product Owner nesta continuidade. Adiar a conferência não equivale a declarar as telas homologadas.
 5. Publicação depende de autorização própria, infraestrutura/HTTPS e tratamento dos riscos de dependências; o ambiente autorizado continua somente local.

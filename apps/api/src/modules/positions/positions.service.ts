@@ -303,6 +303,7 @@ export async function transition(
     else if (action === "CANCELAR" && position.status === "CRIADA") {
       const used =
         (await tx.pedidoCompra.count({ where: { destinoPosicaoId: id } })) +
+        (await tx.pacoteExterno.count({ where: { destinoPosicaoId: id } })) +
         (await tx.mala.count({ where: { posicaoId: id } })) +
         (await tx.recebimentoMiami.count({ where: { posicaoId: id } }));
       if (used) throw new AppError(409, "position_in_use");
@@ -463,6 +464,17 @@ export async function availability(
             destinoPosicaoId: posicaoId,
             status: { notIn: ["CANCELLED", "DRAFT"] }
           }
+        },
+        // D-15: pacote redirecionado para esta posição traz seus códigos para a conferência.
+        {
+          pedido: {
+            status: { notIn: ["CANCELLED", "DRAFT"] },
+            compraImportada: {
+              enviosExternos: {
+                some: { pacotes: { some: { destinoPosicaoId: posicaoId } } }
+              }
+            }
+          }
         }
       ]
     },
@@ -481,6 +493,7 @@ export async function availability(
                 select: {
                   pacotes: {
                     select: {
+                      destinoPosicaoId: true,
                       trackings: {
                         where: { ativo: true },
                         select: { codigo: true, transportadora: true }
@@ -516,6 +529,8 @@ export async function availability(
     const alocado = item.alocacoesMala
       .filter((entry) => entry.status === "CONSUMIDA")
       .reduce((sum, entry) => sum + entry.quantidade, 0);
+    // shortcut: pacote não guarda quantidade por item, então "a caminho" segue o destino do pedido;
+    // dividir por pacote exige o vínculo pacote→item (identidade física, contrato próprio).
     const aCaminho =
       item.pedido.destinoPosicaoId === posicaoId
         ? Math.max(0, item.quantidade - item.quantidadeRecebidaMiami)
@@ -524,8 +539,16 @@ export async function availability(
       pedidoCompraItemId: item.id,
       pedido: { id: item.pedido.id, numeroPedido: item.pedido.numeroPedido },
       // Códigos esperados para conferir a etiqueta; tracking não confirma recebimento.
+      // Só pacotes cujo destino efetivo (pacote, senão pedido) é esta posição.
       trackings: (item.pedido.compraImportada?.enviosExternos ?? []).flatMap(
-        (envio) => envio.pacotes.flatMap((pkg) => pkg.trackings)
+        (envio) =>
+          envio.pacotes
+            .filter(
+              (pkg) =>
+                (pkg.destinoPosicaoId ?? item.pedido.destinoPosicaoId) ===
+                posicaoId
+            )
+            .flatMap((pkg) => pkg.trackings)
       ),
       produto: item.produto,
       recebido,

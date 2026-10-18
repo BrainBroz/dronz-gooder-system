@@ -17,12 +17,16 @@ async function orderWithPurchase(
 ) {
   const order = await db.pedidoCompra.findFirst({
     where: { id, lojaId },
-    select: { id: true, compraImportadaId: true }
+    select: {
+      id: true,
+      compraImportadaId: true,
+      destinoPosicao: { select: { id: true, nome: true } }
+    }
   });
   if (!order) throw new AppError(404, "not_found");
   if (!order.compraImportadaId)
     throw new AppError(409, "order_without_purchase");
-  return order as { id: string; compraImportadaId: string };
+  return order as typeof order & { compraImportadaId: string };
 }
 
 export async function listTrackings(lojaId: string, pedidoCompraId: string) {
@@ -34,7 +38,9 @@ export async function listTrackings(lojaId: string, pedidoCompraId: string) {
     include: {
       pacote: {
         select: {
+          id: true,
           externalPackageId: true,
+          destinoPosicao: { select: { id: true, nome: true } },
           envio: { select: { externalShipmentId: true, enviadoEm: true } }
         }
       }
@@ -50,6 +56,13 @@ export async function listTrackings(lojaId: string, pedidoCompraId: string) {
     statusExterno: tracking.statusExterno,
     substituiTrackingId: tracking.substituiTrackingId,
     pacote: tracking.pacote.externalPackageId,
+    pacoteId: tracking.pacote.id,
+    // Destino efetivo: o do pacote quando definido, senão o padrão do pedido (D-15).
+    destino: tracking.pacote.destinoPosicao
+      ? { ...tracking.pacote.destinoPosicao, origem: "PACOTE" as const }
+      : order.destinoPosicao
+        ? { ...order.destinoPosicao, origem: "PEDIDO" as const }
+        : null,
     enviadoEm: tracking.pacote.envio.enviadoEm,
     registradoEm: tracking.createdAt
   }));
@@ -208,4 +221,60 @@ export async function lookupTracking(lojaId: string, rawCode: string) {
     exato: tracking.codigo.toLowerCase() === codigo.toLowerCase(),
     pedidos: tracking.pacote.envio.compraImportada.pedidosOperacionais
   }));
+}
+
+// D-15: destino por pacote. Alteração auditada só antes de qualquer recebimento da compra; depois,
+// o caminho é transferência operacional. O pacote é físico e pode servir pedidos das duas lojas.
+export async function setPackageDestination(
+  lojaId: string,
+  userId: string,
+  pedidoCompraId: string,
+  pacoteId: string,
+  input: { posicaoId: string | null; motivo: string }
+) {
+  return prisma.$transaction(async (tx) => {
+    const order = await orderWithPurchase(tx, lojaId, pedidoCompraId);
+    await tx.$queryRaw`SELECT id FROM "PacoteExterno" WHERE id = ${pacoteId} FOR UPDATE`;
+    const pkg = await tx.pacoteExterno.findFirst({
+      where: {
+        id: pacoteId,
+        envio: { compraImportadaId: order.compraImportadaId }
+      }
+    });
+    if (!pkg) throw new AppError(404, "package_not_found");
+    if (input.posicaoId) {
+      const position = await tx.posicaoOperacional.findUnique({
+        where: { id: input.posicaoId }
+      });
+      if (!position) throw new AppError(404, "position_not_found");
+      if (position.status === "ENCERRADA" || position.status === "CANCELADA")
+        throw new AppError(409, "position_closed");
+    }
+    if (
+      await tx.recebimentoMiami.count({
+        where: {
+          item: { pedido: { compraImportadaId: order.compraImportadaId } }
+        }
+      })
+    )
+      throw new AppError(409, "already_received");
+    const updated = await tx.pacoteExterno.update({
+      where: { id: pacoteId },
+      data: { destinoPosicaoId: input.posicaoId }
+    });
+    await audit(tx, {
+      usuarioId: userId,
+      lojaId,
+      permissionCode: "PEDIDOS_COMPRA_GERENCIAR",
+      action: "SET_PACKAGE_DESTINATION",
+      entity: "PacoteExterno",
+      entityId: pacoteId,
+      correlationId: randomUUID(),
+      origin: "API_PURCHASE_ORDERS",
+      reason: input.motivo,
+      before: { destinoPosicaoId: pkg.destinoPosicaoId },
+      after: { destinoPosicaoId: input.posicaoId, pedidoCompraId }
+    });
+    return updated;
+  });
 }
