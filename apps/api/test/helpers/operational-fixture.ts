@@ -103,6 +103,7 @@ export async function createOperationalFixture(
       await prisma.checkpointBrasil.deleteMany({ where: { malaId: bag.id } });
       await prisma.checkpointParaguai.deleteMany({ where: { malaId: bag.id } });
       await prisma.recebimentoMiami.deleteMany({ where: { pedidoCompraItemId: order.itens[0].id } });
+      await prisma.handoffVolume.deleteMany({ where: { mala: { viagemId: trip.id } } });
       await prisma.alocacaoMala.deleteMany({ where: { malaId: bag.id } });
       await prisma.volumeLogistico.deleteMany({ where: { malaId: bag.id } });
       await prisma.mala.deleteMany({ where: { id: bag.id } });

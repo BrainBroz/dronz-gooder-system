@@ -9,8 +9,10 @@ type SuitcaseWeight = {
   conteudoKg: string;
   taraKg: string;
   totalKg: string;
-  restanteKg: string;
+  restanteKg: string | null;
+  limiteKg?: string | null;
   excesso: boolean;
+  grupoFisico?: { codigo: string } | null;
 };
 
 const formatKg = (value: string) => `${Number(value).toFixed(2)} kg`;
@@ -41,8 +43,15 @@ export function SuitcaseWeightPanel({ malaId }: { malaId: string | null }) {
             <Typography>Conteúdo: {formatKg(weight.data.conteudoKg)}</Typography>
             <Typography>Tara: {formatKg(weight.data.taraKg)}</Typography>
             <Typography>Total: {formatKg(weight.data.totalKg)}</Typography>
-            <Typography>Restante: {formatKg(weight.data.restanteKg)}</Typography>
+            <Typography>
+              Restante: {weight.data.restanteKg === null ? "sem limite informado" : formatKg(weight.data.restanteKg)}
+            </Typography>
           </Stack>
+          {weight.data.grupoFisico && (
+            <Typography variant="body2">
+              Peso do volume físico {weight.data.grupoFisico.codigo} (todas as lojas).
+            </Typography>
+          )}
           {weight.data.excesso && (
             <Typography color="error.main">Excesso de peso.</Typography>
           )}

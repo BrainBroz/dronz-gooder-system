@@ -74,6 +74,22 @@ async function withPlanningSuitcase<T>(
     return action(tx);
   });
 }
+// Peso físico do volume: soma as partes de todas as lojas quando a mala/caixa está agrupada (D-11).
+// Sem limite (caixa aérea sem limite informado) não há excesso.
+async function physicalWeight(db: Prisma.TransactionClient | typeof prisma, bag: { id: string; grupoFisicoId: string | null; limitePesoKg: Prisma.Decimal | null }) {
+  const group = bag.grupoFisicoId
+    ? await db.grupoFisico.findUnique({ where: { id: bag.grupoFisicoId } })
+    : null;
+  const where = group ? { grupoFisicoId: group.id, status: { not: "CANCELLED" as const } } : { id: bag.id };
+  const [content, tare] = await Promise.all([
+    db.alocacaoMala.aggregate({ where: { mala: where }, _sum: { pesoConteudoKg: true } }),
+    db.volumeLogistico.aggregate({ where: { mala: where }, _sum: { taraKg: true } })
+  ]);
+  const conteudo = content._sum.pesoConteudoKg ?? new Prisma.Decimal(0);
+  const tara = tare._sum.taraKg ?? new Prisma.Decimal(0);
+  const limite = group ? group.limitePesoKg : bag.limitePesoKg;
+  return { conteudo, tara, total: conteudo.plus(tara), limite, grupo: group };
+}
 export const travelers = (lojaId: string) =>
   prisma.viajante.findMany({
     where: { lojaId },
@@ -132,7 +148,9 @@ export const trips = async (lojaId: string) => {
 export async function createTrip(
   lojaId: string,
   d: {
-    viajanteId: string;
+    modalidade?: "MALA_VIAJANTE" | "CAIXA_AEREA";
+    viajanteId?: string;
+    transportadora?: string;
     origem: string;
     destino: string;
     partidaEm: Date;
@@ -142,7 +160,11 @@ export async function createTrip(
 ) {
   if (d.chegadaPrevistaEm <= d.partidaEm)
     throw new AppError(400, "bad_request");
-  if (
+  const modalidade = d.modalidade ?? "MALA_VIAJANTE";
+  if (modalidade === "CAIXA_AEREA") {
+    if (!d.transportadora?.trim()) throw new AppError(400, "carrier_required");
+  } else if (
+    !d.viajanteId ||
     !(await prisma.viajante.findFirst({
       where: { id: d.viajanteId, lojaId, ativo: true }
     }))
@@ -152,6 +174,9 @@ export async function createTrip(
   return prisma.viagem.create({
     data: {
       ...d,
+      modalidade,
+      viajanteId: modalidade === "MALA_VIAJANTE" ? d.viajanteId : null,
+      transportadora: modalidade === "CAIXA_AEREA" ? d.transportadora!.trim() : null,
       lojaId,
       rotaCodigo,
       checkpointsObrigatorios: rotaCodigo === "MIAMI_PARAGUAI_BRASIL"
@@ -204,25 +229,29 @@ export async function tripStatus(
   });
 }
 export const suitcases = async (lojaId: string) =>
-  (await prisma.mala.findMany({
+  Promise.all((await prisma.mala.findMany({
     where: { lojaId },
     include: {
-      viagem: { select: { status: true } },
+      viagem: { select: { status: true, modalidade: true } },
       recebimentos: { where: { status: "COMPLETED", supersededAt: null }, select: { id: true } },
+      grupoFisico: { select: { id: true, codigo: true, tipo: true, limitePesoKg: true } },
+      handoffs: { orderBy: { ocorridoEm: "asc" }, include: { entreguePor: { select: { id: true, name: true } } } },
       volumes: true,
       alocacoes: { include: allocationItem }
     }
-  })).map(({ viagem, recebimentos, ...bag }) => ({
-    ...bag,
-    allowedStatusTransitions: suitcaseTransitions[bag.status].filter((next) =>
-      (next !== "PLANNING" || !departedTrip.includes(viagem.status)) &&
-      (next !== "ARRIVED_BRAZIL" || viagem.status === "ARRIVED_BRAZIL") &&
-      (next !== "RECEIVED" || recebimentos.length > 0) &&
-      (next !== "CANCELLED" || bag.alocacoes.length === 0) &&
-      (next !== "CLOSED" || bag.alocacoes.reduce((sum, allocation) => sum.plus(allocation.pesoConteudoKg), new Prisma.Decimal(0))
-        .plus(bag.volumes.reduce((sum, volume) => sum.plus(volume.taraKg), new Prisma.Decimal(0)))
-        .lessThanOrEqualTo(bag.limitePesoKg))
-    )
+  })).map(async ({ viagem, recebimentos, ...bag }) => {
+    const physical = await physicalWeight(prisma, bag);
+    return {
+      ...bag,
+      modalidade: viagem.modalidade,
+      allowedStatusTransitions: suitcaseTransitions[bag.status].filter((next) =>
+        (next !== "PLANNING" || !departedTrip.includes(viagem.status)) &&
+        (next !== "ARRIVED_BRAZIL" || viagem.status === "ARRIVED_BRAZIL") &&
+        (next !== "RECEIVED" || recebimentos.length > 0) &&
+        (next !== "CANCELLED" || bag.alocacoes.length === 0) &&
+        (next !== "CLOSED" || !physical.limite || physical.total.lessThanOrEqualTo(physical.limite))
+      )
+    };
   }));
 export async function createSuitcase(
   lojaId: string,
@@ -237,7 +266,19 @@ export async function createSuitcase(
       status: { notIn: ["CANCELLED", "ARRIVED_BRAZIL"] }
     } });
     if (!trip) throw new AppError(404, "not_found");
-    return tx.mala.create({ data: { ...d, posicaoId: d.posicaoId ?? MIAMI_BASE_ID, lojaId } });
+    // Mala de viajante segue o limite vigente de 23 kg; caixa aérea só tem limite se informado.
+    const tipo = trip.modalidade === "CAIXA_AEREA" ? "CAIXA" : "MALA";
+    if (tipo === "MALA" && d.limitePesoKg !== undefined && d.limitePesoKg > 23)
+      throw new AppError(400, "weight_limit_above_23kg");
+    return tx.mala.create({
+      data: {
+        ...d,
+        tipo,
+        limitePesoKg: tipo === "MALA" ? (d.limitePesoKg ?? 23) : (d.limitePesoKg ?? null),
+        posicaoId: d.posicaoId ?? MIAMI_BASE_ID,
+        lojaId
+      }
+    });
   });
 }
 export async function addVolume(
@@ -255,23 +296,17 @@ export async function weight(
   malaId: string,
   db: Prisma.TransactionClient = prisma
 ) {
-  const m = await db.mala.findFirst({
-    where: { id: malaId, lojaId },
-    include: { volumes: true, alocacoes: true }
-  });
+  const m = await db.mala.findFirst({ where: { id: malaId, lojaId } });
   if (!m) throw new AppError(404, "not_found");
-  const conteudo = m.alocacoes.reduce(
-      (s, a) => s.plus(a.pesoConteudoKg),
-      new Prisma.Decimal(0)
-    ),
-    tara = m.volumes.reduce((s, v) => s.plus(v.taraKg), new Prisma.Decimal(0)),
-    total = conteudo.plus(tara);
+  const { conteudo, tara, total, limite, grupo } = await physicalWeight(db, m);
   return {
     conteudoKg: conteudo,
     taraKg: tara,
     totalKg: total,
-    restanteKg: Prisma.Decimal.max(0, m.limitePesoKg.minus(total)),
-    excesso: total.greaterThan(m.limitePesoKg)
+    limiteKg: limite,
+    restanteKg: limite ? Prisma.Decimal.max(0, limite.minus(total)) : null,
+    excesso: limite ? total.greaterThan(limite) : false,
+    grupoFisico: grupo ? { id: grupo.id, codigo: grupo.codigo } : null
   };
 }
 export async function allocate(
@@ -301,9 +336,11 @@ export async function allocate(
       include: { produto: true, alocacoesMala: true }
     });
     const bag = await tx.mala.findFirst({
-      where: { id: d.malaId, lojaId, status: "PLANNING" },
-      include: { volumes: true, alocacoes: true }
+      where: { id: d.malaId, lojaId, status: "PLANNING" }
     });
+    // Partes de lojas diferentes no mesmo volume físico disputam o mesmo limite de peso.
+    if (bag?.grupoFisicoId)
+      await tx.$queryRaw`SELECT id FROM "GrupoFisico" WHERE id = ${bag.grupoFisicoId} FOR UPDATE`;
     const volume = await tx.volumeLogistico.findFirst({
       where: { id: d.volumeLogisticoId, malaId: d.malaId, lojaId }
     });
@@ -313,16 +350,9 @@ export async function allocate(
     // Reserva só consome o que já foi recebido na posição da mala e ainda não foi comprometido ali.
     if (d.quantidade < 1 || d.quantidade > (await availableAtPosition(tx, item.id, bag.posicaoId)))
       throw new AppError(409, "conflict");
-    const content = bag.alocacoes.reduce(
-      (sum, allocation) => sum.plus(allocation.pesoConteudoKg),
-      new Prisma.Decimal(0)
-    );
-    const tare = bag.volumes.reduce(
-      (sum, entry) => sum.plus(entry.taraKg),
-      new Prisma.Decimal(0)
-    );
+    const physical = await physicalWeight(tx, bag);
     const allocationWeight = item.produto.peso.mul(d.quantidade);
-    if (content.plus(tare).plus(allocationWeight).greaterThan(bag.limitePesoKg))
+    if (physical.limite && physical.total.plus(allocationWeight).greaterThan(physical.limite))
       throw new AppError(409, "weight_limit");
     // F-8: a seleção cria reserva persistente com responsável; o fechamento da mala a consome.
     const created = await tx.alocacaoMala.create({
@@ -341,11 +371,12 @@ export async function suitcaseStatus(
   userId: string,
   id: string,
   status: MalaStatus,
-  motivo?: string
+  motivo?: string,
+  handoff?: { recebidoPor?: string; referencia?: string; observacao?: string }
 ) {
   return prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "Mala" WHERE id = ${id} AND "lojaId" = ${lojaId} FOR UPDATE`;
-    const m = await tx.mala.findFirst({ where: { id, lojaId }, include: { viagem: true } });
+    const m = await tx.mala.findFirst({ where: { id, lojaId }, include: { viagem: { include: { viajante: true } } } });
     if (!m) throw new AppError(404, "not_found");
     if (!suitcaseTransitions[m.status].includes(status))
       throw new AppError(409, "conflict");
@@ -367,6 +398,20 @@ export async function suitcaseStatus(
       await tx.alocacaoMala.updateMany({ where: { lojaId, malaId: id }, data: { status: "CONSUMIDA", consumidaEm: new Date() } });
     if (status === "PLANNING")
       await tx.alocacaoMala.updateMany({ where: { lojaId, malaId: id }, data: { status: "RESERVADA", consumidaEm: null } });
+    // D-13: a saída do volume registra quem entregou, quem recebeu e o instante; caixa exige referência do recibo.
+    if (status === "CHECKED_IN") {
+      const recebidoPor = handoff?.recebidoPor?.trim() || m.viagem.viajante?.nome || m.viagem.transportadora || "";
+      if (!recebidoPor) throw new AppError(400, "handoff_receiver_required");
+      if (m.tipo === "CAIXA" && !handoff?.referencia?.trim())
+        throw new AppError(400, "handoff_reference_required");
+      await tx.handoffVolume.create({
+        data: {
+          lojaId, malaId: id, entreguePorId: userId, recebidoPor,
+          referencia: handoff?.referencia?.trim() || null,
+          observacao: handoff?.observacao?.trim() || null
+        }
+      });
+    }
     const result = await tx.mala.update({ where: { id }, data: { status } });
     await audit(tx, {
       usuarioId: userId, lojaId, permissionCode: null,
@@ -691,3 +736,81 @@ export async function confirmBrasil(
     }
   });
 }
+
+// D-11: volume físico compartilhado entre lojas. O grupo só expõe totais; cada parte continua na sua loja.
+export async function createPhysicalGroup(d: { codigo: string; tipo: "MALA" | "CAIXA"; limitePesoKg?: number }) {
+  if (d.tipo === "MALA" && d.limitePesoKg !== undefined && d.limitePesoKg > 23)
+    throw new AppError(400, "weight_limit_above_23kg");
+  try {
+    return await prisma.grupoFisico.create({
+      data: {
+        codigo: d.codigo,
+        tipo: d.tipo,
+        limitePesoKg: d.tipo === "MALA" ? (d.limitePesoKg ?? 23) : (d.limitePesoKg ?? null)
+      }
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")
+      throw new AppError(409, "duplicate_code");
+    throw error;
+  }
+}
+
+export async function physicalGroup(actorStores: string[], id: string) {
+  const group = await prisma.grupoFisico.findUnique({
+    where: { id },
+    include: { partes: { select: { id: true, codigo: true, lojaId: true, status: true, posicaoId: true } } }
+  });
+  if (!group) throw new AppError(404, "not_found");
+  const physical = await physicalWeight(prisma, { id: "", grupoFisicoId: group.id, limitePesoKg: null });
+  return {
+    id: group.id, codigo: group.codigo, tipo: group.tipo, limitePesoKg: group.limitePesoKg,
+    totalKg: physical.total,
+    excesso: group.limitePesoKg ? physical.total.greaterThan(group.limitePesoKg) : false,
+    // Parte de loja sem acesso aparece só como existência, sem código ou conteúdo.
+    partes: group.partes.map((part) => actorStores.includes(part.lojaId)
+      ? part
+      : { lojaId: part.lojaId, restrita: true })
+  };
+}
+
+export async function setPhysicalGroup(lojaId: string, userId: string, actorStores: string[], malaId: string, grupoFisicoId: string | null) {
+  return withPlanningSuitcase(lojaId, malaId, async (tx) => {
+    const bag = await tx.mala.findUniqueOrThrow({ where: { id: malaId } });
+    if (grupoFisicoId) {
+      await tx.$queryRaw`SELECT id FROM "GrupoFisico" WHERE id = ${grupoFisicoId} FOR UPDATE`;
+      const group = await tx.grupoFisico.findUnique({ where: { id: grupoFisicoId }, include: { partes: true } });
+      if (!group) throw new AppError(404, "not_found");
+      if (group.tipo !== bag.tipo) throw new AppError(409, "physical_group_type_mismatch");
+      const others = group.partes.filter((part) => part.id !== malaId && part.status !== "CANCELLED");
+      // Compor com outra loja exige acesso operacional a todas as partes (D-11).
+      if (others.some((part) => !actorStores.includes(part.lojaId)))
+        throw new AppError(403, "physical_group_not_authorized");
+      if (others.some((part) => part.posicaoId !== bag.posicaoId || part.status !== "PLANNING"))
+        throw new AppError(409, "physical_group_not_combinable");
+      if (others.some((part) => part.lojaId === lojaId))
+        throw new AppError(409, "physical_group_store_part_exists");
+    }
+    const updated = await tx.mala.update({ where: { id: malaId }, data: { grupoFisicoId } });
+    if (grupoFisicoId) {
+      const physical = await physicalWeight(tx, updated);
+      if (physical.limite && physical.total.greaterThan(physical.limite))
+        throw new AppError(409, "weight_limit");
+    }
+    await audit(tx, {
+      usuarioId: userId, lojaId, permissionCode: null,
+      action: "SET_PHYSICAL_GROUP", entity: "Mala", entityId: malaId,
+      correlationId: randomUUID(), origin: "API_LOGISTICS",
+      before: { grupoFisicoId: bag.grupoFisicoId }, after: { grupoFisicoId }
+    });
+    return updated;
+  });
+}
+
+// Lista agrupamentos para composição: só código, tipo e quantidade de partes (sem conteúdo de outra loja).
+export const physicalGroups = async () =>
+  (await prisma.grupoFisico.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 100,
+    include: { _count: { select: { partes: true } } }
+  })).map(({ _count, ...group }) => ({ ...group, partes: _count.partes }));
