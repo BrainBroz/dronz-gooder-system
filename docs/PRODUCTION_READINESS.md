@@ -9,6 +9,8 @@
 - Criação e recebimentos exigem chave idempotente; a UI conserva a chave e a data do payload após falha de rede. Recebimentos de vendas não aceitam transações de despesa do B16 como comprovação de entrada.
 - O fluxo mensal deriva as parcelas dos eventos imutáveis `RECEIVE_SALE` do AuditLog (diferença antes/depois e data efetiva), sem deslocar o acumulado para o mês da última parcela.
 - Relatórios de estoque/movimentos retiram preço e markup para usuários sem acesso financeiro. Datas de calendário dos indicadores usam America/Sao_Paulo; timestamps com offset explícito preservam o instante e períodos invertidos são rejeitados.
+- Repetir o cálculo com os mesmos filtros refaz a consulta, inclusive após erro. Os indicadores usam uma transação `REPEATABLE READ` e referência temporal do PostgreSQL para manter receita, estoque e demais leituras no mesmo estado; teste concorrente bloqueia a leitura de vendas enquanto outra transação grava a confirmação.
+- Se o armazenamento da sessão falhar antes do envio, a operação é bloqueada com mensagem explícita. Se falhar só depois de a API confirmar, a UI mantém o sucesso e a identidade confirmada em memória para navegação. Uma recarga completa durante falha total desse armazenamento exige conferir o recebível antes de registrar outra parcela; essa memória não sobrevive ao reinício da página.
 - Migrations e seed são verificados somente em banco exclusivo de testes. Atualização do banco operacional local exige backup verificável, `migrate deploy` e concessão idempotente das novas permissões; o seed não deve ser usado para esse upgrade, pois redefine a senha administrativa.
 
 As seções datadas abaixo são evidência histórica e não substituem o estado funcional acima.

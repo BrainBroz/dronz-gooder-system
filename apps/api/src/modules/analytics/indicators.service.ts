@@ -116,7 +116,24 @@ export async function indicators(
   filters: { from?: Date; to?: Date; moeda?: string },
   financial: boolean
 ) {
-  const referenciaEm = new Date();
+  return prisma.$transaction(
+    (db) => readIndicators(db, lojaId, filters, financial),
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead
+    }
+  );
+}
+
+async function readIndicators(
+  db: Prisma.TransactionClient,
+  lojaId: string,
+  filters: { from?: Date; to?: Date; moeda?: string },
+  financial: boolean
+) {
+  const [clock] = await db.$queryRaw<
+    { referenciaEm: Date }[]
+  >`SELECT statement_timestamp() AS "referenciaEm"`;
+  const referenciaEm = clock!.referenciaEm;
   const period = {
     gte: filters.from,
     lt: filters.to ?? referenciaEm
@@ -124,7 +141,7 @@ export async function indicators(
   const moeda = filters.moeda?.toUpperCase();
   const rows: Row[] = [];
 
-  const orders = await prisma.pedidoCompra.findMany({
+  const orders = await db.pedidoCompra.findMany({
     where: { lojaId, dataCompra: period },
     select: { status: true, total: true, moeda: true }
   });
@@ -155,7 +172,7 @@ export async function indicators(
     );
   }
 
-  const lots = await prisma.movimentacaoEstoque.findMany({
+  const lots = await db.movimentacaoEstoque.findMany({
     where: {
       lojaId,
       tipo: "ENTRY",
@@ -184,7 +201,7 @@ export async function indicators(
     )
   );
 
-  const stock = await prisma.estoque.findMany({
+  const stock = await db.estoque.findMany({
     where: { lojaId },
     select: { quantidadeFisica: true, quantidadeReservada: true }
   });
@@ -202,7 +219,7 @@ export async function indicators(
   );
 
   if (financial) {
-    const sales = await prisma.venda.findMany({
+    const sales = await db.venda.findMany({
       where: {
         lojaId,
         estado: "CONFIRMADA",
@@ -281,7 +298,7 @@ export async function indicators(
     );
 
     const flows = new Map<string, { valor: Prisma.Decimal; amostra: number }>();
-    const payments = await prisma.pagamento.findMany({
+    const payments = await db.pagamento.findMany({
       where: {
         lojaId,
         pagoEm: period,
@@ -296,7 +313,7 @@ export async function indicators(
         `PAGAMENTO_FORNECEDOR_LIQUIDO|${payment.moeda}`,
         payment.estornoDeId ? payment.valor.neg() : payment.valor
       );
-    const statementPayments = await prisma.pagamentoFatura.findMany({
+    const statementPayments = await db.pagamentoFatura.findMany({
       where: {
         lojaId,
         pagoEm: period,
@@ -307,7 +324,7 @@ export async function indicators(
     for (const payment of statementPayments)
       add(flows, `PAGAMENTO_FATURA|${payment.fatura.moeda}`, payment.valor);
     // Cada parcela já tem antes/depois imutáveis no AuditLog; saldo acumulado não é fluxo mensal.
-    const receipts = await prisma.auditLog.findMany({
+    const receipts = await db.auditLog.findMany({
       where: {
         lojaId,
         entity: "RecebivelVenda",

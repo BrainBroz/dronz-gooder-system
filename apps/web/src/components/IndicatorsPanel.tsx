@@ -75,15 +75,16 @@ export function IndicatorsPanel() {
         gap={1}
         onSubmit={(event) => {
           event.preventDefault();
-          setParams(
-            Object.fromEntries(
-              Object.entries({
-                from: draft.from,
-                to: draft.to,
-                moeda: draft.moeda
-              }).filter(([, value]) => value)
-            )
+          const next = Object.fromEntries(
+            Object.entries({
+              from: draft.from,
+              to: draft.to,
+              moeda: draft.moeda
+            }).filter(([, value]) => value)
           );
+          if (JSON.stringify(next) === JSON.stringify(params))
+            void result.refetch();
+          else setParams(next);
         }}
       >
         <TextField

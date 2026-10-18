@@ -207,6 +207,104 @@ const line = (
   );
 
 describe("analytics read models (Batch 18)", () => {
+  it("uma venda confirmada durante a leitura não mistura receita nova com estoque antigo", async () => {
+    const data = await facts();
+    const sale = await prisma.venda.create({
+      data: {
+        lojaId: data.order.lojaId,
+        canal: "OUTRO",
+        dataVenda: new Date("2032-01-25T12:00:00Z"),
+        moeda: "USD",
+        criadoPorId: data.admin.id
+      }
+    });
+    await prisma.vendaItem.create({
+      data: {
+        lojaId: data.order.lojaId,
+        vendaId: sale.id,
+        produtoId: data.product.id,
+        quantidade: 1,
+        precoUnitario: 100
+      }
+    });
+    const balances = await prisma.estoque.aggregate({
+      where: { lojaId: data.order.lojaId },
+      _sum: { quantidadeFisica: true, quantidadeReservada: true }
+    });
+    const available =
+      (balances._sum.quantidadeFisica ?? 0) -
+      (balances._sum.quantidadeReservada ?? 0);
+    let unlock!: () => void;
+    const unlocked = new Promise<void>((resolve) => {
+      unlock = resolve;
+    });
+    let locked!: () => void;
+    const lockAcquired = new Promise<void>((resolve) => {
+      locked = resolve;
+    });
+    const writer = prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`LOCK TABLE "Venda" IN ACCESS EXCLUSIVE MODE`;
+      locked();
+      await unlocked;
+      await tx.estoque.update({
+        where: {
+          lojaId_produtoId: {
+            lojaId: data.order.lojaId,
+            produtoId: data.product.id
+          }
+        },
+        data: { quantidadeFisica: { decrement: 1 } }
+      });
+      await tx.venda.update({
+        where: { id: sale.id },
+        data: {
+          estado: "CONFIRMADA",
+          confirmadoPorId: data.admin.id,
+          confirmadoEm: new Date()
+        }
+      });
+    });
+    await lockAcquired;
+    const { indicators } =
+      await import("../src/modules/analytics/indicators.service");
+    const reader = indicators(
+      data.order.lojaId,
+      { from: new Date(WINDOW.from), to: new Date(WINDOW.to) },
+      true
+    );
+    try {
+      // Aguarda uma condição real do PostgreSQL, sem sleep nem alterar os resultados consultados.
+      let waiting = false;
+      for (let probe = 0; probe < 500 && !waiting; probe++) {
+        const [activity] = await prisma.$queryRaw<{ blocked: boolean }[]>`
+          SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname = current_database()
+            AND wait_event_type = 'Lock' AND query LIKE '%FROM "public"."Venda"%') AS blocked`;
+        waiting = activity!.blocked;
+      }
+      expect(waiting).toBe(true);
+    } finally {
+      unlock();
+      await writer;
+    }
+    const during = await reader;
+    expect(line(during.linhas, "ESTOQUE_BR", "DISPONIVEL", null)).toMatchObject(
+      { valor: String(available) }
+    );
+    expect(
+      line(during.linhas, "VENDAS_POR_CANAL", "OUTRO", "USD")
+    ).toBeUndefined();
+    const after = await indicators(
+      data.order.lojaId,
+      { from: new Date(WINDOW.from), to: new Date(WINDOW.to) },
+      true
+    );
+    expect(line(after.linhas, "ESTOQUE_BR", "DISPONIVEL", null)).toMatchObject({
+      valor: String(available - 1)
+    });
+    expect(
+      line(after.linhas, "VENDAS_POR_CANAL", "OUTRO", "USD")
+    ).toMatchObject({ valor: "100.00" });
+  });
   it("dashboard separa moedas e indicadores reconciliam com as fontes", async () => {
     await facts();
     const admin = await login("admin@example.com");

@@ -181,6 +181,86 @@ describe("Relatórios", () => {
 });
 
 describe("Indicadores B18", () => {
+  it("calcular outra vez com os mesmos filtros busca resultados novos", async () => {
+    const values = ["123", "456"];
+    vi.mocked(api.get).mockImplementation(async (url) =>
+      url === "/analytics/indicators"
+        ? {
+            data: {
+              versao: "B18-v1",
+              referenciaEm: "2032-03-01T03:00:00Z",
+              definicoes: [],
+              linhas: [
+                {
+                  codigo: "COMPRAS_PEDIDOS",
+                  dimensao: "CONFIRMED",
+                  moeda: null,
+                  valor: values.shift(),
+                  amostra: 1,
+                  status: "OK"
+                }
+              ]
+            }
+          }
+        : { data: [] }
+    );
+    renderWithProviders(<ReportsPage />, {
+      permissions: ["ANALYTICS_VISUALIZAR"]
+    });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Calcular indicadores" })
+    );
+    await screen.findByText("123");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Calcular indicadores" })
+    );
+    await screen.findByText("456");
+    expect(
+      vi
+        .mocked(api.get)
+        .mock.calls.filter(([url]) => url === "/analytics/indicators")
+    ).toHaveLength(2);
+  });
+
+  it("repetir os mesmos filtros após erro permite recuperar os indicadores", async () => {
+    let failure = true;
+    vi.mocked(api.get).mockImplementation(async (url) => {
+      if (url !== "/analytics/indicators") return { data: [] };
+      if (failure) {
+        failure = false;
+        throw new Error("network");
+      }
+      return {
+        data: {
+          versao: "B18-v1",
+          referenciaEm: "2032-03-01T03:00:00Z",
+          definicoes: [],
+          linhas: [
+            {
+              codigo: "COMPRAS_PEDIDOS",
+              dimensao: "CONFIRMED",
+              moeda: null,
+              valor: "456",
+              amostra: 1,
+              status: "OK"
+            }
+          ]
+        }
+      };
+    });
+    renderWithProviders(<ReportsPage />, {
+      permissions: ["ANALYTICS_VISUALIZAR"]
+    });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Calcular indicadores" })
+    );
+    await screen.findByText("Falha ao calcular indicadores.");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Calcular indicadores" })
+    );
+    await screen.findByText("456");
+    expect(screen.queryByText("Falha ao calcular indicadores.")).toBeNull();
+  });
   it("envia os dias selecionados para conversão pelo backend no fuso operacional", async () => {
     vi.mocked(api.get).mockImplementation(async (url) =>
       url === "/analytics/indicators"
