@@ -1,0 +1,142 @@
+// Quanto de um item ainda é esperado em cada posição (D-15/PD-04). Fonte única para disponibilidade,
+// encerramento de posição e recebimento:
+// - conteúdo declarado em pacote vai para o destino efetivo do pacote (do pacote, senão do pedido) e só é
+//   baixado por recebimento que cite aquele pacote;
+// - o restante (não declarado em pacote algum) segue o destino do pedido e é baixado por recebimento
+//   sem pacote.
+export type ItemForExpectation = {
+  id: string;
+  quantidade: number;
+  pedido: {
+    destinoPosicaoId: string | null;
+    compraImportada: {
+      enviosExternos: {
+        pacotes: {
+          id: string;
+          externalPackageId?: string;
+          destinoPosicaoId: string | null;
+          itens: { pedidoCompraItemId: string; quantidade: number }[];
+        }[];
+      }[];
+    } | null;
+  };
+  recebimentosMiami: {
+    pacoteExternoId: string | null;
+    quantidadeRecebida: number;
+  }[];
+};
+
+export const expectationSelect = {
+  id: true,
+  quantidade: true,
+  pedido: {
+    select: {
+      destinoPosicaoId: true,
+      compraImportada: {
+        select: {
+          enviosExternos: {
+            select: {
+              pacotes: {
+                select: {
+                  id: true,
+                  externalPackageId: true,
+                  destinoPosicaoId: true,
+                  itens: {
+                    select: { pedidoCompraItemId: true, quantidade: true }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  recebimentosMiami: {
+    select: { pacoteExternoId: true, quantidadeRecebida: true }
+  }
+} as const;
+
+export function packagedLines(item: ItemForExpectation) {
+  return (item.pedido.compraImportada?.enviosExternos ?? []).flatMap((envio) =>
+    envio.pacotes.flatMap((pkg) =>
+      pkg.itens
+        .filter((line) => line.pedidoCompraItemId === item.id)
+        .map((line) => ({
+          pacoteId: pkg.id,
+          pacote: pkg.externalPackageId ?? pkg.id,
+          destino: pkg.destinoPosicaoId ?? item.pedido.destinoPosicaoId,
+          quantidade: line.quantidade
+        }))
+    )
+  );
+}
+
+export function receivedByPackage(item: ItemForExpectation) {
+  const map = new Map<string | null, number>();
+  for (const receipt of item.recebimentosMiami)
+    map.set(
+      receipt.pacoteExternoId,
+      (map.get(receipt.pacoteExternoId) ?? 0) + receipt.quantidadeRecebida
+    );
+  return map;
+}
+
+// Saldo recebível sem citar pacote: unidades não declaradas em pacote menos o já recebido sem pacote.
+export function unpackagedRemaining(item: ItemForExpectation) {
+  const packaged = packagedLines(item).reduce(
+    (sum, line) => sum + line.quantidade,
+    0
+  );
+  return Math.max(
+    0,
+    item.quantidade - packaged - (receivedByPackage(item).get(null) ?? 0)
+  );
+}
+
+export function pendingAt(item: ItemForExpectation, posicaoId: string) {
+  const received = receivedByPackage(item);
+  let pending = 0;
+  for (const line of packagedLines(item))
+    if (line.destino === posicaoId)
+      pending += Math.max(
+        0,
+        line.quantidade - (received.get(line.pacoteId) ?? 0)
+      );
+  if (item.pedido.destinoPosicaoId === posicaoId)
+    pending += unpackagedRemaining(item);
+  return pending;
+}
+
+// Pacote destinado explicitamente à posição sem nenhum conteúdo declarado, com item ainda em aberto:
+// não se sabe o que ele traz, então a posição não pode ser dada como sem pendência.
+export function undeclaredRedirect(
+  item: ItemForExpectation,
+  posicaoId: string
+) {
+  const received = item.recebimentosMiami.reduce(
+    (sum, r) => sum + r.quantidadeRecebida,
+    0
+  );
+  if (received >= item.quantidade) return false;
+  return (item.pedido.compraImportada?.enviosExternos ?? []).some((envio) =>
+    envio.pacotes.some(
+      (pkg) => pkg.destinoPosicaoId === posicaoId && pkg.itens.length === 0
+    )
+  );
+}
+
+// Resumo para a tela de recebimento: cada pacote com conteúdo declarado e o saldo fora de pacote.
+export function receivableSummary(item: ItemForExpectation) {
+  const received = receivedByPackage(item);
+  return {
+    pacotes: packagedLines(item).map((line) => ({
+      pacoteId: line.pacoteId,
+      pacote: line.pacote,
+      destinoPosicaoId: line.destino,
+      quantidade: line.quantidade,
+      saldo: Math.max(0, line.quantidade - (received.get(line.pacoteId) ?? 0))
+    })),
+    saldoSemPacote: unpackagedRemaining(item)
+  };
+}

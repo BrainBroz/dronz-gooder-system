@@ -137,11 +137,15 @@ function ActionDialog(props: { action: Exclude<import("../types/operations").Ope
   const [notes, setNotes] = useState("");
   const [condition, setCondition] = useState({ condicaoComercial: "NAO_DEFINIDA", funcionamento: "NAO_TESTADO", acessorios: "", registroTerceiro: false });
   const item = props.item;
+  const packages = isMiami(item) ? (item.recebivel?.pacotes ?? []).filter((entry) => entry.saldo > 0) : [];
+  const [pacoteId, setPacoteId] = useState(packages[0]?.pacoteId ?? "");
   const presentation = operationActionPresentation[props.action];
   const submit = () => {
     const now = new Date().toISOString();
     if (presentation.form === "miami" && isMiami(item)) return props.submit({
       pedidoCompraItemId: item.id, quantidadeRecebida: Number(quantity), recebidoEm: now, tipoDivergencia: divergence, observacao: notes || undefined,
+      // PD-04: com pacote escolhido, a API recebe no destino efetivo do pacote e limita ao saldo dele.
+      ...(pacoteId ? { pacoteExternoId: pacoteId } : {}),
       // D-4: condição comercial, funcionamento, acessórios e registro de terceiro são dimensões separadas.
       condicaoComercial: condition.condicaoComercial, funcionamento: condition.funcionamento,
       acessoriosAusentes: condition.acessorios.split(",").map((entry) => entry.trim()).filter(Boolean),
@@ -154,6 +158,10 @@ function ActionDialog(props: { action: Exclude<import("../types/operations").Ope
   };
   const options = presentation.form === "checkpoint-paraguay" ? checkpointDivergences.paraguay : presentation.form === "checkpoint-brazil" ? checkpointDivergences.brazil : presentation.form === "miami" ? ["CORRETO", "FALTANTE", "QUANTIDADE_DIVERGENTE", "DANIFICADO", "DESCONHECIDO", "TRACKING_NAO_LOCALIZADO"] : [];
   return <Dialog open onClose={props.close} fullWidth maxWidth="sm"><DialogTitle>Confirmar operação</DialogTitle><DialogContent><Stack gap={2} mt={1}>
+    {presentation.form === "miami" && packages.length > 0 && isMiami(item) && <TextField select label="Pacote" value={pacoteId} onChange={(event) => setPacoteId(event.target.value)}>
+      {packages.map((entry) => <MenuItem key={entry.pacoteId} value={entry.pacoteId}>Pacote {entry.pacote} · saldo {entry.saldo}</MenuItem>)}
+      {(item.recebivel?.saldoSemPacote ?? 0) > 0 && <MenuItem value="">Fora de pacote · saldo {item.recebivel?.saldoSemPacote}</MenuItem>}
+    </TextField>}
     {presentation.form === "miami" && <TextField label="Quantidade recebida" type="number" inputProps={{ min: 1 }} value={quantity} onChange={(event) => setQuantity(event.target.value)} />}
     {presentation.form === "miami" && <>
       <TextField select label="Condição comercial" value={condition.condicaoComercial} onChange={(event) => setCondition((current) => ({ ...current, condicaoComercial: event.target.value }))}>

@@ -1038,6 +1038,7 @@ model PacoteExterno {
   destinoPosicao PosicaoOperacional? @relation(fields: [destinoPosicaoId], references: [id], onDelete: Restrict)
   trackings      TrackingExterno[]
   itens          PacoteItem[]
+  recebimentos   RecebimentoMiami[]
 
   @@unique([envioExternoId, externalPackageId])
   @@index([envioExternoId])
@@ -1311,6 +1312,9 @@ model RecebimentoMiami {
   registroTerceiro   Boolean              @default(false)
   posicaoId          String               @default("posicao-miami-base")
   posicao            PosicaoOperacional   @relation(fields: [posicaoId], references: [id], onDelete: Restrict)
+  // Auditoria PD-04: recebimento pode citar o pacote; o saldo do pacote limita a quantidade.
+  pacoteExternoId    String?
+  pacote             PacoteExterno?       @relation(fields: [pacoteExternoId], references: [id], onDelete: Restrict)
   createdAt          DateTime             @default(now())
   loja               Loja                 @relation(fields: [lojaId], references: [id], onDelete: Restrict)
   item               PedidoCompraItem     @relation(fields: [pedidoCompraItemId, lojaId], references: [id, lojaId], onDelete: Restrict)
@@ -1319,6 +1323,7 @@ model RecebimentoMiami {
   @@index([lojaId, pedidoCompraItemId])
   @@index([lojaId, tipoDivergencia])
   @@index([posicaoId])
+  @@index([pacoteExternoId])
 }
 
 model CheckpointParaguai {
@@ -1553,6 +1558,8 @@ model MovimentacaoEstoque {
   movimentoOriginalId String?
   // Lote de origem (B17): ENTRY ligada ao item de compra, base do custo específico (X-10).
   pedidoCompraItemId  String?
+  // Auditoria PD-02: lote de devolução herda o custo congelado da baixa original.
+  baixaOrigemId       String?
   createdAt           DateTime                  @default(now())
   loja                Loja                      @relation(fields: [lojaId], references: [id], onDelete: Restrict)
   produto             Produto                   @relation(fields: [produtoId, lojaId], references: [id, lojaId], onDelete: Restrict)
@@ -1562,6 +1569,7 @@ model MovimentacaoEstoque {
   movimentoOriginal   MovimentacaoEstoque?      @relation("MovimentoCompensacao", fields: [movimentoOriginalId, lojaId], references: [id, lojaId], onDelete: Restrict)
   compensacoes        MovimentacaoEstoque[]     @relation("MovimentoCompensacao")
   pedidoItem          PedidoCompraItem?         @relation(fields: [pedidoCompraItemId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  baixaOrigem         BaixaVenda?               @relation("BaixaOrigemDevolucao", fields: [baixaOrigemId], references: [id], onDelete: Restrict)
   baixasComoLote      BaixaVenda[]              @relation("BaixaLote")
   baixasComoSaida     BaixaVenda[]              @relation("BaixaSaida")
   reconciliacoesLote  ReconciliacaoLote[]       @relation("ReconciliacaoLote")
@@ -2221,24 +2229,25 @@ model VendaItem {
 
 // Uma linha de venda pode consumir vários lotes; custo é snapshot no instante da confirmação.
 model BaixaVenda {
-  id                      String              @id @default(cuid())
+  id                      String                @id @default(cuid())
   lojaId                  String
   vendaItemId             String
   movimentoEntradaId      String
   movimentoSaidaId        String
   quantidade              Int
-  custoUnitario           Decimal?            @db.Decimal(18, 2)
+  custoUnitario           Decimal?              @db.Decimal(18, 2)
   moedaCusto              String?
-  custoUnitarioConvertido Decimal?            @db.Decimal(18, 2)
+  custoUnitarioConvertido Decimal?              @db.Decimal(18, 2)
   cotacaoCambioId         String?
   politica                String
   // PD-01: baixa revertida devolve o saldo ao lote original.
   revertidaEm             DateTime?
-  createdAt               DateTime            @default(now())
-  loja                    Loja                @relation(fields: [lojaId], references: [id], onDelete: Restrict)
-  item                    VendaItem           @relation(fields: [vendaItemId, lojaId], references: [id, lojaId], onDelete: Restrict)
-  lote                    MovimentacaoEstoque @relation("BaixaLote", fields: [movimentoEntradaId, lojaId], references: [id, lojaId], onDelete: Restrict)
-  saida                   MovimentacaoEstoque @relation("BaixaSaida", fields: [movimentoSaidaId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  lotesDevolucao          MovimentacaoEstoque[] @relation("BaixaOrigemDevolucao")
+  createdAt               DateTime              @default(now())
+  loja                    Loja                  @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  item                    VendaItem             @relation(fields: [vendaItemId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  lote                    MovimentacaoEstoque   @relation("BaixaLote", fields: [movimentoEntradaId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  saida                   MovimentacaoEstoque   @relation("BaixaSaida", fields: [movimentoSaidaId, lojaId], references: [id, lojaId], onDelete: Restrict)
 
   @@index([lojaId, movimentoEntradaId])
   @@index([vendaItemId])

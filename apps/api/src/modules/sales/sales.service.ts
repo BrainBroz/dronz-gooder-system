@@ -304,6 +304,15 @@ export async function lotsFor(db: Db, lojaId: string, produtoIds: string[]) {
         select: { quantidade: true }
       },
       reconciliacoesLote: { select: { quantidade: true } },
+      baixaOrigem: {
+        select: {
+          custoUnitario: true,
+          moedaCusto: true,
+          custoUnitarioConvertido: true,
+          cotacaoCambioId: true,
+          item: { select: { venda: { select: { moeda: true } } } }
+        }
+      },
       pedidoItem: {
         include: {
           pedido: { select: { moeda: true, numeroPedido: true } },
@@ -353,6 +362,23 @@ export async function lotBalances(
 }
 
 export function lotCost(lot: Lot, moedaVenda: string) {
+  // Lote de devolução (PD-02): custo é o snapshot da baixa original, nunca o custo atual do item.
+  const origem = lot.baixaOrigem;
+  if (origem)
+    return {
+      custoUnitario: origem.custoUnitario,
+      moedaCusto: origem.moedaCusto,
+      convertido:
+        origem.moedaCusto === moedaVenda
+          ? origem.custoUnitario
+          : origem.item.venda.moeda === moedaVenda
+            ? origem.custoUnitarioConvertido
+            : null,
+      cotacaoCambioId:
+        origem.item.venda.moeda === moedaVenda
+          ? (origem.cotacaoCambioId ?? undefined)
+          : undefined
+    };
   const item = lot.pedidoItem;
   if (!item)
     return {
@@ -442,7 +468,7 @@ export async function lotSuggestion(lojaId: string, id: string) {
           quantidade: take,
           entradaEm: lot.createdAt,
           pedido: lot.pedidoItem?.pedido.numeroPedido ?? null,
-          custoConhecido: !!lot.pedidoItem
+          custoConhecido: !!lot.pedidoItem || !!lot.baixaOrigem?.custoUnitario
         });
       }
       return {

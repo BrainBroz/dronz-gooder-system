@@ -1,3 +1,9 @@
+import {
+  expectationSelect,
+  packagedLines,
+  receivedByPackage,
+  unpackagedRemaining
+} from "../positions/expectations";
 import { randomUUID } from "node:crypto";
 import { MalaStatus, Prisma, ViagemStatus } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
@@ -427,6 +433,7 @@ export async function confirmMiami(
   actor: Actor,
   d: {
     posicaoId?: string;
+    pacoteExternoId?: string;
     condicaoComercial?: "NAO_DEFINIDA" | "NOVO" | "CAIXA_ABERTA" | "USADO";
     funcionamento?: "NAO_TESTADO" | "FUNCIONAL" | "DEFEITO_PARCIAL" | "INOPERANTE";
     acessoriosAusentes?: string[];
@@ -443,9 +450,12 @@ export async function confirmMiami(
   return idempotentMutation({
     lojaId, operation: "CONFIRM_MIAMI", entityId: d.pedidoCompraItemId, key: idempotencyKey, payload: d,
     execute: async (tx, correlationId) => {
+    // A linha do item é o recurso compartilhado de quantidade: recebimento e conteúdo de pacote
+    // (setPackageItems) serializam por ela.
+    await tx.$queryRaw`SELECT id FROM "PedidoCompraItem" WHERE id = ${d.pedidoCompraItemId} AND "lojaId" = ${lojaId} FOR UPDATE`;
     const i = await tx.pedidoCompraItem.findFirst({
       where: { id: d.pedidoCompraItemId, lojaId },
-      include: { pedido: true }
+      select: { ...expectationSelect, pedidoCompraId: true, quantidadeRecebidaMiami: true, pedido: { select: { ...expectationSelect.pedido.select, status: true } } }
     });
     if (
       !i ||
@@ -454,10 +464,21 @@ export async function confirmMiami(
       i.quantidadeRecebidaMiami + d.quantidadeRecebida > i.quantidade
     )
       throw new AppError(409, "conflict");
-    // D-15/T31: recebe-se só no destino do pedido; outro local exige redirecionamento autorizado.
-    if (d.posicaoId && d.posicaoId !== i.pedido.destinoPosicaoId)
+    // D-15/PD-04: com pacote informado, recebe-se no destino efetivo do pacote e até o saldo declarado
+    // nele. Sem pacote, recebe-se no destino do pedido e só o que não está declarado em pacote algum.
+    let destino = i.pedido.destinoPosicaoId;
+    if (d.pacoteExternoId) {
+      const line = packagedLines(i).find((entry) => entry.pacoteId === d.pacoteExternoId);
+      if (!line) throw new AppError(409, "package_item_not_declared");
+      destino = line.destino ?? i.pedido.destinoPosicaoId;
+      const saldo = line.quantidade - (receivedByPackage(i).get(line.pacoteId) ?? 0);
+      if (d.quantidadeRecebida > saldo) throw new AppError(409, "package_quantity_exceeded");
+    } else if (d.quantidadeRecebida > unpackagedRemaining(i))
+      throw new AppError(409, packagedLines(i).length ? "package_receipt_required" : "conflict");
+    // D-15/T31: outro local exige redirecionamento autorizado (do pedido ou do pacote).
+    if (d.posicaoId && d.posicaoId !== destino)
       throw new AppError(409, "destination_mismatch");
-    await assertOperable(tx, actor, i.pedido.destinoPosicaoId);
+    await assertOperable(tx, actor, destino);
     const userId = actor.userId;
     const atraso = Date.now() - d.recebidoEm.getTime() > 86400000;
     const r = await tx.recebimentoMiami.create({
@@ -467,7 +488,8 @@ export async function confirmMiami(
         recebidoEm: d.recebidoEm,
         observacao: d.observacao,
         tipoDivergencia: d.tipoDivergencia || "CORRETO",
-        posicaoId: i.pedido.destinoPosicaoId,
+        posicaoId: destino,
+        pacoteExternoId: d.pacoteExternoId,
         condicaoComercial: d.condicaoComercial,
         funcionamento: d.funcionamento,
         acessoriosAusentes: d.acessoriosAusentes ?? [],

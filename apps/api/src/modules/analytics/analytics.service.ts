@@ -244,8 +244,9 @@ export async function report(
     case "costs": {
       // PD-11 (E-4): encargo pertence à competência do pedido original (mês de dataCompra em
       // São Paulo); lançado depois do fim desse mês recebe a marca e mantém a data de lançamento.
+      // Filtro pela competência (data do pedido), não pela data em que o custo foi lançado.
       const costs = await prisma.custoPedido.findMany({
-        where: { lojaId, createdAt: period },
+        where: { lojaId, pedido: { dataCompra: period } },
         include: { itens: true, pedido: true }
       });
       return costs.map((cost) => {

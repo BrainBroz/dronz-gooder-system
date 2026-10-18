@@ -34,6 +34,11 @@ export type MiamiCandidate = {
   allowedActions: OperationalAction[];
   blockedReasons: BlockedReason[];
   history?: History;
+  // D-15/PD-04: pacotes com conteúdo declarado e saldo recebível fora de pacote.
+  recebivel?: {
+    pacotes: { pacoteId: string; pacote: string; destinoPosicaoId: string; quantidade: number; saldo: number }[];
+    saldoSemPacote: number;
+  };
 };
 
 export type CheckpointCandidate = {

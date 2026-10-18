@@ -316,7 +316,7 @@ Continuam abertas e bloqueiam somente seus batches: vigência de cotação (`E-2
   - PD-01: `POST /sales/:id/reverse` (VENDA_CORRIGIR) reverte as baixas, devolve o saldo ao lote original e marca a venda ESTORNADA (relatório `VENDAS_ESTORNADAS`); é bloqueado se houve recebimento ou devolução.
   - PD-02: `POST /sales/:id/returns` registra a devolução sem mexer no estoque; `POST /sales/returns/:id/check` (DEVOLUCAO_CONFERIR), quando apta, cria lote novo com o item de compra do lote vendido.
   - PD-03: `ReconciliacaoLote`. `GET /inventory/lots/:produtoId` diagnostica; `POST .../reconcile` atribui as saídas sem lote aos lotes mais antigos, com motivo; `POST /inventory/lots/entries/:id/purchase-item` liga lote sem custo ao item, limitado ao comprado.
-  - PD-04: `PacoteItem` (conteúdo por pacote); "a caminho" por posição = pacotes destinados + parte sem pacote − recebido. O recebimento ainda não informa o pacote.
+  - PD-04: `PacoteItem` (conteúdo por pacote); "a caminho" por posição = pacotes destinados + parte sem pacote − recebido.
   - PD-08: alerta `ENVIO_QUINTA_ATRASADO` na Home (08:00–12:00 no fuso do Local da posição de origem, sem bloqueio).
   - PD-09: `GET /finance/exchange-rates` traz vigente e idade; o custo avisa `COTACAO_ANTIGA` (mais de 7 dias) ou `COTACAO_SUBSTITUIDA`.
   - PD-10: listas de pedidos e de pagamentos ocultam cancelados e estornos por padrão (`incluirCancelados=true`); os pagamentos trazem totais por moeda.
@@ -324,6 +324,13 @@ Continuam abertas e bloqueiam somente seus batches: vigência de cotação (`E-2
   - PD-12: com `ESTOQUE_PERDA_LIMITE_UNIDADES` definido, perda ou ajuste negativo acima do limite vira proposta (`POST /inventory/movements/loss-requests`), aprovada por outro usuário na fila D-17. Sem a variável, nada muda; o limite é decisão do PO.
   - PD-13: `GESTOR_LOJA` recebe revisão e aprovação buyer, gestão logística, `VENDA_CORRIGIR` e `DEVOLUCAO_CONFERIR`.
   - De passagem, o contador "pedidos a pagar" da Home deixou de descontar reembolsos (regra do B16).
+- Correções da auditoria do Codex sobre PD-01..PD-13 (baseline `363db60`, branch `claude/audit-pd-fixes`):
+  - Conteúdo de pacote: `setPackageItems` trava as linhas de `PedidoCompraItem` em ordem fixa antes de somar, então dois pacotes não ultrapassam juntos a quantidade comprada.
+  - Recebimento: `confirmMiami` aceita `pacoteExternoId`. Valida o vínculo pacote–item–loja, recebe no destino efetivo do pacote (com autorização na posição) até o saldo declarado e grava `RecebimentoMiami.pacoteExternoId`. Sem pacote, só recebe o que não está declarado em pacote algum (`package_receipt_required`).
+  - Encerramento de posição: conta pacotes destinados com saldo, e também pacote redirecionado sem conteúdo declarado.
+  - Lote de devolução: aponta para a baixa original (`MovimentacaoEstoque.baixaOrigemId`) e herda o custo congelado dela.
+  - Relatório `costs`: filtra pela competência do pedido (`dataCompra`), não pela data do lançamento.
+  - Regra comum de quantidades por posição: `positions/expectations.ts`.
 - Identidade física unitária, compensação pós-materialização e anexos de evidência (D-6) são gaps de backend ou schema, não capacidades atuais.
 - As três projeções do contrato de UX não podem ser colapsadas no frontend. Materialização comercial não prova localização física e reembolso econômico não move mercadoria automaticamente.
 

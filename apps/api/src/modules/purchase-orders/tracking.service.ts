@@ -307,6 +307,16 @@ export async function setPackageItems(
       include: { itens: { where: { lojaId } } }
     });
     if (!pkg) throw new AppError(404, "package_not_found");
+    const ids = input.itens.map((entry) => entry.pedidoCompraItemId);
+    if (new Set(ids).size !== ids.length)
+      throw new AppError(400, "bad_request");
+    // A quantidade comprada do item é o recurso compartilhado entre pacotes: trava as linhas dos itens
+    // (novos e os que saem deste pacote) em ordem fixa antes de somar, e só então confere recebimentos.
+    const lockIds = [
+      ...new Set([...ids, ...pkg.itens.map((line) => line.pedidoCompraItemId)])
+    ].sort();
+    for (const itemId of lockIds)
+      await tx.$queryRaw`SELECT id FROM "PedidoCompraItem" WHERE id = ${itemId} AND "lojaId" = ${lojaId} FOR UPDATE`;
     if (
       await tx.recebimentoMiami.count({
         where: {
@@ -315,9 +325,6 @@ export async function setPackageItems(
       })
     )
       throw new AppError(409, "already_received");
-    const ids = input.itens.map((entry) => entry.pedidoCompraItemId);
-    if (new Set(ids).size !== ids.length)
-      throw new AppError(400, "bad_request");
     const items = await tx.pedidoCompraItem.findMany({
       where: { id: { in: ids }, lojaId, pedidoCompraId },
       include: { pacotes: { where: { pacoteExternoId: { not: pacoteId } } } }

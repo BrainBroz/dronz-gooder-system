@@ -1,4 +1,9 @@
 import {
+  expectationSelect,
+  pendingAt,
+  undeclaredRedirect
+} from "./expectations";
+import {
   Prisma,
   type PapelResponsabilidade,
   type TipoPosicao
@@ -65,14 +70,24 @@ function validTimezone(timezone: string) {
 // D-10: pendências que impedem o encerramento de uma posição temporária.
 export async function closurePendencies(db: Db, posicaoId: string) {
   const [pendingItems, openBags, reservations] = await Promise.all([
+    // Itens destinados pelo pedido ou por pacote redirecionado a esta posição (auditoria D-15/PD-04).
     db.pedidoCompraItem.findMany({
       where: {
         pedido: {
-          destinoPosicaoId: posicaoId,
-          status: { notIn: ["CANCELLED", "COMPLETED", "DRAFT"] }
+          status: { notIn: ["CANCELLED", "COMPLETED", "DRAFT"] },
+          OR: [
+            { destinoPosicaoId: posicaoId },
+            {
+              compraImportada: {
+                enviosExternos: {
+                  some: { pacotes: { some: { destinoPosicaoId: posicaoId } } }
+                }
+              }
+            }
+          ]
         }
       },
-      select: { quantidade: true, quantidadeRecebidaMiami: true }
+      select: expectationSelect
     }),
     db.mala.count({
       where: { posicaoId, status: { in: ["PLANNING", "CLOSED"] } }
@@ -82,7 +97,10 @@ export async function closurePendencies(db: Db, posicaoId: string) {
     })
   ]);
   const notReceived = pendingItems.filter(
-    (item) => item.quantidadeRecebidaMiami < item.quantidade
+    (item) =>
+      pendingAt(item, posicaoId) > 0 ||
+      // Pacote redirecionado para cá sem conteúdo declarado: não dá para saber que nada falta.
+      undeclaredRedirect(item, posicaoId)
   ).length;
   return [
     ...(notReceived
@@ -493,6 +511,7 @@ export async function availability(
                 select: {
                   pacotes: {
                     select: {
+                      id: true,
                       destinoPosicaoId: true,
                       itens: {
                         select: { pedidoCompraItemId: true, quantidade: true }
@@ -511,8 +530,11 @@ export async function availability(
       },
       produto: { select: { id: true, codigo: true, nome: true, peso: true } },
       recebimentosMiami: {
-        where: { posicaoId },
-        select: { quantidadeRecebida: true }
+        select: {
+          quantidadeRecebida: true,
+          posicaoId: true,
+          pacoteExternoId: true
+        }
       },
       alocacoesMala: {
         where: { mala: { posicaoId } },
@@ -522,47 +544,17 @@ export async function availability(
     orderBy: { createdAt: "asc" }
   });
   return items.map((item) => {
-    const recebido = item.recebimentosMiami.reduce(
-      (sum, entry) => sum + entry.quantidadeRecebida,
-      0
-    );
+    const recebido = item.recebimentosMiami
+      .filter((entry) => entry.posicaoId === posicaoId)
+      .reduce((sum, entry) => sum + entry.quantidadeRecebida, 0);
     const reservado = item.alocacoesMala
       .filter((entry) => entry.status === "RESERVADA")
       .reduce((sum, entry) => sum + entry.quantidade, 0);
     const alocado = item.alocacoesMala
       .filter((entry) => entry.status === "CONSUMIDA")
       .reduce((sum, entry) => sum + entry.quantidade, 0);
-    // PD-04: com conteúdo declarado, o esperado aqui é o que vem nos pacotes destinados a esta
-    // posição mais o que não está em pacote algum (segue o pedido). Sem conteúdo, vale o pedido.
-    const packaged = (
-      item.pedido.compraImportada?.enviosExternos ?? []
-    ).flatMap((envio) =>
-      envio.pacotes.flatMap((pkg) =>
-        pkg.itens
-          .filter((entry) => entry.pedidoCompraItemId === item.id)
-          .map((entry) => ({
-            destino: pkg.destinoPosicaoId ?? item.pedido.destinoPosicaoId,
-            quantidade: entry.quantidade
-          }))
-      )
-    );
-    // shortcut: o recebimento ainda não informa o pacote; "a caminho" desconta o recebido nesta
-    // posição. Ligar recebimento→pacote quando a conferência por etiqueta for obrigatória.
-    const aCaminho = packaged.length
-      ? Math.max(
-          0,
-          packaged
-            .filter((entry) => entry.destino === posicaoId)
-            .reduce((sum, entry) => sum + entry.quantidade, 0) +
-            (item.pedido.destinoPosicaoId === posicaoId
-              ? item.quantidade -
-                packaged.reduce((sum, entry) => sum + entry.quantidade, 0)
-              : 0) -
-            recebido
-        )
-      : item.pedido.destinoPosicaoId === posicaoId
-        ? Math.max(0, item.quantidade - item.quantidadeRecebidaMiami)
-        : 0;
+    // Destino efetivo por pacote e recebimento por pacote: mesma regra do encerramento (expectations.ts).
+    const aCaminho = pendingAt(item, posicaoId);
     return {
       pedidoCompraItemId: item.id,
       pedido: { id: item.pedido.id, numeroPedido: item.pedido.numeroPedido },

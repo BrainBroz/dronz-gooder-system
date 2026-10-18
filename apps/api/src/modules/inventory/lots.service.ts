@@ -55,7 +55,7 @@ export async function lotDiagnosis(lojaId: string, produtoId: string) {
       quantidade: lot.quantidade,
       restante: lot.restante,
       pedidoCompraItemId: lot.pedidoCompraItemId,
-      custoConhecido: !!lot.pedidoCompraItemId
+      custoConhecido: !!lot.pedidoCompraItemId || !!lot.baixaOrigem
     })),
     saidasSemLote: await unlottedOutflows(prisma, lojaId, produtoId)
   };
