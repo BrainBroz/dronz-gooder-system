@@ -6,6 +6,7 @@ import {
   type AuthenticatedRequest
 } from "../../middlewares/auth";
 import * as service from "./unified-purchases.service";
+import { monthlyCsv, monthlyPanel } from "./monthly-panel.service";
 import {
   accountSchema,
   assignmentSchema,
@@ -48,6 +49,55 @@ const key = (request: AuthenticatedRequest) => {
   const value = request.headers["idempotency-key"];
   return typeof value === "string" && value.length <= 200 ? value : undefined;
 };
+
+// Batch 13: painel mensal e CSV derivados das compras importadas (staging global).
+const monthlySchema = z
+  .object({
+    ano: z.coerce.number().int().min(2000).max(2100),
+    mes: z.coerce.number().int().min(1).max(12),
+    plataforma: z
+      .enum([
+        "AMAZON",
+        "EBAY",
+        "WALMART",
+        "BEST_BUY",
+        "APPLE",
+        "OUTRA",
+        "MANUAL",
+        "LEGACY_REVIEW"
+      ])
+      .optional(),
+    contaExternaId: z.string().cuid().optional(),
+    merchantExternoId: z.string().cuid().optional(),
+    moeda: z
+      .string()
+      .trim()
+      .length(3)
+      .transform((value) => value.toUpperCase())
+      .optional(),
+    lojaId: z.string().cuid().optional()
+  })
+  .strict();
+unifiedPurchasesRouter.get(
+  "/monthly",
+  requirePermission("COMPRAS_IMPORTADAS_VISUALIZAR"),
+  wrap(async (request, response) => {
+    response.json(await monthlyPanel(monthlySchema.parse(request.query)));
+  })
+);
+unifiedPurchasesRouter.get(
+  "/monthly.csv",
+  requirePermission("COMPRAS_IMPORTADAS_VISUALIZAR"),
+  wrap(async (request, response) => {
+    const filters = monthlySchema.parse(request.query);
+    response
+      .type("text/csv; charset=utf-8")
+      .attachment(
+        `compras-${filters.ano}-${String(filters.mes).padStart(2, "0")}.csv`
+      )
+      .send(await monthlyCsv(filters));
+  })
+);
 
 // Contas externas para seleção em revisão/identificação; sem metadata nem erros de sincronização.
 unifiedPurchasesRouter.get(

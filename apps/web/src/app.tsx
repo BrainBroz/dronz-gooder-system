@@ -70,6 +70,11 @@ const FinancePage = React.lazy(() =>
     default: module.FinancePage
   }))
 );
+const MonthlyPanelPage = React.lazy(() =>
+  import("./pages/MonthlyPanelPage").then((module) => ({
+    default: module.MonthlyPanelPage
+  }))
+);
 const BuyerReviewPage = React.lazy(() =>
   import("./pages/BuyerReviewPage").then((module) => ({
     default: module.BuyerReviewPage
@@ -239,6 +244,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     ["Fornecedores", "/fornecedores", ["CATALOGO_VISUALIZAR"]],
     ["Compras", "/compras", ["COMPRAS_IMPORTADAS_VISUALIZAR"]],
     ["Revisão buyer", "/compras/revisao", ["BUYER_INGESTION_VISUALIZAR"]],
+    ["Painel mensal", "/compras/painel-mensal", ["COMPRAS_IMPORTADAS_VISUALIZAR"]],
     ["Pedidos Operacionais", "/pedidos", ["PEDIDOS_COMPRA_VISUALIZAR"]],
     ["Logística", "/logistica"],
     ["Posições", "/posicoes"],
@@ -478,6 +484,16 @@ export function AppRoutes() {
                 <AuthGate>
                   <Shell>
                     <ReportsPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/compras/painel-mensal"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <MonthlyPanelPage />
                   </Shell>
                 </AuthGate>
               }
