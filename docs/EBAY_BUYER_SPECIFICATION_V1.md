@@ -6,7 +6,7 @@
 
 **Ambiente comprovado:** Production, marketplace US (`siteId=0`)
 
-**Estado:** onboarding OAuth e leitura buyer comprovados; adapter produtivo ainda não implementado
+**Estado:** onboarding OAuth e leitura buyer comprovados; adapter implementado no Batch 11 (`EbayBuyerAdapter`), desligado por padrão
 
 ## 1. Escopo e decisão
 
@@ -319,3 +319,23 @@ Esses itens não invalidam o onboarding. Regras de produto que afetem o pipeline
 ## 18. Gate
 
 **PRONTO PARA IMPLEMENTAÇÃO DO ADAPTER EBAY BUYER**, condicionado à ordem normativa: Batch 10 implementa primeiro o pipeline comum; Batch 11 implementa o adapter usando esta especificação. Nenhum adapter, endpoint, schema, migration ou tela foi criado durante o gate.
+
+## 19. Implementação (Batch 11)
+
+`apps/api/src/modules/marketplace-integrations/ebay-buyer.adapter.ts` implementa esta especificação:
+
+- OAuth: renova o access token por `grant_type=refresh_token` no Identity API, mantém o token só em memória até a expiração devolvida pelo eBay e o envia apenas em `X-EBAY-API-IAF-TOKEN`;
+- `GetOrders` com `OrderRole=Buyer`, `DetailLevel=ReturnAll`, `ModTimeFrom/ModTimeTo` e 100 pedidos por página, compatibility level `1423`;
+- cursor opaco com janela e página; ao concluir uma janela anterior a "agora", abre a seguinte a partir do fim da anterior menos 1 hora de sobreposição, com janelas de no máximo 30 dias;
+- parser XML próprio (`xml.ts`) que recusa DOCTYPE e limita tamanho (8 MiB) e profundidade (64);
+- mapeamento: `OrderLineItemID` (ou `ItemID-TransactionID`) como identidade de linha; `Cancelled`/`CancelComplete` marca as quantidades como canceladas; reembolso não é convertido em quantidade; cada código de tracking vira um pacote do envio do pedido;
+- erros: 401/403 e códigos de token inválido → `AUTHORIZATION_EXPIRED`; 429, 5xx e limite de chamadas → `THROTTLED`; XML inválido ou `Ack` ausente → `INVALID_RESPONSE`; mensagens nunca contêm credencial.
+
+### Ativação
+
+1. Variável `MARKETPLACE_EBAY_BUYER_ENABLED=true` na API (sem ela, o adapter permanece desligado).
+2. Credencial em secret manager exposto ao `SecretProvider`. Hoje o provider aceita apenas `env:MARKETPLACE_*`: variável `MARKETPLACE_EBAY_<NOME>` com JSON `{"clientId":"…","clientSecret":"…","refreshToken":"…"}` — nunca no Git.
+3. Conexão eBay com `secretReference` = `env:MARKETPLACE_EBAY_<NOME>`, status `ACTIVE` e capabilities `LIST_ORDERS`, `GET_ORDER`, `LIST_ORDER_ITEMS`, `LIST_SHIPMENTS`, `INCREMENTAL_CURSOR`.
+4. Sincronização manual autorizada (`POST /integrations/marketplaces/connections/:id/sync-runs`); cada pedido entra como evidência e candidato aguardando aprovação humana.
+
+Continuam abertos: secret manager de produção, frequência automática, validação com mais de uma página em dados reais e retenção/minimização de XML (o adapter não persiste XML bruto).

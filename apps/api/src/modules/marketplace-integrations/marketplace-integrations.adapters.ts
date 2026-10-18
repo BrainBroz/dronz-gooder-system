@@ -1,4 +1,6 @@
 import { AppError } from "../../lib/app-error";
+import { EbayBuyerAdapter } from "./ebay-buyer.adapter";
+import { secretProvider } from "./marketplace-integrations.secrets";
 import type {
   MarketplaceAdapter,
   MarketplaceAdapterRegistry,
@@ -76,7 +78,12 @@ export class EbayMarketplaceAdapter extends DisabledMarketplaceAdapter {
   readonly capabilities = [] as const;
 }
 
+// Adapter eBay real só com ativação explícita do ambiente (gate eBay comprovado; credencial via SecretProvider).
+// Amazon permanece desligado até o onboarding externo.
 export const marketplaceAdapterRegistry: MarketplaceAdapterRegistry = {
   AMAZON: new AmazonMarketplaceAdapter(),
-  EBAY: new EbayMarketplaceAdapter()
+  EBAY:
+    process.env.MARKETPLACE_EBAY_BUYER_ENABLED === "true"
+      ? new EbayBuyerAdapter(secretProvider)
+      : new EbayMarketplaceAdapter()
 };

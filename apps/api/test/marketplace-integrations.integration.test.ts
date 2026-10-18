@@ -2792,3 +2792,43 @@ describe("B10: evidência multicanal, confiança e resolução humana", () => {
     expect(denied.status).toBe(403);
   });
 });
+
+describe("B11: adapter eBay Buyer no pipeline comum", () => {
+  it("sincroniza GetOrders buyer em evidências e candidatos sem aprovar, materializar ou duplicar no replay", async () => {
+    const { EbayBuyerAdapter } = await import("../src/modules/marketplace-integrations/ebay-buyer.adapter");
+    const fixture = await connectionFixture("EBAY", "SHARED", `b11-${randomUUID().slice(0, 6)}`);
+    const xml = `<?xml version="1.0"?><GetOrdersResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Success</Ack>
+      <HasMoreOrders>false</HasMoreOrders><OrderArray>
+      <Order><OrderID>EB-1</OrderID><OrderStatus>Completed</OrderStatus><CreatedTime>2026-10-10T12:00:00.000Z</CreatedTime>
+        <LastModifiedTime>2026-10-11T09:00:00.000Z</LastModifiedTime><Total currencyID="USD">30.00</Total><SellerUserID>seller_b11</SellerUserID>
+        <TransactionArray><Transaction><OrderLineItemID>EB-1-L1</OrderLineItemID><Item><ItemID>9</ItemID><Title>Hélice</Title></Item>
+          <QuantityPurchased>3</QuantityPurchased><TransactionPrice currencyID="USD">10.00</TransactionPrice>
+          <ShippingDetails><ShipmentTrackingDetails><ShippingCarrierUsed>USPS</ShippingCarrierUsed><ShipmentTrackingNumber>9400B11</ShipmentTrackingNumber></ShipmentTrackingDetails></ShippingDetails>
+        </Transaction></TransactionArray></Order>
+      <Order><OrderID>EB-2</OrderID><OrderStatus>Cancelled</OrderStatus><CreatedTime>2026-10-12T12:00:00.000Z</CreatedTime>
+        <LastModifiedTime>2026-10-12T13:00:00.000Z</LastModifiedTime><Total currencyID="USD">5.00</Total>
+        <TransactionArray><Transaction><OrderLineItemID>EB-2-L1</OrderLineItemID><Item><ItemID>8</ItemID><Title>Cabo</Title></Item>
+          <QuantityPurchased>1</QuantityPurchased><TransactionPrice currencyID="USD">5.00</TransactionPrice></Transaction></TransactionArray></Order>
+      </OrderArray></GetOrdersResponse>`;
+    const fetchImpl = async (url: string) => url.includes("/identity/")
+      ? { status: 200, text: async () => JSON.stringify({ access_token: "tok", expires_in: 7200 }) }
+      : { status: 200, text: async () => xml };
+    const secrets = { get: async () => JSON.stringify({ clientId: "c", clientSecret: "s", refreshToken: "r" }) };
+    const adapter = new EbayBuyerAdapter(secrets, fetchImpl, () => new Date("2026-10-18T12:00:00.000Z"));
+    const identity = await getAuthenticatedUser(fixture.userId);
+    const registry = { AMAZON: new FakeAdapter("AMAZON", []), EBAY: adapter };
+    const window = { replay: false, from: new Date("2026-10-01T00:00:00.000Z"), to: new Date("2026-10-18T00:00:00.000Z") };
+    const first = await syncConnection(identity, fixture.connectionId, window, `b11-sync-${randomUUID()}`, registry);
+    expect(first.status).toBe("SUCCEEDED");
+    const candidates = await prisma.buyerPurchaseCandidate.findMany({
+      where: { currentEvidence: { conexaoMarketplaceId: fixture.connectionId } }, include: { currentEvidence: true }
+    });
+    expect(candidates.map((candidate) => [candidate.externalOrderIdNormalized, candidate.status]).sort())
+      .toEqual([["EB-1", "AGUARDANDO_APROVACAO"], ["EB-2", "CANCELADA"]]);
+    expect(candidates.every((candidate) => candidate.currentEvidence.source === "EBAY_BUYER_API")).toBe(true);
+    expect(await prisma.compraImportada.count({ where: { conexaoMarketplaceId: fixture.connectionId } })).toBe(0);
+    const evidenceCount = await prisma.buyerEvidence.count({ where: { conexaoMarketplaceId: fixture.connectionId } });
+    await syncConnection(identity, fixture.connectionId, { ...window, replay: true }, `b11-replay-${randomUUID()}`, registry);
+    expect(await prisma.buyerEvidence.count({ where: { conexaoMarketplaceId: fixture.connectionId } })).toBe(evidenceCount);
+  });
+});
