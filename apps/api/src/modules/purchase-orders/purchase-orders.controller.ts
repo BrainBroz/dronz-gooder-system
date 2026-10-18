@@ -1,5 +1,8 @@
 import type { NextFunction, Response } from "express";
-import type { AuthenticatedRequest } from "../../middlewares/auth";
+import {
+  hasPermission,
+  type AuthenticatedRequest
+} from "../../middlewares/auth";
 import {
   itemSchema,
   itemUpdateSchema,
@@ -123,7 +126,13 @@ export async function searchByNumero(
   const numero = String(r.query.numero || "");
   if (!numero.trim()) return bad(x);
   try {
-    x.json(await s.searchByNumero(st(r), numero));
+    x.json(
+      await s.searchByNumero(
+        st(r),
+        numero,
+        hasPermission(r, "PEDIDOS_COMPRA_VISUALIZAR")
+      )
+    );
   } catch (e) {
     n(e);
   }

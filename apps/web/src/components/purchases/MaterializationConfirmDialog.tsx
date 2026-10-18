@@ -22,40 +22,59 @@ export function MaterializationConfirmDialog({
   storeId,
   summary,
   purchaseVersion,
+  canMaterialize,
   open,
   onClose,
-  onSuccess
+  onSuccess,
+  onRefresh
 }: {
   purchaseId: string;
   storeId: string;
   summary: MaterializationSummary;
   purchaseVersion: number;
+  canMaterialize: boolean;
   open: boolean;
   onClose: () => void;
   onSuccess?: () => void;
+  onRefresh?: () => void;
 }) {
   const [error, setError] = React.useState<MutationError | null>(null);
+  const [completedSummary, setCompletedSummary] = React.useState<MaterializationSummary | null>(null);
   const { materialize } = useUnifiedPurchaseMutations();
+  const submitting = React.useRef(false);
 
   const handleMaterialize = async () => {
+    if (!canMaterialize || submitting.current || materialize.isSuccess) return;
+    submitting.current = true;
     setError(null);
-
     try {
-      await materialize.mutateAsync({
+      const result = await materialize.mutateAsync({
         purchaseId,
         storeId,
         expectedPurchaseVersion: purchaseVersion,
         idempotencyKey: newIdempotencyKey()
       });
-
+      const items = result.data?.pedidoCompra?.itens;
+      setCompletedSummary(Array.isArray(items) && items.length > 0 && items.every((item) => Number.isInteger(item?.quantidade) && item.quantidade > 0)
+        ? {
+            ...summary,
+            itemCount: items.length,
+            totalUnits: items.reduce((total, item) => total + item.quantidade, 0)
+          }
+        : null);
       onSuccess?.();
     } catch (err) {
-      const { status, message } = readMutationError(err);
+      const { status, message, code } = readMutationError(err);
 
       if (status === 409) {
+        if (code === "concurrent_modification") onRefresh?.();
         setError({
           type: "conflict",
-          message: "Dados foram atualizados. Recarregando...",
+          message: code === "supplier_mapping_required"
+            ? "Vincule o merchant a um fornecedor da loja no detalhe da compra antes de materializar."
+            : code === "concurrent_modification"
+              ? "Dados foram atualizados. Confira o detalhe atualizado antes de tentar novamente."
+              : `Materialização bloqueada: ${code ?? message ?? "revise as pendências da compra"}.`,
           statusCode: 409
         });
       } else if (status === 401) {
@@ -77,14 +96,18 @@ export function MaterializationConfirmDialog({
           statusCode: status
         });
       }
+    } finally {
+      submitting.current = false;
     }
   };
+  const displayedSummary = materialize.isSuccess ? completedSummary : summary;
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+    <Dialog open={open} onClose={materialize.isPending ? undefined : onClose} maxWidth="sm" fullWidth>
       <DialogTitle>Materializar para {summary.storeName}</DialogTitle>
       <DialogContent>
         <Stack gap={2}>
+          {materialize.isSuccess && <Alert severity="success">Materialização concluída. Pedido operacional disponível.</Alert>}
           {error && (
             <Alert severity="error" onClose={() => setError(null)}>
               {error.message}
@@ -97,20 +120,20 @@ export function MaterializationConfirmDialog({
             Compra — não é possível materializar um item isolado.
           </Alert>
 
-          <Stack gap={0.5}>
+          {displayedSummary ? <Stack gap={0.5}>
             <Typography variant="body2">
-              Loja: <strong>{summary.storeName}</strong>
+              Loja: <strong>{displayedSummary.storeName}</strong>
             </Typography>
             <Typography variant="body2">
               Itens elegíveis:{" "}
               <strong>
-                {summary.itemCount} {summary.itemCount === 1 ? "item" : "itens"}
+                {displayedSummary.itemCount} {displayedSummary.itemCount === 1 ? "item" : "itens"}
               </strong>
             </Typography>
             <Typography variant="body2">
-              Total de unidades: <strong>{summary.totalUnits}</strong>
+              Total de unidades: <strong>{displayedSummary.totalUnits}</strong>
             </Typography>
-          </Stack>
+          </Stack> : <Alert severity="warning">Pedido operacional disponível, mas o resumo da resposta está indisponível. Consulte o pedido operacional.</Alert>}
 
           <Typography variant="caption" color="text.secondary" sx={{ fontStyle: "italic" }}>
             Ação é idempotente — repetir não duplica.
@@ -119,12 +142,12 @@ export function MaterializationConfirmDialog({
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} disabled={materialize.isPending}>
-          Cancelar
+          {materialize.isSuccess ? "Fechar" : "Cancelar"}
         </Button>
         <Button
           onClick={handleMaterialize}
           variant="contained"
-          disabled={materialize.isPending}
+          disabled={!canMaterialize || materialize.isPending || materialize.isSuccess}
         >
           {materialize.isPending ? (
             <>

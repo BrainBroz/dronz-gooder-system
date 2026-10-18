@@ -1,0 +1,3 @@
+ALTER TYPE "TipoConflitoEvidenciaCompra" ADD VALUE 'CANCELLATION_CHANGED';
+ALTER TYPE "TipoConflitoEvidenciaCompra" ADD VALUE 'EXTERNAL_STATUS';
+ALTER TYPE "TipoConflitoEvidenciaCompra" ADD VALUE 'POST_APPROVAL_EVIDENCE';

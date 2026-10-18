@@ -68,7 +68,9 @@ export async function miamiDetail(lojaId: string, itemId: string, permissions: s
   });
   if (!item) throw new AppError(404, "not_found");
   const history = await operationalHistory(lojaId, "PedidoCompraItem", itemId);
-  return { ...item, history, allowedActions: candidate?.allowedActions ?? [], blockedReasons: candidate ? [] : [{ code: "MIAMI_ALREADY_COMPLETE", message: "Item sem quantidade pendente em Miami." }] };
+  return { ...item, history, allowedActions: candidate?.allowedActions ?? [], blockedReasons: candidate ? [] : item.quantidadeRecebidaMiami >= item.quantidade
+    ? [{ code: "MIAMI_ALREADY_COMPLETE", message: "Item sem quantidade pendente em Miami." }]
+    : [{ code: "ORDER_NOT_READY_FOR_MIAMI", message: "Pedido ainda não está apto ao recebimento em Miami." }] };
 }
 
 export async function paraguayCandidates(lojaId: string, permissions: string[], bagId?: string) {

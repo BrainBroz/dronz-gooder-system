@@ -3,6 +3,7 @@ export type PurchaseOrder = {
   id: string;
   numeroPedido: string;
   status: string;
+  allowedStatusTransitions: string[];
   subtotal: string;
   total: string;
   fornecedor: Supplier;

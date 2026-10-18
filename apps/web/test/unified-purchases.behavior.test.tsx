@@ -25,6 +25,7 @@ const overview = {
   unassigned: 0,
   partiallyAssigned: 1,
   fullyAssigned: 0,
+  awaitingMaterialization: 0,
   materialized: 0,
   pending: 3,
   conflicts: 1,

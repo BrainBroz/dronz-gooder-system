@@ -31,7 +31,6 @@ function FutureMetric({ label }: { label: string }) {
 }
 
 export function EconomicPanel({ overview }: { overview: UnifiedPurchaseOverview }) {
-  const readyToMaterialize = overview.fullyAssigned;
   return (
     <ContentCard title="Economia">
       <Stack gap={2}>
@@ -50,7 +49,7 @@ export function EconomicPanel({ overview }: { overview: UnifiedPurchaseOverview 
             label="Sem atribuição"
             value={overview.unassigned + overview.partiallyAssigned}
           />
-          <Metric label="Prontas p/ materializar" value={readyToMaterialize} />
+          <Metric label="Itens totalmente atribuídos" value={overview.fullyAssigned} />
           <Metric label="Materializadas" value={overview.materialized} />
         </Box>
         <Box

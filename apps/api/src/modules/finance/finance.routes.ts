@@ -2,13 +2,22 @@ import { Router, type NextFunction, type Response } from "express";
 import { z } from "zod";
 import {
   requireAuth,
+  requireReadWrite,
   requireStore,
   type AuthenticatedRequest
 } from "../../middlewares/auth";
 import * as service from "./finance.service";
 
 export const financeRouter = Router();
-financeRouter.use(requireAuth, requireStore);
+financeRouter.use(
+  requireAuth,
+  requireStore,
+  requireReadWrite(["FINANCEIRO_VISUALIZAR"], ["FINANCEIRO_REGISTRAR"])
+);
+const key = (req: AuthenticatedRequest) =>
+  typeof req.headers["idempotency-key"] === "string"
+    ? req.headers["idempotency-key"]
+    : undefined;
 const run =
   (fn: (req: AuthenticatedRequest) => Promise<unknown>, status = 200) =>
   async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
@@ -34,7 +43,12 @@ financeRouter.post(
       })
       .strict()
       .parse(req.body);
-    return service.createExchange(req.storeId!, req.identity!.user.id, d);
+    return service.createExchange(
+      req.storeId!,
+      req.identity!.user.id,
+      d,
+      key(req)
+    );
   }, 201)
 );
 financeRouter.post(
@@ -58,7 +72,13 @@ financeRouter.post(
       })
       .strict()
       .parse(req.body);
-    return service.pay(req.storeId!, d.pedidoCompraId, d);
+    return service.pay(
+      req.storeId!,
+      req.identity!.user.id,
+      d.pedidoCompraId,
+      d,
+      key(req)
+    );
   }, 201)
 );
 financeRouter.post(
@@ -67,9 +87,11 @@ financeRouter.post(
     (req) =>
       service.refund(
         req.storeId!,
+        req.identity!.user.id,
         String(req.params.id),
         z.object({ valor: z.number().positive() }).strict().parse(req.body)
-          .valor
+          .valor,
+        key(req)
       ),
     201
   )
@@ -79,6 +101,7 @@ financeRouter.put(
   run((req) =>
     service.setCosts(
       req.storeId!,
+      req.identity!.user.id,
       String(req.params.id),
       z
         .object({
@@ -88,7 +111,8 @@ financeRouter.put(
           custoAdicional: z.number().min(0)
         })
         .strict()
-        .parse(req.body)
+        .parse(req.body),
+      key(req)
     )
   )
 );

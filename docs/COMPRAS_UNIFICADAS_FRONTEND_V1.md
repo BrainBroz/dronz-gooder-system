@@ -4,7 +4,7 @@ Implementação técnica concluída e aprovada no Batch 6, commit `968b2bf`, sub
 
 ## Escopo
 
-A rota `/compras` apresenta a staging global de compras externas. A rota `/pedidos` continua separada e passa a ser identificada como **Pedidos Operacionais**. A interface não altera estoque, logística, checkpoints, financeiro ou pedidos já materializados.
+A rota `/compras` apresenta a staging global de compras externas. A rota `/pedidos` continua separada e passa a ser identificada como **Pedidos Operacionais**. A fila de compras não altera estoque, logística, checkpoints, financeiro ou pedidos já materializados. A página separada de Pedidos Operacionais permite envio e confirmação usando exclusivamente as transições devolvidas pelo backend.
 
 ## Fonte de verdade
 
@@ -65,3 +65,17 @@ Os testes comportamentais em jsdom cobrem:
 ## Fora de escopo
 
 Ingestão automática por e-mail/documentos/CSV, APIs externas, listagem de contas/merchants, matching automático, Dashboard, Relatórios, UI-3C e qualquer mutação de estoque, logística ou financeiro. Tracking futuro será consumido por domínio independente da fonte e não será inferido pelo frontend de Compras Unificadas.
+
+## Correção verificada na jornada local — 2026-10-16
+
+O drawer novo havia omitido o mapping merchant–fornecedor existente no detalhe anterior. `SupplierMappingForm` agora é compartilhado pelas duas apresentações, visível somente com `SET_SUPPLIER_MAPPING` no read model. Reutiliza `GET /suppliers` com query key/header da loja e a mutação existente de mapping, que invalida overview, listas e detalhe. Trocar a loja limpa a seleção anterior; falha no catálogo impede envio e permite retry.
+
+O diálogo de materialização lê o código `error` efetivamente enviado pela API. `supplier_mapping_required` orienta a configurar o vínculo; somente `concurrent_modification` dispara atualização do detalhe. O resumo confirmado usa as quantidades do pedido operacional retornado pela API, inclusive em retry que encontra materialização existente; não reutiliza a estimativa anterior ao envio. Se a resposta não trouxer itens verificáveis, informa que o resumo está indisponível. Sucesso mantém a confirmação aberta e desabilita novo envio; uma requisição pendente não aceita fechamento por ESC ou submissão duplicada.
+
+Se a atribuição mudar com o diálogo aberto, o resumo acompanha o detalhe atualizado antes do envio. Após sucesso, os números são os do pedido operacional retornado, não a cópia antiga da abertura ou do formulário.
+
+`fullyAssigned` permanece no painel Economia como “Itens totalmente atribuídos”. O card de atenção usa `awaitingMaterialization` como “Atribuições pendentes” e convida a revisar, sem prometer elegibilidade; inclui excessos legados sinalizados pelo backend. A API remove a ação de materializar quando não há atribuição realmente materializável. Para excesso legado, o detalhe exibe o bloqueio e oferece somente a redução auditada até a quantidade materializada, mediante motivo, `ASSIGN_TO_STORE` autorizado e revalidação pelo backend; atribuição sem unidades materializadas usa a remoção auditada. A elegibilidade completa continua revalidada na mutação, sem inferir mappings de fornecedor ausentes do read model.
+
+Oito regressões comportamentais foram acrescentadas em `purchase-mutations.behavior.test.tsx`: request de mapping e invalidações; troca de loja; ausência de ação sem autorização do read model; erro/retry do catálogo; erro de fornecedor; conflito de versão com refetch; sucesso com resumo removido do detalhe; bloqueio de ESC e duplo envio durante mutação. Os testes existentes foram preservados.
+
+A prova manual materializou duas unidades fictícias pela UI. A página de Pedidos Operacionais passou a usar `allowedStatusTransitions` nas leituras e o endpoint de status já existente; o pedido avançou por `DRAFT → PLACED → CONFIRMED` e apareceu em Miami com duas unidades pendentes. Não houve confirmação de recebimento físico nem entrada em estoque. O fornecedor legado do seed agora é aceito pelo mapping após validação de loja; os limites da homologação estão em [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md).

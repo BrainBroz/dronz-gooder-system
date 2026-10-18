@@ -1,5 +1,10 @@
 import { Router } from "express";
-import { requireAuth, requireStore } from "../../middlewares/auth";
+import {
+  requireAuth,
+  requirePermission,
+  requireReadWrite,
+  requireStore
+} from "../../middlewares/auth";
 import * as c from "./purchase-orders.controller";
 import * as tc from "./triagem.controller";
 
@@ -7,8 +12,16 @@ export const purchaseOrdersRouter = Router();
 
 purchaseOrdersRouter.use(requireAuth, requireStore);
 
+// Check-in Miami localiza o pedido por número; sem PEDIDOS_COMPRA_VISUALIZAR a resposta omite valores.
+purchaseOrdersRouter.get(
+  "/search/numero",
+  requirePermission("PEDIDOS_COMPRA_VISUALIZAR", "MIAMI_RECEBIMENTO_CONFIRMAR"),
+  c.searchByNumero
+);
+purchaseOrdersRouter.use(
+  requireReadWrite(["PEDIDOS_COMPRA_VISUALIZAR"], ["PEDIDOS_COMPRA_GERENCIAR"])
+);
 purchaseOrdersRouter.get("/", c.list);
-purchaseOrdersRouter.get("/search/numero", c.searchByNumero);
 purchaseOrdersRouter.get("/:id", c.get);
 purchaseOrdersRouter.post("/", c.create);
 purchaseOrdersRouter.patch("/:id", c.update);

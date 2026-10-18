@@ -12,7 +12,7 @@ const json = (value: unknown): Prisma.InputJsonValue =>
 type AuditInput = {
   usuarioId: string;
   lojaId?: string;
-  permissionCode: string;
+  permissionCode: string | null;
   action: string;
   entity: string;
   entityId: string;
@@ -25,6 +25,11 @@ type AuditInput = {
 };
 
 let auditFailureForTests: ((input: AuditInput) => boolean) | undefined;
+const isSerializationConflict = (error: unknown) =>
+  error instanceof Prisma.PrismaClientKnownRequestError &&
+  (error.code === "P2034" ||
+    (error.code === "P2010" && error.meta?.code === "40001"));
+
 export function setAuditFailureForTests(
   predicate?: (input: AuditInput) => boolean
 ) {
@@ -50,10 +55,7 @@ export async function idempotentMutation<T>(input: {
         }
       );
     } catch (error) {
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === "P2034"
-      )
+      if (isSerializationConflict(error))
         throw new AppError(409, "concurrent_modification");
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -97,10 +99,7 @@ export async function idempotentMutation<T>(input: {
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
     );
   } catch (error) {
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2034"
-    )
+    if (isSerializationConflict(error))
       throw new AppError(409, "concurrent_modification");
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&

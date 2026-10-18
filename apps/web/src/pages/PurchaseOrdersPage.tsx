@@ -1,5 +1,5 @@
-import React from "react";
-import { Button, MenuItem, Stack, TextField, Typography } from "@mui/material";
+import React, { useState } from "react";
+import { Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, Stack, TextField, Typography } from "@mui/material";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -11,12 +11,15 @@ import { MutationStatus } from "../components/ui/MutationStatus";
 import { api } from "../api/client";
 import { authHeader, useAuthStore } from "../stores/auth";
 import { purchasingQueryKeys } from "../queryKeys";
+import { operationsKeys } from "../hooks/useOperations";
 import type { Supplier, PurchaseOrder } from "../types/purchasing";
 import { useProducts } from "../hooks/useCatalog";
 
 function PurchaseOrdersContent() {
   const store = useAuthStore((s) => s.activeStoreId);
   const client = useQueryClient();
+  const [page, setPage] = useState(1);
+  const [selectedAction, setSelectedAction] = useState<{ id: string; number: string; status: "PLACED" | "CONFIRMED" } | null>(null);
   const { products } = useProducts();
   const suppliers = useQuery<Supplier[]>({
     queryKey: purchasingQueryKeys.suppliers(store),
@@ -29,12 +32,13 @@ function PurchaseOrdersContent() {
       ).data.items
   });
   const orders = useQuery<PurchaseOrder[]>({
-    queryKey: purchasingQueryKeys.orders(store),
+    queryKey: [...purchasingQueryKeys.orders(store), page],
     enabled: !!store,
     queryFn: async () =>
       (
         await api.get("/purchase-orders", {
-          headers: { ...authHeader(), "x-store-id": store }
+          headers: { ...authHeader(), "x-store-id": store },
+          params: { page, limit: 20 }
         })
       ).data.items
   });
@@ -89,12 +93,30 @@ function PurchaseOrdersContent() {
         { headers: { ...authHeader(), "x-store-id": store } }
       ),
     onSuccess: async () => {
+      setPage(1);
       await client.invalidateQueries({
         queryKey: purchasingQueryKeys.orders(store)
       });
       form.reset();
     }
   });
+  const changeStatus = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: "PLACED" | "CONFIRMED" }) =>
+      api.patch(`/purchase-orders/${id}/status`, { status }, { headers: { ...authHeader(), "x-store-id": store } }),
+    onSuccess: async () => {
+      setSelectedAction(null);
+      await Promise.all([
+        client.invalidateQueries({ queryKey: purchasingQueryKeys.orders(store) }),
+        client.invalidateQueries({ queryKey: operationsKeys.all(store) })
+      ]);
+    },
+    onError: async () => {
+      await client.invalidateQueries({ queryKey: purchasingQueryKeys.orders(store) });
+    }
+  });
+  const actionAvailable = Boolean(selectedAction && orders.data?.some((order) =>
+    order.id === selectedAction.id && order.allowedStatusTransitions.includes(selectedAction.status)
+  ));
   return (
     <PageContainer>
       <Stack gap={{ xs: 2.5, md: 3.5 }}>
@@ -196,8 +218,32 @@ function PurchaseOrdersContent() {
             <Typography color="text.secondary" variant="body2">
               Subtotal {o.subtotal} · Total {o.total}
             </Typography>
+            {(["PLACED", "CONFIRMED"] as const).filter((status) =>
+              o.allowedStatusTransitions?.includes(status)
+            ).map((status) => (
+              <Button key={status} disabled={changeStatus.isPending} onClick={() => { changeStatus.reset(); setSelectedAction({ id: o.id, number: o.numeroPedido, status }); }}>
+                {status === "PLACED" ? "Enviar pedido" : "Confirmar pedido"}
+              </Button>
+            ))}
           </ContentCard>
         ))}
+        <Stack direction="row" alignItems="center" gap={2}>
+          <Button disabled={page === 1 || orders.isFetching} onClick={() => { setSelectedAction(null); setPage(page - 1); }}>Anterior</Button>
+          <Typography>Página {page}</Typography>
+          <Button disabled={orders.isFetching || (orders.data?.length ?? 0) < 20} onClick={() => { setSelectedAction(null); setPage(page + 1); }}>Próxima</Button>
+        </Stack>
+        <Dialog open={actionAvailable} onClose={() => !changeStatus.isPending && setSelectedAction(null)}>
+          <DialogTitle>Confirmar mudança de status</DialogTitle>
+          <DialogContent>
+            <Typography>{selectedAction?.number}: {selectedAction?.status === "PLACED" ? "enviar pedido" : "confirmar compra"}?</Typography>
+            {changeStatus.isError && <Alert severity="error">Não foi possível alterar o status. Confira o pedido atualizado e tente novamente.</Alert>}
+          </DialogContent>
+          <DialogActions>
+            <Button disabled={changeStatus.isPending} onClick={() => setSelectedAction(null)}>Cancelar</Button>
+            <Button disabled={changeStatus.isPending || !actionAvailable} onClick={() => selectedAction && changeStatus.mutate(selectedAction)}>Confirmar</Button>
+          </DialogActions>
+        </Dialog>
+        {changeStatus.isError && !actionAvailable && <Alert severity="error">O pedido mudou ou a operação falhou. Confira os dados atualizados.</Alert>}
         {!orders.isLoading && !orders.data?.length && (
           <Typography>Nenhum pedido.</Typography>
         )}
