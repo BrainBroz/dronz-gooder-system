@@ -68,6 +68,24 @@ function validTimezone(timezone: string) {
 }
 
 // D-10: pendências que impedem o encerramento de uma posição temporária.
+// Auditoria PD (item 4): quem cria pendência numa posição (destino de pedido ou pacote, conteúdo de
+// pacote) "reivindica" a linha da posição com UPDATE condicional. Se o encerramento já passou, o UPDATE
+// reavalia o status e não acha linha; se o encerramento vier depois, ele trava uma linha alterada por
+// outra transação e falha por serialização (409), e a nova tentativa enxerga a pendência.
+export async function claimOpenPosition(db: Db, posicaoId: string) {
+  const claimed =
+    await db.$executeRaw`UPDATE "PosicaoOperacional" SET "updatedAt" = now() WHERE id = ${posicaoId} AND status NOT IN ('ENCERRADA', 'CANCELADA')`;
+  if (!claimed) {
+    const exists = await db.posicaoOperacional.count({
+      where: { id: posicaoId }
+    });
+    throw new AppError(
+      exists ? 409 : 404,
+      exists ? "position_closed" : "position_not_found"
+    );
+  }
+}
+
 export async function closurePendencies(db: Db, posicaoId: string) {
   const [pendingItems, openBags, reservations] = await Promise.all([
     // Itens destinados pelo pedido ou por pacote redirecionado a esta posição (auditoria D-15/PD-04).

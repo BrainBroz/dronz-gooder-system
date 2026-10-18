@@ -328,8 +328,9 @@ Continuam abertas e bloqueiam somente seus batches: vigência de cotação (`E-2
   - Conteúdo de pacote: `setPackageItems` trava as linhas de `PedidoCompraItem` em ordem fixa antes de somar, então dois pacotes não ultrapassam juntos a quantidade comprada.
   - Recebimento: `confirmMiami` aceita `pacoteExternoId`. Valida o vínculo pacote–item–loja, recebe no destino efetivo do pacote (com autorização na posição) até o saldo declarado e grava `RecebimentoMiami.pacoteExternoId`. Sem pacote, só recebe o que não está declarado em pacote algum (`package_receipt_required`).
   - Encerramento de posição: conta pacotes destinados com saldo, e também pacote redirecionado sem conteúdo declarado.
+  - Concorrência entre redirecionar e encerrar: destino de pacote, conteúdo de pacote e destino de pedido "reivindicam" a posição (`claimOpenPosition`, UPDATE condicional). Posição já encerrada recusa (`position_closed`); encerramento concorrente falha por serialização e, na nova tentativa, enxerga a pendência.
   - Lote de devolução: aponta para a baixa original (`MovimentacaoEstoque.baixaOrigemId`) e herda o custo congelado dela.
-  - Relatório `costs`: filtra pela competência do pedido (`dataCompra`), não pela data do lançamento.
+  - Relatório `costs`: filtra pela competência do pedido (`dataCompra`), não pela data do lançamento. `competencia=AAAA-MM` aplica o mês de America/Sao_Paulo com fim exclusivo; os outros relatórios recusam o parâmetro.
   - Regra comum de quantidades por posição: `positions/expectations.ts`.
 - Identidade física unitária, compensação pós-materialização e anexos de evidência (D-6) são gaps de backend ou schema, não capacidades atuais.
 - As três projeções do contrato de UX não podem ser colapsadas no frontend. Materialização comercial não prova localização física e reembolso econômico não move mercadoria automaticamente.

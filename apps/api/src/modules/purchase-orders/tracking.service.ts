@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { AppError } from "../../lib/app-error";
 import { audit } from "../operations/operations.persistence";
+import { claimOpenPosition } from "../positions/positions.service";
 
 // Batch 14: tracking por pedido operacional. Tracking é evidência de envio, nunca confirma
 // recebimento, checkpoint ou estoque. Fallback manual auditável quando o marketplace não informa.
@@ -247,14 +248,8 @@ export async function setPackageDestination(
       }
     });
     if (!pkg) throw new AppError(404, "package_not_found");
-    if (input.posicaoId) {
-      const position = await tx.posicaoOperacional.findUnique({
-        where: { id: input.posicaoId }
-      });
-      if (!position) throw new AppError(404, "position_not_found");
-      if (position.status === "ENCERRADA" || position.status === "CANCELADA")
-        throw new AppError(409, "position_closed");
-    }
+    // Novo destino efetivo (do pacote, ou do pedido ao voltar ao padrão) recebe a pendência.
+    await claimOpenPosition(tx, input.posicaoId ?? order.destinoPosicao!.id);
     if (
       await tx.recebimentoMiami.count({
         where: {
@@ -325,6 +320,12 @@ export async function setPackageItems(
       })
     )
       throw new AppError(409, "already_received");
+    // Conteúdo declarado vira pendência no destino efetivo do pacote.
+    if (input.itens.length)
+      await claimOpenPosition(
+        tx,
+        pkg.destinoPosicaoId ?? order.destinoPosicao!.id
+      );
     const items = await tx.pedidoCompraItem.findMany({
       where: { id: { in: ids }, lojaId, pedidoCompraId },
       include: { pacotes: { where: { pacoteExternoId: { not: pacoteId } } } }

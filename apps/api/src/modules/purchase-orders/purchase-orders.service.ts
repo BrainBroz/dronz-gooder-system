@@ -4,6 +4,7 @@ import type { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { AppError } from "../../lib/app-error";
 import { audit } from "../operations/operations.persistence";
+import { claimOpenPosition } from "../positions/positions.service";
 import type { itemSchema, itemUpdateSchema, orderCreateSchema, orderUpdateSchema } from "./purchase-orders.schemas";
 type OrderCreate = z.infer<typeof orderCreateSchema>;
 type OrderUpdate = z.infer<typeof orderUpdateSchema>;
@@ -249,10 +250,7 @@ export async function setDestination(
     await tx.$queryRaw`SELECT id FROM "PedidoCompra" WHERE id = ${id} AND "lojaId" = ${lojaId} FOR UPDATE`;
     const order = await tx.pedidoCompra.findFirst({ where: { id, lojaId } });
     if (!order) throw new AppError(404, "not_found");
-    const position = await tx.posicaoOperacional.findUnique({ where: { id: posicaoId } });
-    if (!position) throw new AppError(404, "position_not_found");
-    if (position.status === "ENCERRADA" || position.status === "CANCELADA")
-      throw new AppError(409, "position_closed");
+    await claimOpenPosition(tx, posicaoId);
     if (await tx.recebimentoMiami.count({ where: { lojaId, item: { pedidoCompraId: id } } }))
       throw new AppError(409, "already_received");
     const updated = await tx.pedidoCompra.update({

@@ -494,3 +494,552 @@ describe("auditoria PD: custo do lote de devolução e competência dos custos",
     );
   });
 });
+
+describe("auditoria PD (completo): recebimento por pacote — bordas", () => {
+  it("retry idempotente, concorrência no saldo, loja/compra alheias, posição encerrada e nenhum estoque antes da entrada definitiva", async () => {
+    const ctx = await packages();
+    const { confirmMiami } =
+      await import("../src/modules/logistics/logistics.service");
+    expect((await ctx.content(ctx.a.id, 1)).status).toBe(200);
+    expect((await ctx.content(ctx.b.id, 1)).status).toBe(200);
+    const body = (
+      pacoteExternoId: string,
+      extra: Record<string, unknown> = {}
+    ) => ({
+      pedidoCompraItemId: ctx.data.item.id,
+      quantidadeRecebida: 1,
+      recebidoEm: new Date("2026-10-18T12:00:00Z"),
+      pacoteExternoId,
+      ...extra
+    });
+    // Retry com a mesma chave devolve o mesmo recebimento, sem duplicar.
+    const key = randomUUID();
+    const first = await confirmMiami(
+      ctx.store.id,
+      ctx.admin,
+      body(ctx.a.id),
+      key
+    );
+    const replay = await confirmMiami(
+      ctx.store.id,
+      ctx.admin,
+      body(ctx.a.id),
+      key
+    );
+    expect(replay.id).toBe(first.id);
+    expect(
+      await prisma.recebimentoMiami.count({
+        where: { pacoteExternoId: ctx.a.id }
+      })
+    ).toBe(1);
+    // Concorrência: dois recebimentos simultâneos disputam o saldo 1 do pacote B.
+    const results = await Promise.allSettled(
+      [1, 2].map(() =>
+        confirmMiami(ctx.store.id, ctx.admin, body(ctx.b.id), randomUUID())
+      )
+    );
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(
+      await prisma.recebimentoMiami.count({
+        where: { pacoteExternoId: ctx.b.id }
+      })
+    ).toBe(1);
+    // Recebimento em Miami não cria estoque antes da entrada definitiva.
+    expect(
+      await prisma.estoque.count({ where: { produtoId: ctx.data.product.id } })
+    ).toBe(0);
+    expect(
+      await prisma.movimentacaoEstoque.count({
+        where: { produtoId: ctx.data.product.id }
+      })
+    ).toBe(0);
+  });
+
+  it("pacote de outra compra, item de outra loja e posição encerrada são recusados", async () => {
+    const ctx = await packages();
+    const { confirmMiami } =
+      await import("../src/modules/logistics/logistics.service");
+    expect(
+      (
+        await ctx.put(ctx.a.id, "destination", {
+          posicaoId: ctx.hotel.id,
+          motivo: "Hotel"
+        })
+      ).status
+    ).toBe(200);
+    expect((await ctx.content(ctx.a.id, 1)).status).toBe(200);
+    const other = await prisma.compraImportada.create({
+      data: {
+        numeroPedido: `AUD-OTHER-${randomUUID()}`,
+        quantidade: 1,
+        plataforma: "MANUAL",
+        dataPedido: new Date()
+      }
+    });
+    const otherShipment = await prisma.envioExterno.create({
+      data: {
+        compraImportadaId: other.id,
+        externalShipmentId: "OTHER",
+        ultimaAtualizacaoEm: new Date()
+      }
+    });
+    const foreign = await prisma.pacoteExterno.create({
+      data: { envioExternoId: otherShipment.id, externalPackageId: "X" }
+    });
+    cleanups.push(async () => {
+      await prisma.pacoteExterno.delete({ where: { id: foreign.id } });
+      await prisma.envioExterno.delete({ where: { id: otherShipment.id } });
+      await prisma.compraImportada.delete({ where: { id: other.id } });
+    });
+    const receive = (lojaId: string, pacoteExternoId: string) =>
+      confirmMiami(
+        lojaId,
+        ctx.admin,
+        {
+          pedidoCompraItemId: ctx.data.item.id,
+          quantidadeRecebida: 1,
+          recebidoEm: new Date(),
+          pacoteExternoId
+        },
+        randomUUID()
+      );
+    await expect(receive(ctx.store.id, foreign.id)).rejects.toMatchObject({
+      code: "package_item_not_declared"
+    });
+    const gooder = await prisma.loja.findUniqueOrThrow({
+      where: { slug: "gooder" }
+    });
+    await expect(receive(gooder.id, ctx.a.id)).rejects.toMatchObject({
+      code: "conflict"
+    });
+    await prisma.posicaoOperacional.update({
+      where: { id: ctx.hotel.id },
+      data: { status: "ENCERRADA", encerradaEm: new Date() }
+    });
+    await expect(receive(ctx.store.id, ctx.a.id)).rejects.toMatchObject({
+      code: "position_closed"
+    });
+    expect(
+      await prisma.recebimentoMiami.count({
+        where: { pedidoCompraItemId: ctx.data.item.id }
+      })
+    ).toBe(0);
+  });
+});
+
+describe("auditoria PD (completo): encerramento — bordas e concorrência", () => {
+  it("recebimento parcial ainda bloqueia e não há dupla contagem quando pedido e pacote apontam para a mesma posição", async () => {
+    const ctx = await packages();
+    const { closurePendencies } =
+      await import("../src/modules/positions/positions.service");
+    const { confirmMiami } =
+      await import("../src/modules/logistics/logistics.service");
+    await prisma.pedidoCompra.update({
+      where: { id: ctx.data.order.id },
+      data: { destinoPosicaoId: ctx.hotel.id }
+    });
+    expect(
+      (
+        await ctx.put(ctx.a.id, "destination", {
+          posicaoId: ctx.hotel.id,
+          motivo: "Hotel"
+        })
+      ).status
+    ).toBe(200);
+    expect((await ctx.content(ctx.a.id, 2)).status).toBe(200);
+    const pending = async () => closurePendencies(prisma, ctx.hotel.id);
+    expect(await pending()).toEqual([
+      {
+        code: "ITEMS_NOT_RECEIVED",
+        message: "1 item(ns) destinados ainda não recebidos."
+      }
+    ]);
+    await confirmMiami(
+      ctx.store.id,
+      ctx.admin,
+      {
+        pedidoCompraItemId: ctx.data.item.id,
+        quantidadeRecebida: 1,
+        recebidoEm: new Date(),
+        pacoteExternoId: ctx.a.id
+      },
+      randomUUID()
+    );
+    expect((await pending()).map((p) => p.code)).toEqual([
+      "ITEMS_NOT_RECEIVED"
+    ]);
+  });
+
+  it("redirecionar para posição já encerrada é recusado; corrida entre encerrar e redirecionar nunca deixa posição encerrada com pendência", async () => {
+    const ctx = await packages();
+    const { closurePendencies, transition } =
+      await import("../src/modules/positions/positions.service");
+    const { setPackageDestination } =
+      await import("../src/modules/purchase-orders/tracking.service");
+    expect((await transition(ctx.admin, ctx.hotel.id, "ENCERRAR")).status).toBe(
+      "ENCERRADA"
+    );
+    expect(
+      (
+        await ctx.put(ctx.a.id, "destination", {
+          posicaoId: ctx.hotel.id,
+          motivo: "Tarde"
+        })
+      ).body.error
+    ).toBe("position_closed");
+    const base = await prisma.posicaoOperacional.findUniqueOrThrow({
+      where: { id: "posicao-miami-base" }
+    });
+    for (let round = 0; round < 5; round++) {
+      const hotel = await prisma.posicaoOperacional.create({
+        data: {
+          localId: base.localId,
+          codigo: `AUD-RACE-${randomUUID()}`,
+          nome: "Hotel corrida",
+          tipo: "TEMPORARIA",
+          status: "ATIVA",
+          inicioEm: new Date(Date.now() - 86_400_000),
+          fimEm: new Date(Date.now() + 86_400_000)
+        }
+      });
+      await prisma.pacoteExterno.update({
+        where: { id: ctx.a.id },
+        data: { destinoPosicaoId: null }
+      });
+      await Promise.allSettled([
+        transition(ctx.admin, hotel.id, "ENCERRAR"),
+        setPackageDestination(
+          ctx.store.id,
+          ctx.data.admin.id,
+          ctx.data.order.id,
+          ctx.a.id,
+          {
+            posicaoId: hotel.id,
+            motivo: "Corrida"
+          }
+        )
+      ]);
+      const after = await prisma.posicaoOperacional.findUniqueOrThrow({
+        where: { id: hotel.id }
+      });
+      const redirected =
+        (
+          await prisma.pacoteExterno.findUniqueOrThrow({
+            where: { id: ctx.a.id }
+          })
+        ).destinoPosicaoId === hotel.id;
+      // Invariante: nunca encerrada E com pacote destinado pendente.
+      expect(after.status === "ENCERRADA" && redirected).toBe(false);
+      if (redirected)
+        expect(
+          (await closurePendencies(prisma, hotel.id)).length
+        ).toBeGreaterThan(0);
+      await prisma.pacoteExterno.update({
+        where: { id: ctx.a.id },
+        data: { destinoPosicaoId: null }
+      });
+      await prisma.posicaoOperacional.delete({ where: { id: hotel.id } });
+    }
+  });
+});
+
+describe("auditoria PD (completo): custo da devolução — bordas", () => {
+  it("devolução parcial de venda com lotes de custos diferentes preserva cada custo; custo desconhecido continua desconhecido; replay e rollback", async () => {
+    const store = await prisma.loja.findUniqueOrThrow({
+      where: { slug: "dronz" }
+    });
+    const g = await createOperationalFixture(prisma, store.id);
+    const stock = await prisma.estoque.create({
+      data: { lojaId: store.id, produtoId: g.product.id, quantidadeFisica: 2 }
+    });
+    const known = await prisma.movimentacaoEstoque.create({
+      data: {
+        lojaId: store.id,
+        produtoId: g.product.id,
+        estoqueId: stock.id,
+        pedidoCompraItemId: g.item.id,
+        tipo: "ENTRY",
+        motivo: "PURCHASE_RECEIPT",
+        quantidade: 1,
+        quantidadeAnterior: 0,
+        quantidadePosterior: 1,
+        responsavelId: g.admin.id,
+        createdAt: new Date(Date.now() - 60_000)
+      }
+    });
+    const unknown = await prisma.movimentacaoEstoque.create({
+      data: {
+        lojaId: store.id,
+        produtoId: g.product.id,
+        estoqueId: stock.id,
+        tipo: "ADJUSTMENT_POSITIVE",
+        motivo: "MANUAL_CORRECTION",
+        quantidade: 1,
+        quantidadeAnterior: 1,
+        quantidadePosterior: 2,
+        responsavelId: g.admin.id,
+        observacoes: "Lote legado sem custo",
+        createdAt: new Date(Date.now() - 30_000)
+      }
+    });
+    cleanups.push(async () => {
+      const ids = (
+        await prisma.venda.findMany({
+          where: { itens: { some: { produtoId: g.product.id } } },
+          select: { id: true }
+        })
+      ).map((v) => v.id);
+      await prisma.devolucaoVenda.deleteMany({
+        where: { vendaId: { in: ids } }
+      });
+      await prisma.recebivelVenda.deleteMany({
+        where: { vendaId: { in: ids } }
+      });
+      await prisma.movimentacaoEstoque.updateMany({
+        where: { produtoId: g.product.id },
+        data: { baixaOrigemId: null }
+      });
+      await prisma.baixaVenda.deleteMany({
+        where: { item: { produtoId: g.product.id } }
+      });
+      await prisma.vendaItem.deleteMany({ where: { vendaId: { in: ids } } });
+      await prisma.venda.deleteMany({ where: { id: { in: ids } } });
+      await prisma.custoPedidoItem.deleteMany({
+        where: { custo: { pedidoCompraId: g.order.id } }
+      });
+      await prisma.custoPedido.deleteMany({
+        where: { pedidoCompraId: g.order.id }
+      });
+      await g.cleanup();
+    });
+    const app = createApp();
+    const login = await request(app)
+      .post("/auth/login")
+      .send({ email: "admin@example.com", password: "change-me" });
+    const headers = {
+      Authorization: `Bearer ${login.body.accessToken}`,
+      "x-store-id": store.id
+    };
+    const post = (url: string, body: object, key = randomUUID()) =>
+      request(app)
+        .post(url)
+        .set(headers)
+        .set("idempotency-key", key)
+        .send(body);
+    const sale = (
+      await post("/sales", {
+        canal: "OUTRO",
+        dataVenda: new Date().toISOString(),
+        moeda: "USD",
+        itens: [{ produtoId: g.product.id, quantidade: 2, precoUnitario: 150 }]
+      })
+    ).body;
+    const confirmed = await post(`/sales/${sale.id}/confirm`, {
+      lotes: [
+        {
+          vendaItemId: sale.itens[0].id,
+          movimentoEntradaId: known.id,
+          quantidade: 1
+        },
+        {
+          vendaItemId: sale.itens[0].id,
+          movimentoEntradaId: unknown.id,
+          quantidade: 1
+        }
+      ]
+    });
+    expect(confirmed.status).toBe(200);
+    const originalBaixas = await prisma.baixaVenda.findMany({
+      where: { vendaItemId: sale.itens[0].id },
+      orderBy: { createdAt: "asc" }
+    });
+    const { setCosts } = await import("../src/modules/finance/finance.service");
+    await setCosts(
+      store.id,
+      g.admin.id,
+      g.order.id,
+      { iofPercentual: 0, taxas: 100, custoAdicional: 0 },
+      randomUUID()
+    );
+    // Devolução parcial (1 de 2): rollback por falha de auditoria não deixa lote nem estoque.
+    const ret = (
+      await post(`/sales/${sale.id}/returns`, {
+        vendaItemId: sale.itens[0].id,
+        quantidade: 1,
+        motivo: "Parcial"
+      })
+    ).body;
+    const { setAuditFailureForTests } =
+      await import("../src/modules/operations/operations.persistence");
+    setAuditFailureForTests((input) => input.action === "CHECK_SALE_RETURN");
+    try {
+      expect(
+        (
+          await post(`/sales/returns/${ret.id}/check`, {
+            apta: true,
+            condicaoComercial: "NOVO",
+            funcionamento: "FUNCIONAL"
+          })
+        ).status
+      ).toBe(500);
+    } finally {
+      setAuditFailureForTests();
+    }
+    expect(
+      await prisma.movimentacaoEstoque.count({
+        where: { produtoId: g.product.id, tipo: "RETURN_ENTRY" }
+      })
+    ).toBe(0);
+    expect(
+      (await prisma.estoque.findUniqueOrThrow({ where: { id: stock.id } }))
+        .quantidadeFisica
+    ).toBe(0);
+    // Replay com a mesma chave não duplica o lote.
+    const checkKey = randomUUID();
+    const checkBody = {
+      apta: true,
+      condicaoComercial: "NOVO",
+      funcionamento: "FUNCIONAL"
+    };
+    expect(
+      (await post(`/sales/returns/${ret.id}/check`, checkBody, checkKey)).status
+    ).toBe(200);
+    expect(
+      (await post(`/sales/returns/${ret.id}/check`, checkBody, checkKey)).status
+    ).toBe(200);
+    // Segunda devolução, do outro lote.
+    const ret2 = (
+      await post(`/sales/${sale.id}/returns`, {
+        vendaItemId: sale.itens[0].id,
+        quantidade: 1,
+        motivo: "Restante"
+      })
+    ).body;
+    expect(
+      (await post(`/sales/returns/${ret2.id}/check`, checkBody)).status
+    ).toBe(200);
+    const returnLots = await prisma.movimentacaoEstoque.findMany({
+      where: { produtoId: g.product.id, tipo: "RETURN_ENTRY" },
+      include: { baixaOrigem: true }
+    });
+    expect(returnLots).toHaveLength(2);
+    // Cada lote de devolução aponta para uma baixa distinta, com seu custo congelado (50 e desconhecido).
+    expect(new Set(returnLots.map((l) => l.baixaOrigemId)).size).toBe(2);
+    expect(
+      returnLots
+        .map((l) => l.baixaOrigem!.custoUnitario?.toFixed(2) ?? null)
+        .sort()
+    ).toEqual(["50.00", null].sort());
+    // Venda original intacta.
+    expect(
+      await prisma.baixaVenda.findMany({
+        where: { vendaItemId: sale.itens[0].id },
+        orderBy: { createdAt: "asc" }
+      })
+    ).toEqual(originalBaixas);
+    // Revenda dos dois lotes de devolução: 50 preservado e desconhecido não inventado.
+    const resale = (
+      await post("/sales", {
+        canal: "OUTRO",
+        dataVenda: new Date().toISOString(),
+        moeda: "USD",
+        itens: [{ produtoId: g.product.id, quantidade: 2, precoUnitario: 150 }]
+      })
+    ).body;
+    const sold = await post(`/sales/${resale.id}/confirm`, {
+      lotes: returnLots.map((l) => ({
+        vendaItemId: resale.itens[0].id,
+        movimentoEntradaId: l.id,
+        quantidade: 1
+      }))
+    });
+    expect(sold.status).toBe(200);
+    expect(
+      sold.body.itens[0].baixas
+        .map((b: { custoUnitario: string | null }) => b.custoUnitario)
+        .sort()
+    ).toEqual(["50.00", null].sort());
+    expect(sold.body.lucro).toBeNull();
+  });
+});
+
+describe("auditoria PD (completo): competência dos custos", () => {
+  it("competência usa o mês de São Paulo com fim exclusivo e isola lojas (restrição financeira: analytics-indicators)", async () => {
+    const store = await prisma.loja.findUniqueOrThrow({
+      where: { slug: "dronz" }
+    });
+    const sept = await createOperationalFixture(prisma, store.id);
+    const oct = await createOperationalFixture(prisma, store.id);
+    cleanups.push(async () => {
+      for (const f of [sept, oct]) {
+        await prisma.custoPedidoItem.deleteMany({
+          where: { custo: { pedidoCompraId: f.order.id } }
+        });
+        await prisma.custoPedido.deleteMany({
+          where: { pedidoCompraId: f.order.id }
+        });
+        await f.cleanup();
+      }
+    });
+    // 30/09 23:59 em São Paulo e 01/10 00:00 em São Paulo.
+    await prisma.pedidoCompra.update({
+      where: { id: sept.order.id },
+      data: { dataCompra: new Date("2026-10-01T02:59:00Z") }
+    });
+    await prisma.pedidoCompra.update({
+      where: { id: oct.order.id },
+      data: { dataCompra: new Date("2026-10-01T03:00:00Z") }
+    });
+    const { setCosts } = await import("../src/modules/finance/finance.service");
+    for (const f of [sept, oct])
+      await setCosts(
+        store.id,
+        f.admin.id,
+        f.order.id,
+        { iofPercentual: 0, taxas: 5, custoAdicional: 0 },
+        randomUUID()
+      );
+    const app = createApp();
+    const login = await request(app)
+      .post("/auth/login")
+      .send({ email: "admin@example.com", password: "change-me" });
+    const stores = login.body.stores as { id: string; slug: string }[];
+    const h = (slug: string) => ({
+      Authorization: `Bearer ${login.body.accessToken}`,
+      "x-store-id": stores.find((s) => s.slug === slug)!.id
+    });
+    const ids = async (competencia: string, slug = "dronz") =>
+      (
+        (
+          await request(app)
+            .get("/analytics/reports/costs")
+            .query({ competencia })
+            .set(h(slug))
+        ).body as { pedidoCompraId: string; competencia: string }[]
+      )
+        .filter((r) => [sept.order.id, oct.order.id].includes(r.pedidoCompraId))
+        .map((r) => [
+          r.pedidoCompraId === sept.order.id ? "sept" : "oct",
+          r.competencia
+        ]);
+    expect(await ids("2026-09")).toEqual([["sept", "2026-09"]]);
+    expect(await ids("2026-10")).toEqual([["oct", "2026-10"]]);
+    expect(await ids("2026-09", "gooder")).toEqual([]);
+    expect(
+      (
+        await request(app)
+          .get("/analytics/reports/costs")
+          .query({ competencia: "2026-13" })
+          .set(h("dronz"))
+      ).status
+    ).toBe(400);
+    expect(
+      (
+        await request(app)
+          .get("/analytics/reports/payments")
+          .query({ competencia: "2026-09" })
+          .set(h("dronz"))
+      ).status
+    ).toBe(400);
+  });
+});
