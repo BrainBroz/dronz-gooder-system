@@ -82,7 +82,8 @@ async function main() {
     "FINANCEIRO_FATURAS",
     "VENDA_VISUALIZAR",
     "VENDA_CRIAR",
-    "VENDA_CONFIRMAR"
+    "VENDA_CONFIRMAR",
+    "ANALYTICS_EXPORTAR"
   ] as const;
   const permissions = await Promise.all(
     permissionCodes.map((code) =>
@@ -123,6 +124,7 @@ async function main() {
     "CATALOGO_VISUALIZAR",
     "CATALOGO_GERENCIAR",
     "ANALYTICS_VISUALIZAR",
+    "ANALYTICS_EXPORTAR",
     "SIMULACAO_VISUALIZAR",
     "SIMULACAO_GERENCIAR",
     "MIAMI_RECEBIMENTO_VISUALIZAR",
