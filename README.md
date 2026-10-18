@@ -65,6 +65,18 @@ implementador e revisores está em
 - `npm run db:migrate:deploy`
 - `npm run db:seed`
 
+## Ensaio operacional sem integrações reais
+
+Com Node 22, dependências instaladas, Prisma Client gerado e PostgreSQL local (`psql`/`createdb` no PATH), execute `npm run test:flow`.
+
+O comando cria, se necessário, **somente** o banco local `dronz_gooder_flow_test`, aplica migrations/seed de teste e roda as suítes existentes de adapter eBay simulado, evidências API/e-mail, revisão humana, mappings, split/materialização, checkpoints/estoque, vendas, recebimentos, indicadores e tracking manual. São cenários automatizados por etapa; a jornada de pedido operacional até recebimentos/indicadores usa as mesmas entidades nas duas lojas. Não se trata de uma tela demo nem de um novo adapter genérico em produção.
+
+- Não exige login de marketplace, mailbox, planilha histórica ou credenciais de transportadora. Nenhuma fonte real é habilitada.
+- O comando não usa `DATABASE_URL` do ambiente operacional: repassa aos testes somente a URL de ensaio validada e credenciais administrativas sintéticas. Os dados ficam separados. O banco de ensaio é descartável, mas não é apagado automaticamente.
+- Para outro usuário/porta locais, use `FLOW_TEST_DATABASE_URL`. A URL deve continuar apontando para o nome fixo `dronz_gooder_flow_test`, host local e schema `public`; nomes operacionais, hosts remotos e outros parâmetros são recusados **antes** de qualquer acesso ao banco. Não registre credenciais em Git.
+- As proteções têm autoverificação sem acesso ao banco (`node scripts/test-operational-flow.mjs --self-test`), também executada pelo `npm test` global.
+- Isso valida os fluxos internos e o tratamento de respostas sintéticas. Leitura real de Gmail/Outlook, parsing dos e-mails reais, eventos de transportadoras, limites/consentimentos das APIs, planilha e conferência visual continuam pendentes; B12/B15 não são declarados implementados por este ensaio.
+
 ## Roadmap
 
 O roadmap oficial e seus bloqueios estão em `docs/PROJECT_CONTEXT_MASTER.md`. Dronz e Gooder usam marketplaces como compradores. O pipeline multicanal preserva evidências e exige revisão/aprovação humana antes de atribuir e materializar. O score explicável X-03 prioriza a revisão sem autorizar operações. O adapter eBay Buyer implementa Trading API `GetOrders` com `OrderRole=Buyer`; a especificação sanitizada está em `docs/EBAY_BUYER_SPECIFICATION_V1.md`. Painel mensal/CSV, tracking manual, Financeiro, Vendas e Analytics estão implementados. Mailbox autorizada (B12), migração da planilha real e motor de tracking (B15) mantêm dependências específicas. A Amazon Business API permanece `PENDENTE_DE_ONBOARDING_EXTERNO` e será incorporada como evidência adicional, sem duplicar compras já existentes.
