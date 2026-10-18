@@ -33,7 +33,13 @@ type HomeResponse = {
 type CompensationRequest = {
   id: string;
   createdAt: string;
-  payload: { reason: string; adjustments?: { quantityDelta: number }[] };
+  payload: {
+    reason?: string;
+    adjustments?: { quantityDelta: number }[];
+    // PD-12: perda de estoque acima do limite usa a mesma fila.
+    kind?: "STOCK_LOSS";
+    move?: { quantidade: number; motivo: string; observacoes?: string };
+  };
   propostoPor: { name: string };
 };
 
@@ -74,11 +80,9 @@ function CompensationQueue({ store }: { store: string }) {
             alignItems={{ md: "center" }}
           >
             <Typography sx={{ flex: 1 }}>
-              {request.propostoPor.name}: {request.payload.reason} (
-              {request.payload.adjustments
-                ?.map((adjustment) => adjustment.quantityDelta)
-                .join(", ")}{" "}
-              un.)
+              {request.payload.kind === "STOCK_LOSS"
+                ? `${request.propostoPor.name}: perda de ${request.payload.move?.quantidade} un. (${request.payload.move?.motivo}) · ${request.payload.move?.observacoes ?? ""}`
+                : `${request.propostoPor.name}: ${request.payload.reason} (${request.payload.adjustments?.map((adjustment) => adjustment.quantityDelta).join(", ") ?? ""} un.)`}
             </Typography>
             <Button
               disabled={decide.isPending}

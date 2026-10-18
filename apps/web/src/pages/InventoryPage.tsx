@@ -4,6 +4,7 @@ import { useForm } from "react-hook-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ContentCard } from "../components/ui/ContentCard";
 import { PageContainer } from "../components/ui/PageContainer";
+import { LotsPanel } from "../components/LotsPanel";
 import { PageHeader } from "../components/ui/PageHeader";
 import { MutationStatus } from "../components/ui/MutationStatus";
 import { api } from "../api/client";
@@ -100,6 +101,28 @@ function InventoryContent() {
       await refreshInventory();
     }
   });
+  // PD-12: perda acima do limite vira proposta para aval de outro usuário (fila da Home).
+  const proposeLoss = useMutation({
+    mutationFn: (v: { produtoId: string; tipo: string; quantidade: number; observacoes: string }) =>
+      api.post(
+        "/inventory/movements/loss-requests",
+        {
+          produtoId: v.produtoId,
+          tipo: v.tipo,
+          motivo: v.tipo === "EXIT" ? "LOSS" : "MANUAL_CORRECTION",
+          quantidade: Number(v.quantidade),
+          observacoes: v.observacoes
+        },
+        { headers: { ...headers, "idempotency-key": crypto.randomUUID() } }
+      ),
+    onSuccess: () => {
+      move.reset();
+      movementForm.reset();
+    }
+  });
+  const needsApproval =
+    (move.error as { response?: { data?: { error?: string } } } | null)?.response?.data?.error ===
+    "loss_requires_approval";
   const createReceipt = useMutation({
     mutationFn: (v: { viagemId: string; malaId: string }) =>
       api.post("/receiving", v, { headers }),
@@ -192,6 +215,18 @@ function InventoryContent() {
             </Button>
           </Stack>
           <MutationStatus mutation={move} successMessage="Movimento registrado." />
+          {needsApproval && (
+            <Button
+              disabled={proposeLoss.isPending || !movementForm.getValues("observacoes")}
+              onClick={() => proposeLoss.mutate(movementForm.getValues())}
+            >
+              Enviar perda para aprovação
+            </Button>
+          )}
+          <MutationStatus
+            mutation={proposeLoss}
+            successMessage="Perda enviada para aprovação; o estoque muda após o aval."
+          />
           {stock.data?.map(
             (item: {
               id: string;
@@ -339,6 +374,14 @@ function InventoryContent() {
             successMessage="Item confirmado."
           />
         </ContentCard>
+        <LotsPanel
+          products={(stock.data ?? []).map(
+            (row: { produtoId: string; produto: { nome: string } }) => ({
+              produtoId: row.produtoId,
+              nome: row.produto.nome
+            })
+          )}
+        />
       </Stack>
     </PageContainer>
   );

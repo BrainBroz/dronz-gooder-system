@@ -46,6 +46,9 @@ model Loja {
   vendaItens                    VendaItem[]
   baixasVenda                   BaixaVenda[]
   recebiveisVenda               RecebivelVenda[]
+  devolucoesVenda               DevolucaoVenda[]
+  reconciliacoesLote            ReconciliacaoLote[]
+  pacoteItens                   PacoteItem[]
   pagamentos                    Pagamento[]
   custosPedido                  CustoPedido[]
   handoffsVolume                HandoffVolume[]
@@ -1034,6 +1037,7 @@ model PacoteExterno {
   envio          EnvioExterno        @relation(fields: [envioExternoId], references: [id], onDelete: Restrict)
   destinoPosicao PosicaoOperacional? @relation(fields: [destinoPosicaoId], references: [id], onDelete: Restrict)
   trackings      TrackingExterno[]
+  itens          PacoteItem[]
 
   @@unique([envioExternoId, externalPackageId])
   @@index([envioExternoId])
@@ -1141,6 +1145,7 @@ model PedidoCompraItem {
   atribuicoes             AtribuicaoItem[]
   materializacaoOrigem    MaterializacaoCompraItem?
   lotesEstoque            MovimentacaoEstoque[]
+  pacotes                 PacoteItem[]
 
   @@unique([pedidoCompraId, produtoId])
   @@unique([id, lojaId])
@@ -1559,6 +1564,8 @@ model MovimentacaoEstoque {
   pedidoItem          PedidoCompraItem?         @relation(fields: [pedidoCompraItemId, lojaId], references: [id, lojaId], onDelete: Restrict)
   baixasComoLote      BaixaVenda[]              @relation("BaixaLote")
   baixasComoSaida     BaixaVenda[]              @relation("BaixaSaida")
+  reconciliacoesLote  ReconciliacaoLote[]       @relation("ReconciliacaoLote")
+  reconciliacoesSaida ReconciliacaoLote[]       @relation("ReconciliacaoSaida")
 
   @@unique([id, lojaId])
   @@index([lojaId, produtoId, createdAt])
@@ -2142,33 +2149,46 @@ enum StatusVenda {
   RASCUNHO
   CONFIRMADA
   CANCELADA
+  ESTORNADA
+}
+
+enum StatusDevolucaoVenda {
+  PENDENTE
+  CONFERIDA
+  REJEITADA
 }
 
 enum StatusRecebivelVenda {
   PENDENTE
   PARCIAL
   RECEBIDO
+  ESTORNADO
 }
 
 model Venda {
-  id                String          @id @default(cuid())
+  id                String           @id @default(cuid())
   lojaId            String
   canal             CanalVenda
   referenciaExterna String?
   dataVenda         DateTime
   moeda             String
-  estado            StatusVenda     @default(RASCUNHO)
+  estado            StatusVenda      @default(RASCUNHO)
   observacao        String?
   criadoPorId       String
   confirmadoPorId   String?
   confirmadoEm      DateTime?
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
-  loja              Loja            @relation(fields: [lojaId], references: [id], onDelete: Restrict)
-  criadoPor         Usuario         @relation("VendaCriadaPor", fields: [criadoPorId], references: [id], onDelete: Restrict)
-  confirmadoPor     Usuario?        @relation("VendaConfirmadaPor", fields: [confirmadoPorId], references: [id], onDelete: Restrict)
+  // PD-01: estorno vinculado; a venda original (receita e custo) permanece intacta.
+  estornadaEm       DateTime?
+  estornadaPorId    String?
+  motivoEstorno     String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  loja              Loja             @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  criadoPor         Usuario          @relation("VendaCriadaPor", fields: [criadoPorId], references: [id], onDelete: Restrict)
+  confirmadoPor     Usuario?         @relation("VendaConfirmadaPor", fields: [confirmadoPorId], references: [id], onDelete: Restrict)
   itens             VendaItem[]
   recebivel         RecebivelVenda?
+  devolucoes        DevolucaoVenda[]
 
   @@unique([id, lojaId])
   @@unique([lojaId, canal, referenciaExterna])
@@ -2178,21 +2198,22 @@ model Venda {
 
 // Encargos são valores informados por item (snapshot); nenhum percentual é presumido pelo canal (X-08).
 model VendaItem {
-  id              String       @id @default(cuid())
+  id              String           @id @default(cuid())
   lojaId          String
   vendaId         String
   produtoId       String
   quantidade      Int
-  precoUnitario   Decimal      @db.Decimal(18, 2)
-  desconto        Decimal      @default(0) @db.Decimal(18, 2)
-  taxaMarketplace Decimal      @default(0) @db.Decimal(18, 2)
-  notaFiscal      Decimal      @default(0) @db.Decimal(18, 2)
-  frete           Decimal      @default(0) @db.Decimal(18, 2)
-  createdAt       DateTime     @default(now())
-  loja            Loja         @relation(fields: [lojaId], references: [id], onDelete: Restrict)
-  venda           Venda        @relation(fields: [vendaId, lojaId], references: [id, lojaId], onDelete: Cascade)
-  produto         Produto      @relation(fields: [produtoId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  precoUnitario   Decimal          @db.Decimal(18, 2)
+  desconto        Decimal          @default(0) @db.Decimal(18, 2)
+  taxaMarketplace Decimal          @default(0) @db.Decimal(18, 2)
+  notaFiscal      Decimal          @default(0) @db.Decimal(18, 2)
+  frete           Decimal          @default(0) @db.Decimal(18, 2)
+  createdAt       DateTime         @default(now())
+  loja            Loja             @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  venda           Venda            @relation(fields: [vendaId, lojaId], references: [id, lojaId], onDelete: Cascade)
+  produto         Produto          @relation(fields: [produtoId, lojaId], references: [id, lojaId], onDelete: Restrict)
   baixas          BaixaVenda[]
+  devolucoes      DevolucaoVenda[]
 
   @@unique([id, lojaId])
   @@index([lojaId, produtoId])
@@ -2211,6 +2232,8 @@ model BaixaVenda {
   custoUnitarioConvertido Decimal?            @db.Decimal(18, 2)
   cotacaoCambioId         String?
   politica                String
+  // PD-01: baixa revertida devolve o saldo ao lote original.
+  revertidaEm             DateTime?
   createdAt               DateTime            @default(now())
   loja                    Loja                @relation(fields: [lojaId], references: [id], onDelete: Restrict)
   item                    VendaItem           @relation(fields: [vendaItemId, lojaId], references: [id, lojaId], onDelete: Restrict)
@@ -2238,4 +2261,65 @@ model RecebivelVenda {
   venda            Venda                @relation(fields: [vendaId, lojaId], references: [id, lojaId], onDelete: Restrict)
 
   @@unique([vendaId, lojaId])
+}
+
+// PD-02: devolução física em duas etapas; só a conferência apta cria estoque (lote novo, custo original).
+model DevolucaoVenda {
+  id                    String               @id @default(cuid())
+  lojaId                String
+  vendaId               String
+  vendaItemId           String
+  quantidade            Int
+  estado                StatusDevolucaoVenda @default(PENDENTE)
+  motivo                String
+  registradoPorId       String
+  conferidoPorId        String?
+  conferidoEm           DateTime?
+  condicaoComercial     CondicaoComercial?
+  funcionamento         Funcionamento?
+  observacaoConferencia String?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  loja                  Loja                 @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  venda                 Venda                @relation(fields: [vendaId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  item                  VendaItem            @relation(fields: [vendaItemId, lojaId], references: [id, lojaId], onDelete: Restrict)
+
+  @@index([lojaId, estado])
+  @@index([vendaItemId])
+}
+
+// PD-03: saída antiga sem lote (perda, ajuste, venda legada) atribuída explicitamente a um lote,
+// por comando com motivo. Nunca automática; restaura Σ saldo dos lotes = estoque físico.
+model ReconciliacaoLote {
+  id                 String              @id @default(cuid())
+  lojaId             String
+  movimentoEntradaId String
+  movimentoSaidaId   String
+  quantidade         Int
+  motivo             String
+  usuarioId          String
+  createdAt          DateTime            @default(now())
+  loja               Loja                @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  lote               MovimentacaoEstoque @relation("ReconciliacaoLote", fields: [movimentoEntradaId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  saida              MovimentacaoEstoque @relation("ReconciliacaoSaida", fields: [movimentoSaidaId, lojaId], references: [id, lojaId], onDelete: Restrict)
+
+  @@index([lojaId, movimentoEntradaId])
+  @@index([movimentoSaidaId])
+}
+
+// PD-04: conteúdo declarado do pacote (quantidade por item do pedido da loja). Opcional: sem ele,
+// "a caminho" segue o destino do pedido.
+model PacoteItem {
+  id                 String           @id @default(cuid())
+  lojaId             String
+  pacoteExternoId    String
+  pedidoCompraItemId String
+  quantidade         Int
+  createdAt          DateTime         @default(now())
+  loja               Loja             @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  pacote             PacoteExterno    @relation(fields: [pacoteExternoId], references: [id], onDelete: Restrict)
+  item               PedidoCompraItem @relation(fields: [pedidoCompraItemId, lojaId], references: [id, lojaId], onDelete: Restrict)
+
+  @@unique([pacoteExternoId, pedidoCompraItemId])
+  @@index([pedidoCompraItemId])
 }

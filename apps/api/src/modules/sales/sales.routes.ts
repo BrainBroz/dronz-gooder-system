@@ -8,6 +8,7 @@ import {
   type AuthenticatedRequest
 } from "../../middlewares/auth";
 import * as service from "./sales.service";
+import * as corrections from "./sales-corrections.service";
 
 export const salesRouter = Router();
 salesRouter.use(requireAuth, requireStore);
@@ -164,6 +165,81 @@ salesRouter.post(
             valor: z.number().positive().max(1e15),
             recebidoEm: z.coerce.date(),
             transacaoFonteId: z.string().optional()
+          })
+          .strict()
+          .parse(req.body),
+        requiredKey(req)
+      ),
+    201
+  )
+);
+
+// PD-01/PD-02: estorno e devolução física são comandos próprios, com chave idempotente obrigatória.
+salesRouter.post(
+  "/returns/:devolucaoId/check",
+  requirePermission("DEVOLUCAO_CONFERIR"),
+  run((req) =>
+    corrections.checkReturn(
+      req.storeId!,
+      req.identity!.user.id,
+      String(req.params.devolucaoId),
+      z
+        .object({
+          apta: z.boolean(),
+          condicaoComercial: z.enum([
+            "NAO_DEFINIDA",
+            "NOVO",
+            "CAIXA_ABERTA",
+            "USADO"
+          ]),
+          funcionamento: z.enum([
+            "NAO_TESTADO",
+            "FUNCIONAL",
+            "DEFEITO_PARCIAL",
+            "INOPERANTE"
+          ]),
+          observacao: z.string().trim().max(1000).optional()
+        })
+        .strict()
+        .parse(req.body),
+      requiredKey(req)
+    )
+  )
+);
+salesRouter.post(
+  "/:id/reverse",
+  requirePermission("VENDA_CORRIGIR"),
+  run((req) =>
+    corrections.reverseSale(
+      req.storeId!,
+      req.identity!.user.id,
+      String(req.params.id),
+      z
+        .object({
+          motivo: z.string().trim().min(3).max(500),
+          // Estorno só quando o item comprovadamente não saiu; devolução física usa /returns.
+          itemNaoSaiu: z.literal(true)
+        })
+        .strict()
+        .parse(req.body),
+      requiredKey(req)
+    )
+  )
+);
+salesRouter.post(
+  "/:id/returns",
+  requirePermission("VENDA_CRIAR"),
+  run(
+    (req) =>
+      corrections.registerReturn(
+        req.storeId!,
+        req.identity!.user.id,
+        String(req.params.id),
+        z
+          .object({
+            vendaItemId: z.string(),
+            quantidade: z.number().int().positive().max(100000),
+            motivo: z.string().trim().min(3).max(500)
           })
           .strict()
           .parse(req.body),

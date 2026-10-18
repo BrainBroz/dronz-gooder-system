@@ -46,7 +46,49 @@ const KNOWN_ERROR_MESSAGES: Record<string, string> = {
     "Já existe compra importada com esta identidade.",
   buyer_candidate_cancelled: "Compra cancelada na origem.",
   approver_must_differ: "Quem propôs a correção não pode aprová-la.",
-  request_already_decided: "Esta solicitação já foi decidida."
+  request_already_decided: "Esta solicitação já foi decidida.",
+  historical_replay_incomplete:
+    "Há um replay histórico incompleto nesta conexão. Conclua o replay antes da sincronização incremental.",
+  package_not_found: "Pacote não encontrado nesta compra.",
+  sale_requires_sales_module: "Saída por venda só pelo módulo Vendas.",
+  sale_not_draft: "A venda não está mais em rascunho.",
+  lots_must_cover_item: "Os lotes escolhidos precisam cobrir a quantidade do item.",
+  lot_insufficient: "O lote escolhido não tem saldo suficiente.",
+  lot_not_eligible: "Lote inválido para este produto.",
+  receipt_exceeds_receivable: "O recebimento ultrapassa o valor previsto.",
+  statement_overpayment: "O pagamento ultrapassa o saldo da fatura.",
+  statement_not_open: "A fatura não está aberta.",
+  statement_already_paid: "A fatura já está quitada.",
+  entry_exceeds_payment: "As parcelas ultrapassam o pagamento de origem.",
+  installment_already_posted: "Esta parcela já foi lançada.",
+  payment_not_card: "Só pagamentos com cartão entram em fatura.",
+  payment_already_reconciled: "Este pagamento já está conciliado com outra fonte.",
+  amount_mismatch: "O valor da fonte é diferente do pagamento.",
+  reconciliation_already_reviewed: "Esta conciliação já foi revisada.",
+  source_superseded: "A fonte tem versão mais nova; revise a versão atual.",
+  expense_double_counting:
+    "Essa origem já é custo ou transferência; não pode virar despesa de resultado.",
+  expense_origin_already_classified: "Essa origem já foi classificada.",
+  order_cancelled: "O pedido está cancelado.",
+  sale_not_confirmed: "A venda não está confirmada.",
+  sale_has_returns: "A venda tem devolução registrada; use a conferência da devolução.",
+  receivable_has_receipts:
+    "A venda já teve recebimento; registre o reembolso no financeiro antes do estorno.",
+  return_exceeds_sold: "A devolução ultrapassa a quantidade vendida.",
+  return_already_checked: "Esta devolução já foi conferida.",
+  stock_lots_require_reconciliation:
+    "Os lotes deste produto precisam de reconciliação no Estoque antes da venda.",
+  lots_already_reconciled: "Não há saídas sem lote para reconciliar.",
+  outflow_without_prior_lot: "Há saída anterior a qualquer entrada; investigue antes de reconciliar.",
+  lots_still_unbalanced: "Mesmo reconciliados, os lotes não batem com o físico; investigue os ajustes.",
+  lot_already_linked: "Este lote já está ligado a um item de compra.",
+  lot_exceeds_purchase_item: "O item de compra não tem unidades suficientes para este lote.",
+  product_mismatch: "O item de compra é de outro produto.",
+  package_exceeds_item: "Os pacotes somam mais unidades do que o item comprado.",
+  purchase_item_not_found: "Item de compra não encontrado neste pedido.",
+  loss_requires_approval:
+    "Perda acima do limite: registre uma proposta para aprovação por outro usuário.",
+  loss_within_limit: "A perda está dentro do limite; registre o movimento direto."
 };
 const STATUS_FALLBACK_MESSAGES: Record<number, string> = {
   400: "Dados inválidos. Verifique os campos e tente novamente.",

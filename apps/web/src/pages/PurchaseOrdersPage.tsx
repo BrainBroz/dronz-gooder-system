@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, Stack, TextField, Typography } from "@mui/material";
+import { Alert, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, MenuItem, Stack, TextField, Typography } from "@mui/material";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -33,14 +33,20 @@ function PurchaseOrdersContent() {
         })
       ).data.items
   });
+  // PD-10: cancelados ficam fora da visão ativa até o usuário pedir.
+  const [incluirCancelados, setIncluirCancelados] = React.useState(false);
   const orders = useQuery<PurchaseOrder[]>({
-    queryKey: [...purchasingQueryKeys.orders(store), page],
+    queryKey: [...purchasingQueryKeys.orders(store), page, incluirCancelados],
     enabled: !!store,
     queryFn: async () =>
       (
         await api.get("/purchase-orders", {
           headers: { ...authHeader(), "x-store-id": store },
-          params: { page, limit: 20 }
+          params: {
+            page,
+            limit: 20,
+            ...(incluirCancelados ? { incluirCancelados: "true" } : {})
+          }
         })
       ).data.items
   });
@@ -264,6 +270,10 @@ function PurchaseOrdersContent() {
           </ContentCard>
         ))}
         <Stack direction="row" alignItems="center" gap={2}>
+          <FormControlLabel
+            control={<Checkbox checked={incluirCancelados} onChange={(e) => { setPage(1); setIncluirCancelados(e.target.checked); }} />}
+            label="Incluir cancelados"
+          />
           <Button disabled={page === 1 || orders.isFetching} onClick={() => { setSelectedAction(null); setPage(page - 1); }}>Anterior</Button>
           <Typography>Página {page}</Typography>
           <Button disabled={orders.isFetching || (orders.data?.length ?? 0) < 20} onClick={() => { setSelectedAction(null); setPage(page + 1); }}>Próxima</Button>

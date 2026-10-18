@@ -3,12 +3,14 @@ import { z } from "zod";
 import {
   hasPermission,
   requireAuth,
+  requirePermission,
   requireReadWrite,
   requireStore,
   type AuthenticatedRequest
 } from "../../middlewares/auth";
 import { AppError } from "../../lib/app-error";
 import * as s from "./inventory.service";
+import * as lots from "./lots.service";
 export const inventoryRouter = Router();
 inventoryRouter.use(
   requireAuth,
@@ -79,4 +81,69 @@ inventoryRouter.post(
         : undefined
     );
   })
+);
+
+// PD-03: diagnóstico e reconciliação de lotes legados; escrita exige ESTOQUE_AJUSTAR e motivo.
+const lotKey = (r: AuthenticatedRequest) =>
+  z.string().trim().min(1).max(200).parse(r.headers["idempotency-key"]);
+const lotReason = z
+  .object({ motivo: z.string().trim().min(3).max(500) })
+  .strict();
+inventoryRouter.get(
+  "/lots/:produtoId",
+  w((r) => lots.lotDiagnosis(r.storeId!, String(r.params.produtoId)))
+);
+inventoryRouter.post(
+  "/lots/:produtoId/reconcile",
+  requirePermission("ESTOQUE_AJUSTAR"),
+  w((r) =>
+    lots.reconcileLots(
+      r.storeId!,
+      r.identity!.user.id,
+      String(r.params.produtoId),
+      lotReason.parse(r.body).motivo,
+      lotKey(r)
+    )
+  )
+);
+inventoryRouter.post(
+  "/lots/entries/:movimentoId/purchase-item",
+  requirePermission("ESTOQUE_AJUSTAR"),
+  w((r) =>
+    lots.linkLotPurchaseItem(
+      r.storeId!,
+      r.identity!.user.id,
+      String(r.params.movimentoId),
+      z
+        .object({
+          pedidoCompraItemId: z.string().min(1),
+          motivo: z.string().trim().min(3).max(500)
+        })
+        .strict()
+        .parse(r.body),
+      lotKey(r)
+    )
+  )
+);
+// PD-12: perda/ajuste negativo acima do limite vira proposta; o aval vem da fila de correções (D-17).
+inventoryRouter.post(
+  "/movements/loss-requests",
+  requirePermission("ESTOQUE_AJUSTAR"),
+  w((r) =>
+    s.proposeLoss(
+      r.storeId!,
+      r.identity!.user.id,
+      z
+        .object({
+          produtoId: z.string(),
+          tipo: z.enum(["EXIT", "ADJUSTMENT_NEGATIVE"]),
+          motivo: z.enum(["LOSS", "DAMAGE", "MANUAL_CORRECTION"]),
+          quantidade: z.number().int().positive(),
+          observacoes: z.string().trim().min(3).max(1000)
+        })
+        .strict()
+        .parse(r.body),
+      lotKey(r)
+    )
+  )
 );

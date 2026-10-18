@@ -1036,6 +1036,17 @@ export async function syncConnection(
       throw new AppError(409, "marketplace_sync_in_progress");
     return existing;
   }
+  // PD-07: incremental fica bloqueada enquanto o último replay histórico da conexão não terminou
+  // com sucesso; senão o cursor incremental avançaria por cima de uma janela ainda incompleta.
+  if (!input.replay) {
+    const lastReplay = await prisma.execucaoSincronizacao.findFirst({
+      where: { conexaoId: connectionId, origem: "REPLAY" },
+      orderBy: { createdAt: "desc" },
+      select: { status: true }
+    });
+    if (lastReplay && lastReplay.status !== "SUCCEEDED")
+      throw new AppError(409, "historical_replay_incomplete");
+  }
   const correlationId = randomUUID();
   let execution: { id: string };
   try {

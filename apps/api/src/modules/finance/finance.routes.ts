@@ -47,11 +47,38 @@ const run =
   };
 financeRouter.get(
   "/payments",
-  run((req) => service.listPayments(req.storeId!))
+  run((req) =>
+    service.listPayments(
+      req.storeId!,
+      z
+        .enum(["true", "false"])
+        .optional()
+        .parse(req.query.incluirCancelados) === "true"
+    )
+  )
 );
 financeRouter.get(
   "/orders/:id/obligation",
   run((req) => service.orderObligation(req.storeId!, String(req.params.id)))
+);
+financeRouter.get(
+  "/exchange-rates",
+  run((req) => {
+    const q = z
+      .object({
+        moedaOrigem: z
+          .string()
+          .regex(/^[A-Z]{3}$/)
+          .optional(),
+        moedaDestino: z
+          .string()
+          .regex(/^[A-Z]{3}$/)
+          .optional()
+      })
+      .strict()
+      .parse(req.query);
+    return service.listExchangeRates(req.storeId!, q);
+  })
 );
 financeRouter.post(
   "/exchange-rates",

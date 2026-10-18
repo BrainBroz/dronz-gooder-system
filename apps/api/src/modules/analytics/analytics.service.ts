@@ -1,5 +1,9 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
+import {
+  COMPETENCE_TIMEZONE,
+  competenceRange
+} from "../unified-purchases/monthly-panel.service";
 import { AppError } from "../../lib/app-error";
 
 // Soma valores só dentro da mesma moeda; moedas diferentes nunca são somadas entre si (B18).
@@ -237,11 +241,30 @@ export async function report(
         include: { itens: true },
         orderBy: { createdAt: "desc" }
       });
-    case "costs":
-      return prisma.custoPedido.findMany({
+    case "costs": {
+      // PD-11 (E-4): encargo pertence à competência do pedido original (mês de dataCompra em
+      // São Paulo); lançado depois do fim desse mês recebe a marca e mantém a data de lançamento.
+      const costs = await prisma.custoPedido.findMany({
         where: { lojaId, createdAt: period },
         include: { itens: true, pedido: true }
       });
+      return costs.map((cost) => {
+        const parts = new Intl.DateTimeFormat("en-CA", {
+          timeZone: COMPETENCE_TIMEZONE,
+          year: "numeric",
+          month: "2-digit"
+        }).formatToParts(cost.pedido.dataCompra);
+        const year = Number(parts.find((p) => p.type === "year")!.value);
+        const month = Number(parts.find((p) => p.type === "month")!.value);
+        const { to: fim } = competenceRange(year, month);
+        return {
+          ...cost,
+          competencia: `${year}-${String(month).padStart(2, "0")}`,
+          lancadoEm: cost.updatedAt,
+          lancadoAposCompetencia: cost.updatedAt >= fim
+        };
+      });
+    }
     case "markup": {
       const products = await prisma.produto.findMany({
         where: { lojaId },

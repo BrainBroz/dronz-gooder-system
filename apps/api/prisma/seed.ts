@@ -83,7 +83,9 @@ async function main() {
     "VENDA_VISUALIZAR",
     "VENDA_CRIAR",
     "VENDA_CONFIRMAR",
-    "ANALYTICS_EXPORTAR"
+    "ANALYTICS_EXPORTAR",
+    "VENDA_CORRIGIR",
+    "DEVOLUCAO_CONFERIR"
   ] as const;
   const permissions = await Promise.all(
     permissionCodes.map((code) =>
@@ -116,6 +118,12 @@ async function main() {
     "VENDA_VISUALIZAR",
     "VENDA_CRIAR",
     "VENDA_CONFIRMAR",
+    "VENDA_CORRIGIR",
+    "DEVOLUCAO_CONFERIR",
+    // PD-13: gestor revisa e aprova evidências buyer; Miami continua sem financeiro e vendas.
+    "BUYER_INGESTION_VISUALIZAR",
+    "BUYER_INGESTION_APROVAR",
+    "BUYER_INGESTION_REJEITAR",
     "ESTOQUE_VISUALIZAR",
     "ESTOQUE_MOVIMENTAR",
     "ESTOQUE_AJUSTAR",
@@ -138,6 +146,7 @@ async function main() {
     "ENTRADA_DEFINITIVA_VISUALIZAR",
     "ENTRADA_DEFINITIVA_CONFIRMAR",
     "LOGISTICA_POSICOES_VISUALIZAR",
+    "LOGISTICA_POSICOES_GERENCIAR",
     "LOGISTICA_POSICOES_TODAS",
     "CHECKPOINT_CORRIGIR",
     "CORRECAO_PATRIMONIAL_APROVAR"

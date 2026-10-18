@@ -1,6 +1,6 @@
 # Propostas para decisões pendentes — 2026-10-18
 
-Estado: **PROPOSTA, aguardando aprovação do Product Owner.** Nada aqui está implementado. Cada item só vira código depois de aprovado, em batch próprio. Itens que dependem de terceiros (e-mail, eBay, Amazon, transportadoras, planilha histórica, provider de anexos) ficam fora desta lista.
+Estado: **APROVADAS pelo Product Owner em 2026-10-18 (todas as recomendações, PD-01 a PD-13).** A implementação segue a ordem abaixo, na branch `claude/pd-decisions`. Todas as treze estão implementadas, com testes; o detalhe fica em `PROJECT_CONTEXT_MASTER.md`. Limites restantes: o recebimento ainda não informa o pacote (PD-04), e o limite numérico da PD-12 depende do PO (variável `ESTOQUE_PERDA_LIMITE_UNIDADES`). O limite de valor da PD-12 continua a ser definido pelo PO e, até lá, fica configurável sem default. Itens que dependem de terceiros (e-mail, eBay, Amazon, transportadoras, planilha histórica, provider de anexos) ficam fora desta lista.
 
 Para cada item: o problema, a recomendação e a alternativa considerada.
 

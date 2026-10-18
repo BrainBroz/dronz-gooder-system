@@ -74,11 +74,106 @@ export async function orderObligation(lojaId: string, id: string) {
   };
 }
 
-export const listPayments = (lojaId: string) =>
-  prisma.pagamento.findMany({
+// PD-10: a lista ativa oculta cancelados e lançamentos de estorno, salvo filtro; os totais por moeda
+// sempre trazem bruto, reembolsado e líquido de todos os lançamentos.
+// PD-09 (E-2): a cotação vale até a próxima registrada para o mesmo par; com mais de 7 dias ou já
+// substituída, o uso gera aviso (sem bloqueio). O custo guarda o ID da cotação usada como snapshot.
+const QUOTE_WARNING_DAYS = 7;
+async function quoteWarning(
+  db: Prisma.TransactionClient | typeof prisma,
+  lojaId: string,
+  quote: {
+    id: string;
+    moedaOrigem: string;
+    moedaDestino: string;
+    cotadoEm: Date;
+  }
+) {
+  const newer = await db.cotacaoCambio.count({
+    where: {
+      lojaId,
+      moedaOrigem: quote.moedaOrigem,
+      moedaDestino: quote.moedaDestino,
+      cotadoEm: { gt: quote.cotadoEm }
+    }
+  });
+  if (newer) return "COTACAO_SUBSTITUIDA";
+  return Date.now() - quote.cotadoEm.getTime() > QUOTE_WARNING_DAYS * 86_400_000
+    ? "COTACAO_ANTIGA"
+    : null;
+}
+
+export async function listExchangeRates(
+  lojaId: string,
+  par: { moedaOrigem?: string; moedaDestino?: string }
+) {
+  const quotes = await prisma.cotacaoCambio.findMany({
+    where: {
+      lojaId,
+      moedaOrigem: par.moedaOrigem,
+      moedaDestino: par.moedaDestino
+    },
+    orderBy: [{ cotadoEm: "desc" }, { id: "desc" }],
+    take: 100
+  });
+  const seen = new Set<string>();
+  return quotes.map((quote) => {
+    const key = `${quote.moedaOrigem}:${quote.moedaDestino}`;
+    const vigente = !seen.has(key);
+    seen.add(key);
+    const idadeDias = Math.floor(
+      (Date.now() - quote.cotadoEm.getTime()) / 86_400_000
+    );
+    return {
+      ...quote,
+      vigente,
+      idadeDias,
+      aviso: !vigente
+        ? "COTACAO_SUBSTITUIDA"
+        : idadeDias > QUOTE_WARNING_DAYS
+          ? "COTACAO_ANTIGA"
+          : null
+    };
+  });
+}
+
+export async function listPayments(lojaId: string, incluirCancelados = false) {
+  const all = await prisma.pagamento.findMany({
     where: { lojaId },
     orderBy: { createdAt: "desc" }
   });
+  const totals = new Map<
+    string,
+    {
+      bruto: Prisma.Decimal;
+      reembolsado: Prisma.Decimal;
+      cancelado: Prisma.Decimal;
+    }
+  >();
+  for (const p of all) {
+    const t = totals.get(p.moeda) ?? {
+      bruto: new Prisma.Decimal(0),
+      reembolsado: new Prisma.Decimal(0),
+      cancelado: new Prisma.Decimal(0)
+    };
+    if (p.estornoDeId) t.reembolsado = t.reembolsado.plus(p.valor);
+    else if (p.status === "CANCELLED") t.cancelado = t.cancelado.plus(p.valor);
+    else t.bruto = t.bruto.plus(p.valor);
+    totals.set(p.moeda, t);
+  }
+  return {
+    items: incluirCancelados
+      ? all
+      : all.filter((p) => !p.estornoDeId && p.status !== "CANCELLED"),
+    totais: [...totals].map(([moeda, t]) => ({
+      moeda,
+      bruto: t.bruto.toFixed(2),
+      cancelado: t.cancelado.toFixed(2),
+      reembolsado: t.reembolsado.toFixed(2),
+      liquido: t.bruto.minus(t.reembolsado).toFixed(2)
+    }))
+  };
+}
 
 export async function createExchange(
   lojaId: string,
@@ -282,13 +377,13 @@ export async function setCosts(
     payload: data,
     execute: async (tx, correlationId) => {
       const o = await lockedOrder(tx, lojaId, pedidoCompraId);
-      if (
-        data.cotacaoCambioId &&
-        !(await tx.cotacaoCambio.findFirst({
-          where: { id: data.cotacaoCambioId, lojaId }
-        }))
-      )
-        throw new AppError(404, "not_found");
+      const quote = data.cotacaoCambioId
+        ? await tx.cotacaoCambio.findFirst({
+            where: { id: data.cotacaoCambioId, lojaId }
+          })
+        : null;
+      if (data.cotacaoCambioId && !quote) throw new AppError(404, "not_found");
+      const avisoCotacao = quote ? await quoteWarning(tx, lojaId, quote) : null;
       const base = o.total;
       const iofValor = money(base.mul(data.iofPercentual).div(100));
       const global = money(iofValor.plus(data.taxas).plus(data.custoAdicional));
@@ -364,7 +459,7 @@ export async function setCosts(
         after: result,
         origin: ORIGIN
       });
-      return result;
+      return { ...result, avisoCotacao };
     }
   });
 }

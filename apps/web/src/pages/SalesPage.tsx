@@ -25,7 +25,15 @@ type Sale = {
   referenciaExterna?: string | null;
   dataVenda: string;
   moeda: string;
-  estado: "RASCUNHO" | "CONFIRMADA" | "CANCELADA";
+  estado: "RASCUNHO" | "CONFIRMADA" | "CANCELADA" | "ESTORNADA";
+  motivoEstorno?: string | null;
+  devolucoes?: {
+    id: string;
+    vendaItemId: string;
+    quantidade: number;
+    estado: "PENDENTE" | "CONFERIDA" | "REJEITADA";
+    motivo: string;
+  }[];
   receitaBruta: string;
   receitaLiquida: string;
   custo?: string | null;
@@ -61,8 +69,199 @@ const CANAIS = ["MERCADO_LIVRE", "SHOPEE", "SITE_PROPRIO", "OUTRO"];
 const ESTADO_LABEL: Record<string, string> = {
   RASCUNHO: "Rascunho",
   CONFIRMADA: "Confirmada",
-  CANCELADA: "Cancelada"
+  CANCELADA: "Cancelada",
+  ESTORNADA: "Estornada"
 };
+const DEVOLUCAO_LABEL: Record<string, string> = {
+  PENDENTE: "aguardando conferência",
+  CONFERIDA: "conferida (voltou ao estoque)",
+  REJEITADA: "rejeitada (não voltou ao estoque)"
+};
+
+// PD-01/PD-02: estorno (item não saiu) e devolução física em duas etapas; nenhuma edita a venda.
+function SaleCorrections({
+  sale,
+  post,
+  onDone
+}: {
+  sale: Sale;
+  post: ReturnType<typeof useSalesPost>;
+  onDone: () => Promise<unknown>;
+}) {
+  const { can } = useSalesContext();
+  const [motivo, setMotivo] = React.useState("");
+  const [devolucao, setDevolucao] = React.useState({
+    vendaItemId: sale.itens[0]?.id ?? "",
+    quantidade: "1",
+    motivo: ""
+  });
+  const [check, setCheck] = React.useState({
+    condicaoComercial: "CAIXA_ABERTA",
+    funcionamento: "FUNCIONAL"
+  });
+  const reverse = useMutation({
+    mutationFn: () =>
+      post(`/sales/${sale.id}/reverse`, { motivo, itemNaoSaiu: true }),
+    onSuccess: onDone
+  });
+  const registerReturn = useMutation({
+    mutationFn: () =>
+      post(`/sales/${sale.id}/returns`, {
+        ...devolucao,
+        quantidade: Number(devolucao.quantidade)
+      }),
+    onSuccess: async () => {
+      setDevolucao({ ...devolucao, motivo: "" });
+      await onDone();
+    }
+  });
+  const conferir = useMutation({
+    mutationFn: (v: { id: string; apta: boolean }) =>
+      post(`/sales/returns/${v.id}/check`, { apta: v.apta, ...check }),
+    onSuccess: onDone
+  });
+  if (sale.estado !== "CONFIRMADA") return null;
+  const pendentes = (sale.devolucoes ?? []).filter(
+    (d) => d.estado === "PENDENTE"
+  );
+  return (
+    <Stack gap={1} mt={1}>
+      {(sale.devolucoes ?? []).map((d) => (
+        <Typography key={d.id} variant="body2">
+          Devolução de {d.quantidade} un. · {DEVOLUCAO_LABEL[d.estado]} ·{" "}
+          {d.motivo}
+        </Typography>
+      ))}
+      {can("VENDA_CRIAR") && (
+        <Stack direction={{ xs: "column", md: "row" }} gap={1}>
+          <TextField
+            select
+            size="small"
+            label="Item devolvido"
+            value={devolucao.vendaItemId}
+            onChange={(e) =>
+              setDevolucao({ ...devolucao, vendaItemId: e.target.value })
+            }
+          >
+            {sale.itens.map((item) => (
+              <MenuItem key={item.id} value={item.id}>
+                {item.produto.nome}
+              </MenuItem>
+            ))}
+          </TextField>
+          <TextField
+            size="small"
+            type="number"
+            inputProps={{ min: 1 }}
+            label="Qtd. devolvida"
+            value={devolucao.quantidade}
+            onChange={(e) =>
+              setDevolucao({ ...devolucao, quantidade: e.target.value })
+            }
+          />
+          <TextField
+            size="small"
+            label="Motivo da devolução"
+            value={devolucao.motivo}
+            onChange={(e) =>
+              setDevolucao({ ...devolucao, motivo: e.target.value })
+            }
+          />
+          <Button
+            disabled={
+              devolucao.motivo.trim().length < 3 || registerReturn.isPending
+            }
+            onClick={() => registerReturn.mutate()}
+          >
+            Registrar devolução
+          </Button>
+        </Stack>
+      )}
+      {can("DEVOLUCAO_CONFERIR") && !!pendentes.length && (
+        <Stack direction={{ xs: "column", md: "row" }} gap={1}>
+          <TextField
+            select
+            size="small"
+            label="Condição"
+            value={check.condicaoComercial}
+            onChange={(e) =>
+              setCheck({ ...check, condicaoComercial: e.target.value })
+            }
+          >
+            {["NOVO", "CAIXA_ABERTA", "USADO", "NAO_DEFINIDA"].map((c) => (
+              <MenuItem key={c} value={c}>
+                {c}
+              </MenuItem>
+            ))}
+          </TextField>
+          <TextField
+            select
+            size="small"
+            label="Funcionamento"
+            value={check.funcionamento}
+            onChange={(e) =>
+              setCheck({ ...check, funcionamento: e.target.value })
+            }
+          >
+            {["FUNCIONAL", "DEFEITO_PARCIAL", "INOPERANTE", "NAO_TESTADO"].map(
+              (f) => (
+                <MenuItem key={f} value={f}>
+                  {f}
+                </MenuItem>
+              )
+            )}
+          </TextField>
+          <Button
+            disabled={conferir.isPending}
+            onClick={() =>
+              conferir.mutate({ id: pendentes[0]!.id, apta: true })
+            }
+          >
+            Conferir: apta (volta ao estoque)
+          </Button>
+          <Button
+            color="inherit"
+            disabled={conferir.isPending}
+            onClick={() =>
+              conferir.mutate({ id: pendentes[0]!.id, apta: false })
+            }
+          >
+            Conferir: não apta
+          </Button>
+        </Stack>
+      )}
+      {can("VENDA_CORRIGIR") && (
+        <Stack direction={{ xs: "column", md: "row" }} gap={1}>
+          <TextField
+            size="small"
+            label="Motivo do estorno"
+            value={motivo}
+            onChange={(e) => setMotivo(e.target.value)}
+          />
+          <Button
+            color="warning"
+            disabled={motivo.trim().length < 3 || reverse.isPending}
+            onClick={() => reverse.mutate()}
+          >
+            Estornar (item não saiu)
+          </Button>
+        </Stack>
+      )}
+      <MutationStatus
+        mutation={reverse}
+        successMessage="Venda estornada; estoque devolvido ao lote."
+      />
+      <MutationStatus
+        mutation={registerReturn}
+        successMessage="Devolução registrada; estoque só após conferência."
+      />
+      <MutationStatus
+        mutation={conferir}
+        successMessage="Devolução conferida."
+      />
+    </Stack>
+  );
+}
 
 function useSalesContext() {
   const store = useAuthStore((s) => s.activeStoreId);
@@ -301,8 +500,13 @@ function SaleCard({
             )}
           </Stack>
         )}
+        {sale.estado === "ESTORNADA" && (
+          <Typography variant="body2">Estorno: {sale.motivoEstorno}</Typography>
+        )}
+        <SaleCorrections sale={sale} post={post} onDone={refresh} />
         {sale.recebivel &&
           sale.recebivel.status !== "RECEBIDO" &&
+          sale.recebivel.status !== "ESTORNADO" &&
           can("FINANCEIRO_REGISTRAR") && (
             <Stack direction="row" gap={1} mt={1}>
               <TextField

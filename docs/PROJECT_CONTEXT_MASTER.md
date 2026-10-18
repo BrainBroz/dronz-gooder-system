@@ -310,6 +310,20 @@ Continuam abertas e bloqueiam somente seus batches: vigência de cotação (`E-2
 - `DECISOES_PRODUTO_2026-10-17.md` registra a aprovação das propostas D-1…D-17 e X-01…X-15 (exceto X-02 e DEC-DOM-001, superadas por F-2/F-1) e a ordem logística primeiro.
 - A Home usa o read model implementado `BE-HOME`; cada contador declara domínio, definição e instante de referência. Homologação operacional real continua necessária.
 - D-15 por pacote (branch `claude/d15-package-destination`): `PacoteExterno.destinoPosicaoId` opcional (nulo herda o destino do pedido); `PUT /purchase-orders/:id/packages/:pacoteId/destination` com motivo, auditoria e bloqueio após o primeiro recebimento da compra (depois disso, transferência operacional). Rastreios exibem o destino efetivo e a disponibilidade da posição lista só os códigos dos pacotes destinados a ela; a quantidade "a caminho" segue o pedido, porque o pacote não guarda quantidade por item.
+- PD-01 a PD-13 (aprovadas em 2026-10-18, branch `claude/pd-decisions`):
+  - PD-05: status de viagem e mala exigem `LOGISTICA_POSICOES_GERENCIAR`.
+  - PD-07: a incremental é recusada enquanto o último replay da conexão não terminou com sucesso (`historical_replay_incomplete`).
+  - PD-01: `POST /sales/:id/reverse` (VENDA_CORRIGIR) reverte as baixas, devolve o saldo ao lote original e marca a venda ESTORNADA (relatório `VENDAS_ESTORNADAS`); é bloqueado se houve recebimento ou devolução.
+  - PD-02: `POST /sales/:id/returns` registra a devolução sem mexer no estoque; `POST /sales/returns/:id/check` (DEVOLUCAO_CONFERIR), quando apta, cria lote novo com o item de compra do lote vendido.
+  - PD-03: `ReconciliacaoLote`. `GET /inventory/lots/:produtoId` diagnostica; `POST .../reconcile` atribui as saídas sem lote aos lotes mais antigos, com motivo; `POST /inventory/lots/entries/:id/purchase-item` liga lote sem custo ao item, limitado ao comprado.
+  - PD-04: `PacoteItem` (conteúdo por pacote); "a caminho" por posição = pacotes destinados + parte sem pacote − recebido. O recebimento ainda não informa o pacote.
+  - PD-08: alerta `ENVIO_QUINTA_ATRASADO` na Home (08:00–12:00 no fuso do Local da posição de origem, sem bloqueio).
+  - PD-09: `GET /finance/exchange-rates` traz vigente e idade; o custo avisa `COTACAO_ANTIGA` (mais de 7 dias) ou `COTACAO_SUBSTITUIDA`.
+  - PD-10: listas de pedidos e de pagamentos ocultam cancelados e estornos por padrão (`incluirCancelados=true`); os pagamentos trazem totais por moeda.
+  - PD-11: relatório `costs` com competência do pedido e `lancadoAposCompetencia`.
+  - PD-12: com `ESTOQUE_PERDA_LIMITE_UNIDADES` definido, perda ou ajuste negativo acima do limite vira proposta (`POST /inventory/movements/loss-requests`), aprovada por outro usuário na fila D-17. Sem a variável, nada muda; o limite é decisão do PO.
+  - PD-13: `GESTOR_LOJA` recebe revisão e aprovação buyer, gestão logística, `VENDA_CORRIGIR` e `DEVOLUCAO_CONFERIR`.
+  - De passagem, o contador "pedidos a pagar" da Home deixou de descontar reembolsos (regra do B16).
 - Identidade física unitária, compensação pós-materialização e anexos de evidência (D-6) são gaps de backend ou schema, não capacidades atuais.
 - As três projeções do contrato de UX não podem ser colapsadas no frontend. Materialização comercial não prova localização física e reembolso econômico não move mercadoria automaticamente.
 

@@ -83,6 +83,9 @@ async function setup() {
     await prisma.recebimentoMiami.deleteMany({
       where: { pedidoCompraItemId: data.item.id }
     });
+    await prisma.pacoteItem.deleteMany({
+      where: { pedidoCompraItemId: data.item.id }
+    });
     await prisma.trackingExterno.deleteMany({
       where: { pacote: { envio: { compraImportadaId: purchase.id } } }
     });
@@ -207,5 +210,42 @@ describe("destino por pacote (D-15)", () => {
       .set(headers)
       .send({ posicaoId: hotel.id, motivo: "Pacote alheio" });
     expect(other.status).toBe(404);
+  });
+
+  it("PD-04: conteúdo por pacote divide o 'a caminho' entre as posições de destino", async () => {
+    const { app, headers, data, base, hotel, first, second } = await setup();
+    const items = (pacoteId: string, quantidade: number) =>
+      request(app)
+        .put(`/purchase-orders/${data.order.id}/packages/${pacoteId}/items`)
+        .set(headers)
+        .send({
+          itens: [{ pedidoCompraItemId: data.item.id, quantidade }],
+          motivo: "Conteúdo conferido na nota"
+        });
+    await request(app)
+      .put(`/purchase-orders/${data.order.id}/packages/${first.id}/destination`)
+      .set(headers)
+      .send({ posicaoId: hotel.id, motivo: "Entrega no hotel" });
+    expect((await items(first.id, 1)).status).toBe(200);
+    expect((await items(second.id, 2)).body.error).toBe("package_exceeds_item");
+    expect((await items(second.id, 1)).status).toBe(200);
+    const onWay = async (posicaoId: string) =>
+      (
+        await request(app)
+          .get(`/positions/${posicaoId}/availability`)
+          .set(headers)
+      ).body.find(
+        (row: { pedidoCompraItemId: string }) =>
+          row.pedidoCompraItemId === data.item.id
+      )?.aCaminho;
+    expect(await onWay(hotel.id)).toBe(1);
+    expect(await onWay(base.id)).toBe(1);
+    const list = await request(app)
+      .get(`/purchase-orders/${data.order.id}/trackings`)
+      .set(headers);
+    expect(
+      list.body.find((t: { pacoteId: string }) => t.pacoteId === first.id)
+        .pacoteItens
+    ).toEqual([{ pedidoCompraItemId: data.item.id, quantidade: 1 }]);
   });
 });

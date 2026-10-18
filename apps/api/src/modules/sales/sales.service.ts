@@ -34,7 +34,8 @@ export const saleInclude = {
     },
     orderBy: { createdAt: "asc" }
   },
-  recebivel: true
+  recebivel: true,
+  devolucoes: { orderBy: { createdAt: "asc" } }
 } satisfies Prisma.VendaInclude;
 type SaleRow = Prisma.VendaGetPayload<{ include: typeof saleInclude }>;
 
@@ -98,6 +99,18 @@ export function saleView(sale: SaleRow, includeCost: boolean) {
     estado: sale.estado,
     observacao: sale.observacao,
     confirmadoEm: sale.confirmadoEm,
+    estornadaEm: sale.estornadaEm,
+    motivoEstorno: sale.motivoEstorno,
+    devolucoes: sale.devolucoes.map((d) => ({
+      id: d.id,
+      vendaItemId: d.vendaItemId,
+      quantidade: d.quantidade,
+      estado: d.estado,
+      motivo: d.motivo,
+      conferidoEm: d.conferidoEm,
+      condicaoComercial: d.condicaoComercial,
+      funcionamento: d.funcionamento
+    })),
     receitaBruta: money(bruto).toFixed(2),
     receitaLiquida: money(liquido).toFixed(2),
     ...(includeCost
@@ -276,15 +289,21 @@ export function cancelDraft(
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
-async function lotsFor(db: Db, lojaId: string, produtoIds: string[]) {
+export async function lotsFor(db: Db, lojaId: string, produtoIds: string[]) {
   const lots = await db.movimentacaoEstoque.findMany({
     where: {
       lojaId,
       produtoId: { in: produtoIds },
-      tipo: { in: [...LOT_TYPES] }
+      tipo: { in: [...LOT_TYPES] },
+      // PD-01: retorno de estorno (RETURN_ENTRY/SALE) só desfaz a baixa; não é lote novo.
+      NOT: { tipo: "RETURN_ENTRY", motivo: "SALE" }
     },
     include: {
-      baixasComoLote: { select: { quantidade: true } },
+      baixasComoLote: {
+        where: { revertidaEm: null },
+        select: { quantidade: true }
+      },
+      reconciliacoesLote: { select: { quantidade: true } },
       pedidoItem: {
         include: {
           pedido: { select: { moeda: true, numeroPedido: true } },
@@ -300,12 +319,14 @@ async function lotsFor(db: Db, lojaId: string, produtoIds: string[]) {
     ...lot,
     restante:
       lot.quantidade -
-      lot.baixasComoLote.reduce((sum, baixa) => sum + baixa.quantidade, 0)
+      lot.baixasComoLote.reduce((sum, baixa) => sum + baixa.quantidade, 0) -
+      // PD-03: saídas antigas atribuídas a este lote na reconciliação.
+      lot.reconciliacoesLote.reduce((sum, r) => sum + r.quantidade, 0)
   }));
 }
-type Lot = Awaited<ReturnType<typeof lotsFor>>[number];
+export type Lot = Awaited<ReturnType<typeof lotsFor>>[number];
 
-async function lotBalances(
+export async function lotBalances(
   db: Db,
   lojaId: string,
   produtoIds: string[],
@@ -331,7 +352,7 @@ async function lotBalances(
   );
 }
 
-function lotCost(lot: Lot, moedaVenda: string) {
+export function lotCost(lot: Lot, moedaVenda: string) {
   const item = lot.pedidoItem;
   if (!item)
     return {

@@ -1,5 +1,5 @@
 import React from "react";
-import { Button, Card, CardContent, MenuItem, Stack, Tab, Tabs, TextField, Typography } from "@mui/material";
+import { Button, Card, CardContent, Checkbox, FormControlLabel, MenuItem, Stack, Tab, Tabs, TextField, Typography } from "@mui/material";
 import { useForm } from "react-hook-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ContentCard } from "../components/ui/ContentCard";
@@ -67,13 +67,19 @@ function FinanceContent() {
     }
   });
   const headers = { ...authHeader(), "x-store-id": store };
-  const payments = useQuery({
-    queryKey: financeQueryKeys.payments(store),
+  // PD-10: cancelados e estornos ficam fora da lista ativa por padrão; os totais mostram tudo.
+  const [incluirCancelados, setIncluirCancelados] = React.useState(false);
+  const payments = useQuery<{
+    items: { id: string; formaPagamento: string; valor: string; moeda: string; status: string; estornoDeId?: string | null }[];
+    totais: { moeda: string; bruto: string; cancelado: string; reembolsado: string; liquido: string }[];
+  }>({
+    queryKey: [...financeQueryKeys.payments(store), incluirCancelados],
     enabled: !!store,
     queryFn: async () =>
       (
         await api.get("/finance/payments", {
-          headers: { ...authHeader(), "x-store-id": store }
+          headers: { ...authHeader(), "x-store-id": store },
+          ...(incluirCancelados ? { params: { incluirCancelados: "true" } } : {})
         })
       ).data
   });
@@ -302,7 +308,21 @@ function FinanceContent() {
         />
         {payments.isLoading && <Typography>Carregando...</Typography>}
         {payments.isError && <Typography>Falha ao carregar dados</Typography>}
-        {payments.data?.map(
+        <FormControlLabel
+          control={
+            <Checkbox
+              checked={incluirCancelados}
+              onChange={(e) => setIncluirCancelados(e.target.checked)}
+            />
+          }
+          label="Incluir cancelados e estornos"
+        />
+        {payments.data?.totais?.map((t) => (
+          <Typography key={t.moeda} variant="body2">
+            {t.moeda}: bruto {t.bruto} · cancelado {t.cancelado} · reembolsado {t.reembolsado} · líquido {t.liquido}
+          </Typography>
+        ))}
+        {payments.data?.items?.map(
           (p: {
             id: string;
             formaPagamento: string;
@@ -373,6 +393,13 @@ function FinanceContent() {
           </Button>
         </Stack>
         <MutationStatus mutation={costs} successMessage="Custos calculados." />
+        {costs.data?.data?.avisoCotacao && (
+          <Typography role="status" color="warning.main">
+            {costs.data.data.avisoCotacao === "COTACAO_SUBSTITUIDA"
+              ? "Atenção: existe cotação mais recente para este par; o custo usou a escolhida."
+              : "Atenção: a cotação usada tem mais de 7 dias."}
+          </Typography>
+        )}
       </ContentCard>
     </Stack>
   );

@@ -494,6 +494,9 @@ export async function availability(
                   pacotes: {
                     select: {
                       destinoPosicaoId: true,
+                      itens: {
+                        select: { pedidoCompraItemId: true, quantidade: true }
+                      },
                       trackings: {
                         where: { ativo: true },
                         select: { codigo: true, transportadora: true }
@@ -529,10 +532,35 @@ export async function availability(
     const alocado = item.alocacoesMala
       .filter((entry) => entry.status === "CONSUMIDA")
       .reduce((sum, entry) => sum + entry.quantidade, 0);
-    // shortcut: pacote não guarda quantidade por item, então "a caminho" segue o destino do pedido;
-    // dividir por pacote exige o vínculo pacote→item (identidade física, contrato próprio).
-    const aCaminho =
-      item.pedido.destinoPosicaoId === posicaoId
+    // PD-04: com conteúdo declarado, o esperado aqui é o que vem nos pacotes destinados a esta
+    // posição mais o que não está em pacote algum (segue o pedido). Sem conteúdo, vale o pedido.
+    const packaged = (
+      item.pedido.compraImportada?.enviosExternos ?? []
+    ).flatMap((envio) =>
+      envio.pacotes.flatMap((pkg) =>
+        pkg.itens
+          .filter((entry) => entry.pedidoCompraItemId === item.id)
+          .map((entry) => ({
+            destino: pkg.destinoPosicaoId ?? item.pedido.destinoPosicaoId,
+            quantidade: entry.quantidade
+          }))
+      )
+    );
+    // shortcut: o recebimento ainda não informa o pacote; "a caminho" desconta o recebido nesta
+    // posição. Ligar recebimento→pacote quando a conferência por etiqueta for obrigatória.
+    const aCaminho = packaged.length
+      ? Math.max(
+          0,
+          packaged
+            .filter((entry) => entry.destino === posicaoId)
+            .reduce((sum, entry) => sum + entry.quantidade, 0) +
+            (item.pedido.destinoPosicaoId === posicaoId
+              ? item.quantidade -
+                packaged.reduce((sum, entry) => sum + entry.quantidade, 0)
+              : 0) -
+            recebido
+        )
+      : item.pedido.destinoPosicaoId === posicaoId
         ? Math.max(0, item.quantidade - item.quantidadeRecebidaMiami)
         : 0;
     return {
