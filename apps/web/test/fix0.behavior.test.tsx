@@ -40,11 +40,15 @@ describe("FIX-0 — câmbio envia valorMercado", () => {
     const user = userEvent.setup();
     renderWithProviders(<FinancePage />);
     await user.type(screen.getByLabelText("Cotação"), "5.4321");
+    await user.type(screen.getByLabelText("Margem"), "0.2");
+    await user.type(screen.getByLabelText("Fonte"), "Banco");
     await user.click(screen.getByRole("button", { name: "Registrar câmbio" }));
     await waitFor(() => expect(post).toHaveBeenCalled());
     const [url, payload] = post.mock.calls[0] as [string, Record<string, unknown>];
     expect(url).toBe("/finance/exchange-rates");
     expect(payload.valorMercado).toBe(5.4321);
+    expect(payload.margem).toBe(0.2);
+    expect(payload.fonte).toBe("Banco");
     expect(payload).not.toHaveProperty("valor");
     expect(payload.moedaOrigem).toBe("BRL");
     expect(payload.moedaDestino).toBe("USD");

@@ -1527,8 +1527,9 @@ model CotacaoCambio {
   moedaOrigem   String
   moedaDestino  String
   valorMercado  Decimal       @db.Decimal(18, 6)
-  margem        Decimal       @default(0.20) @db.Decimal(18, 6)
+  margem        Decimal       @db.Decimal(18, 6)
   valor         Decimal       @db.Decimal(18, 6)
+  fonte         String?
   cotadoEm      DateTime
   responsavelId String
   createdAt     DateTime      @default(now())

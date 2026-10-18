@@ -92,7 +92,7 @@ describe("purchase finance", () => {
     const result = await request(app).post("/finance/exchange-rates")
       .set({ Authorization: `Bearer ${login.body.accessToken}`, "x-store-id": store.id })
       .send({ moedaOrigem: "USD", moedaDestino: "BRL", valorMercado: 5.13,
-        cotadoEm: "2026-10-16T12:00:00.000Z" });
+        margem: 0.2, fonte: "Cotação manual de teste", cotadoEm: "2026-10-16T12:00:00.000Z" });
     expect(result.status).toBe(201);
     createdQuoteIds.push(result.body.id);
     expect(result.body).toMatchObject({
@@ -106,6 +106,13 @@ describe("purchase finance", () => {
     });
     expect(persisted.valor.toString()).toBe("5.33");
     expect(persisted.valorMercado.toString()).toBe("5.13");
+    expect(persisted.fonte).toBe("Cotação manual de teste");
+    // X-08: sem margem informada não há acréscimo default.
+    const withoutMargin = await request(app).post("/finance/exchange-rates")
+      .set({ Authorization: `Bearer ${login.body.accessToken}`, "x-store-id": store.id })
+      .send({ moedaOrigem: "USD", moedaDestino: "BRL", valorMercado: 5.13,
+        fonte: "x", cotadoEm: "2026-10-16T12:00:00.000Z" });
+    expect(withoutMargin.status).toBe(400);
   });
 
   it("rateia HALF_UP, aceita parcial, bloqueia excesso e isola loja", async () => {

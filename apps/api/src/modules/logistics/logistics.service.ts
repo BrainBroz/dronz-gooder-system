@@ -4,6 +4,14 @@ import { prisma } from "../../lib/prisma";
 import { AppError } from "../../lib/app-error";
 import { audit, idempotentMutation } from "../operations/operations.persistence";
 import { assertBrazilTransition, assertParaguayTransition } from "../operations/operations.policy";
+
+// Logística opera quantidades e pesos; valores do item e do produto não saem destas respostas (F-10).
+const allocationItem = {
+  item: {
+    omit: { precoUnitario: true, descontoItem: true, totalItem: true },
+    include: { produto: { omit: { precoVenda: true, markup: true } } }
+  }
+} as const;
 const tripTransitions: Record<ViagemStatus, ViagemStatus[]> = {
   PLANNED: ["OPEN_FOR_ALLOCATION"],
   OPEN_FOR_ALLOCATION: ["CLOSED_FOR_ALLOCATION", "CANCELLED"],
@@ -195,7 +203,7 @@ export const suitcases = async (lojaId: string) =>
       viagem: { select: { status: true } },
       recebimentos: { where: { status: "COMPLETED", supersededAt: null }, select: { id: true } },
       volumes: true,
-      alocacoes: { include: { item: { include: { produto: true } } } }
+      alocacoes: { include: allocationItem }
     }
   })).map(({ viagem, recebimentos, ...bag }) => ({
     ...bag,
@@ -488,7 +496,7 @@ export async function updateSuitcase(
     tx.mala.update({
       where: { id },
       data: d,
-      include: { volumes: true, alocacoes: { include: { item: { include: { produto: true } } } } }
+      include: { volumes: true, alocacoes: { include: allocationItem } }
     })
   );
 }
