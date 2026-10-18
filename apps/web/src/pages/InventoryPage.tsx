@@ -299,10 +299,9 @@ function InventoryContent() {
                   <Typography>{item.status}</Typography>
                   <Typography>{item.itens.length} item(ns)</Typography>
                   {item.itens.map((received) => {
+                    // Rejeitadas fazem parte das recebidas; só falta conferir o que não chegou.
                     const remaining =
-                      received.quantidadeEsperada -
-                      received.quantidadeRecebida -
-                      received.quantidadeRejeitada;
+                      received.quantidadeEsperada - received.quantidadeRecebida;
                     return (
                       <Stack
                         key={received.id}

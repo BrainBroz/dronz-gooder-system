@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import {
-  Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem,
+  Alert, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, MenuItem,
   Snackbar, Stack, Tab, Tabs, TextField, Typography
 } from "@mui/material";
 import { ContentCard } from "../components/ui/ContentCard";
@@ -123,8 +123,8 @@ function ReceivingItems({ detail, mutate, pending }: { detail: ReceivingDetail; 
       {detail.allowedActions.includes("CONFIRM_RECEIVING_ITEM") && <Button onClick={() => setItemId(item.id)}>{operationActionPresentation.CONFIRM_RECEIVING_ITEM.label}</Button>}
     </Stack>)}
     <Dialog open={Boolean(itemId)} onClose={() => setItemId(null)}><DialogTitle>Confirmar item</DialogTitle><DialogContent><Stack gap={2} mt={1}>
-      <TextField label="Quantidade recebida" type="number" value={received} onChange={(event) => setReceived(event.target.value)} />
-      <TextField label="Quantidade rejeitada" type="number" value={rejected} onChange={(event) => setRejected(event.target.value)} />
+      <TextField label="Quantidade recebida" helperText="Todas as unidades que chegaram, inclusive as rejeitadas." type="number" value={received} onChange={(event) => setReceived(event.target.value)} />
+      <TextField label="Quantidade rejeitada" helperText="Parte das recebidas que não pode entrar no estoque." type="number" value={rejected} onChange={(event) => setRejected(event.target.value)} />
       <TextField select label="Divergência" value={divergence} onChange={(event) => setDivergence(event.target.value as (typeof receivingDivergences)[number])}>{receivingDivergences.map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}</TextField>
       <TextField label="Observação" value={notes} onChange={(event) => setNotes(event.target.value)} required={divergence !== "CORRETO"} />
     </Stack></DialogContent><DialogActions><Button onClick={() => setItemId(null)}>Cancelar</Button><Button disabled={pending || (divergence !== "CORRETO" && !notes.trim())} onClick={() => itemId && void mutate({ quantidadeRecebida: Number(received), quantidadeRejeitada: Number(rejected), tipoDivergencia: divergence, observacoes: notes || undefined }, operationActionPresentation.CONFIRM_RECEIVING_ITEM.url.replace(":receivingId", detail.id).replace(":itemId", itemId), operationActionPresentation.CONFIRM_RECEIVING_ITEM.successMessage).then(() => setItemId(null))}>Confirmar</Button></DialogActions></Dialog>
@@ -135,11 +135,18 @@ function ActionDialog(props: { action: Exclude<import("../types/operations").Ope
   const [quantity, setQuantity] = useState("1");
   const [divergence, setDivergence] = useState("CORRETO");
   const [notes, setNotes] = useState("");
+  const [condition, setCondition] = useState({ condicaoComercial: "NAO_DEFINIDA", funcionamento: "NAO_TESTADO", acessorios: "", registroTerceiro: false });
   const item = props.item;
   const presentation = operationActionPresentation[props.action];
   const submit = () => {
     const now = new Date().toISOString();
-    if (presentation.form === "miami" && isMiami(item)) return props.submit({ pedidoCompraItemId: item.id, quantidadeRecebida: Number(quantity), recebidoEm: now, tipoDivergencia: divergence, observacao: notes || undefined }, presentation.url, presentation.successMessage);
+    if (presentation.form === "miami" && isMiami(item)) return props.submit({
+      pedidoCompraItemId: item.id, quantidadeRecebida: Number(quantity), recebidoEm: now, tipoDivergencia: divergence, observacao: notes || undefined,
+      // D-4: condição comercial, funcionamento, acessórios e registro de terceiro são dimensões separadas.
+      condicaoComercial: condition.condicaoComercial, funcionamento: condition.funcionamento,
+      acessoriosAusentes: condition.acessorios.split(",").map((entry) => entry.trim()).filter(Boolean),
+      registroTerceiro: condition.registroTerceiro
+    }, presentation.url, presentation.successMessage);
     if ((presentation.form === "checkpoint-paraguay" || presentation.form === "checkpoint-brazil") && isCheckpoint(item)) return props.submit({ viagemId: item.viagemId, malaId: item.id, confirmadoEm: now, tipoDivergencia: divergence, observacao: notes || undefined }, presentation.url, presentation.successMessage);
     if (presentation.form === "open-receiving" && isReceiving(item)) return props.submit({ viagemId: item.viagemId, malaId: item.id, observacoes: notes || undefined }, presentation.url, presentation.successMessage);
     if (presentation.form === "definitive-entry" && isDefinitive(item)) return props.submit({ viagemId: item.viagemId, malaId: item.malaId, confirmadoEm: now, observacao: notes || undefined }, presentation.url, presentation.successMessage);
@@ -148,6 +155,16 @@ function ActionDialog(props: { action: Exclude<import("../types/operations").Ope
   const options = presentation.form === "checkpoint-paraguay" ? checkpointDivergences.paraguay : presentation.form === "checkpoint-brazil" ? checkpointDivergences.brazil : presentation.form === "miami" ? ["CORRETO", "FALTANTE", "QUANTIDADE_DIVERGENTE", "DANIFICADO", "DESCONHECIDO", "TRACKING_NAO_LOCALIZADO"] : [];
   return <Dialog open onClose={props.close} fullWidth maxWidth="sm"><DialogTitle>Confirmar operação</DialogTitle><DialogContent><Stack gap={2} mt={1}>
     {presentation.form === "miami" && <TextField label="Quantidade recebida" type="number" inputProps={{ min: 1 }} value={quantity} onChange={(event) => setQuantity(event.target.value)} />}
+    {presentation.form === "miami" && <>
+      <TextField select label="Condição comercial" value={condition.condicaoComercial} onChange={(event) => setCondition((current) => ({ ...current, condicaoComercial: event.target.value }))}>
+        {[["NAO_DEFINIDA", "Não definida"], ["NOVO", "Novo"], ["CAIXA_ABERTA", "Caixa aberta"], ["USADO", "Usado"]].map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
+      </TextField>
+      <TextField select label="Funcionamento" value={condition.funcionamento} onChange={(event) => setCondition((current) => ({ ...current, funcionamento: event.target.value }))}>
+        {[["NAO_TESTADO", "Não testado"], ["FUNCIONAL", "Funcional"], ["DEFEITO_PARCIAL", "Defeito parcial"], ["INOPERANTE", "Inoperante"]].map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
+      </TextField>
+      <TextField label="Acessórios ausentes" helperText="Separe por vírgula." value={condition.acessorios} onChange={(event) => setCondition((current) => ({ ...current, acessorios: event.target.value }))} />
+      <FormControlLabel control={<Checkbox checked={condition.registroTerceiro} onChange={(event) => setCondition((current) => ({ ...current, registroTerceiro: event.target.checked }))} />} label="Registrado em nome de terceiro" />
+    </>}
     {options.length > 0 && <TextField select label="Divergência" value={divergence} onChange={(event) => setDivergence(event.target.value)}>{options.map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}</TextField>}
     <TextField label="Observação" multiline minRows={2} value={notes} onChange={(event) => setNotes(event.target.value)} />
   </Stack></DialogContent><DialogActions><Button onClick={props.close}>Cancelar</Button><Button variant="contained" disabled={props.pending} onClick={() => void submit()}>{props.pending ? "Confirmando..." : "Confirmar"}</Button></DialogActions></Dialog>;

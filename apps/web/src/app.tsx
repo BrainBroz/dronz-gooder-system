@@ -70,6 +70,11 @@ const FinancePage = React.lazy(() =>
     default: module.FinancePage
   }))
 );
+const HomePage = React.lazy(() =>
+  import("./pages/HomePage").then((module) => ({
+    default: module.HomePage
+  }))
+);
 const PositionsPage = React.lazy(() =>
   import("./pages/PositionsPage").then((module) => ({
     default: module.PositionsPage
@@ -148,7 +153,7 @@ export function LoginPage() {
           (permission: { code: string }) => permission.code
         )
       });
-      navigate("/operacao");
+      navigate("/");
     } catch (error) {
       setError("root", { message: extractErrorMessage(error) });
     }
@@ -221,6 +226,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
   // Só esconde atalhos: a autorização continua sendo decidida pela API.
   const allNavigationItems: [string, string, string[]?][] = [
+    ["Início", "/"],
     ["Operação", "/operacao"],
     ["Checkpoints", "/checkpoints"],
     ["Categorias", "/categorias", ["CATALOGO_VISUALIZAR"]],
@@ -349,7 +355,16 @@ export function AppRoutes() {
           fallback={<div role="status">Carregando módulo...</div>}
         >
           <Routes>
-            <Route path="/" element={<Navigate to="/operacao" replace />} />
+            <Route
+              path="/"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <HomePage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
             <Route path="/login" element={<LoginPage />} />
             <Route
               path="/operacao"

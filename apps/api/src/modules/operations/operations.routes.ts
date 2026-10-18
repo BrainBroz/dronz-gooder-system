@@ -3,8 +3,9 @@ import { z } from "zod";
 import { requireAuth, requirePermission, requireStore, type AuthenticatedRequest } from "../../middlewares/auth";
 import { AppError } from "../../lib/app-error";
 import * as service from "./operations.service";
-import { correct } from "./corrections.service";
+import { approveCompensation, compensationRequests, correct, rejectCompensation } from "./corrections.service";
 import { correctionSchema } from "./corrections.schemas";
+import { home } from "./home.service";
 
 export const operationsRouter = Router();
 operationsRouter.use(requireAuth, requireStore);
@@ -15,6 +16,7 @@ const wrap = (fn: (request: AuthenticatedRequest) => Promise<unknown>) =>
   };
 const permissions = (request: AuthenticatedRequest) => request.identity!.permissoes.map((entry) => entry.code);
 
+operationsRouter.get("/home", wrap((request) => home(request.identity!, request.storeId!)));
 operationsRouter.get("/overview", requirePermission(
   "MIAMI_RECEBIMENTO_VISUALIZAR", "PARAGUAI_CHECKPOINT_VISUALIZAR", "BRASIL_CHECKPOINT_VISUALIZAR", "RECEBIMENTO_VISUALIZAR", "ENTRADA_DEFINITIVA_VISUALIZAR"
 ), wrap((request) => service.overview(request.storeId!, permissions(request))));
@@ -66,4 +68,14 @@ operationsRouter.post("/corrections", requirePermission("CHECKPOINT_CORRIGIR"), 
   const parsed = correctionSchema.safeParse(request.body);
   if (!parsed.success) throw new AppError(400, "bad_request");
   return correct(request.storeId!, request.identity!.user.id, parsed.data, typeof request.headers["idempotency-key"] === "string" ? request.headers["idempotency-key"] : undefined);
+}));
+
+operationsRouter.get("/corrections/requests", requirePermission("CHECKPOINT_CORRIGIR", "CORRECAO_PATRIMONIAL_APROVAR"), wrap((request) =>
+  compensationRequests(request.storeId!)));
+operationsRouter.post("/corrections/requests/:id/approve", requirePermission("CORRECAO_PATRIMONIAL_APROVAR"), wrap((request) =>
+  approveCompensation(request.storeId!, request.identity!.user.id, String(request.params.id))));
+operationsRouter.post("/corrections/requests/:id/reject", requirePermission("CORRECAO_PATRIMONIAL_APROVAR"), wrap((request) => {
+  const parsed = z.object({ motivo: z.string().trim().min(1).max(2000) }).strict().safeParse(request.body);
+  if (!parsed.success) throw new AppError(400, "bad_request");
+  return rejectCompensation(request.storeId!, request.identity!.user.id, String(request.params.id), parsed.data.motivo);
 }));

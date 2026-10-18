@@ -27,7 +27,7 @@ describe("sessão web", () => {
     renderWithProviders(
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/operacao" element={<div>Operação autenticada</div>} />
+        <Route path="/" element={<div>Início autenticado</div>} />
       </Routes>,
       { route: "/login", accessToken: null, user: null, stores: [] }
     );
@@ -42,7 +42,7 @@ describe("sessão web", () => {
     resolveLogin({
       data: { accessToken: "novo-token", user: testUser, stores: testStores }
     });
-    await screen.findByText("Operação autenticada");
+    await screen.findByText("Início autenticado");
     expect(useAuthStore.getState().accessToken).toBe("novo-token");
   });
 

@@ -324,6 +324,11 @@ logisticsRouter.post(
         z
           .object({
             posicaoId: z.string().optional(),
+            condicaoComercial: z.enum(["NAO_DEFINIDA", "NOVO", "CAIXA_ABERTA", "USADO"]).optional(),
+            funcionamento: z.enum(["NAO_TESTADO", "FUNCIONAL", "DEFEITO_PARCIAL", "INOPERANTE"]).optional(),
+            acessoriosAusentes: z.array(z.string().trim().min(1).max(120)).max(30).optional(),
+            observacaoCondicao: z.string().trim().max(2000).optional(),
+            registroTerceiro: z.boolean().optional(),
             pedidoCompraItemId: z.string(),
             quantidadeRecebida: z.number().int().positive(),
             recebidoEm: z.coerce.date(),
