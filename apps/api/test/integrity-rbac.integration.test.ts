@@ -106,9 +106,14 @@ describe("integridade transacional sob concorrência real (chamadas paralelas ao
     await prisma.alocacaoMala.deleteMany({
       where: { pedidoCompraItemId: data.item.id }
     });
-    await prisma.pedidoCompraItem.update({
-      where: { id: data.item.id },
-      data: { quantidadeRecebidaMiami: 1 }
+    await prisma.recebimentoMiami.create({
+      data: {
+        lojaId: data.order.lojaId,
+        pedidoCompraItemId: data.item.id,
+        quantidadeRecebida: 1,
+        recebidoEm: new Date(),
+        confirmadoPorId: data.admin.id
+      }
     });
     const volumes = await Promise.all(
       [1, 2, 3, 4, 5].map((n) =>
@@ -124,12 +129,16 @@ describe("integridade transacional sob concorrência real (chamadas paralelas ao
     );
     await Promise.allSettled(
       volumes.map((volume) =>
-        allocate(data.order.lojaId, {
-          pedidoCompraItemId: data.item.id,
-          malaId: data.bag.id,
-          volumeLogisticoId: volume.id,
-          quantidade: 1
-        })
+        allocate(
+          data.order.lojaId,
+          {
+            pedidoCompraItemId: data.item.id,
+            malaId: data.bag.id,
+            volumeLogisticoId: volume.id,
+            quantidade: 1
+          },
+          { userId: data.admin.id, permissions: ["SYSTEM_ADMIN"] }
+        )
       )
     );
     const total = await prisma.alocacaoMala.aggregate({

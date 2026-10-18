@@ -26,6 +26,7 @@ purchaseOrdersRouter.get("/:id", c.get);
 purchaseOrdersRouter.post("/", c.create);
 purchaseOrdersRouter.patch("/:id", c.update);
 purchaseOrdersRouter.patch("/:id/status", c.status);
+purchaseOrdersRouter.put("/:id/destination", c.destination);
 purchaseOrdersRouter.delete("/:id", c.remove);
 purchaseOrdersRouter.post("/:id/items", c.addItem);
 purchaseOrdersRouter.patch("/:id/items/:itemId", c.updateItem);

@@ -79,6 +79,8 @@ model Usuario {
   conflitosCompraResolvidos      ConflitoCompra[]
   conexoesMarketplaceCriadas     ConexaoMarketplace[]
   decisoesBuyerCompra            BuyerApprovalDecision[]
+  responsabilidadesContextuais   ResponsabilidadeContextual[]
+  reservasMala                   AlocacaoMala[]
 }
 
 model Perfil {
@@ -1075,6 +1077,8 @@ model PedidoCompra {
   pagamentos           Pagamento[]
   custo                CustoPedido?
   materializacaoOrigem MaterializacaoCompra?
+  destinoPosicaoId     String                @default("posicao-miami-base")
+  destinoPosicao       PosicaoOperacional    @relation(fields: [destinoPosicaoId], references: [id], onDelete: Restrict)
 
   @@unique([lojaId, fornecedorId, numeroPedido])
   @@unique([id, lojaId])
@@ -1186,6 +1190,8 @@ model Mala {
   viagemId            String
   codigo              String
   limitePesoKg        Decimal              @default(23) @db.Decimal(8, 3)
+  posicaoId           String               @default("posicao-miami-base")
+  posicao             PosicaoOperacional   @relation(fields: [posicaoId], references: [id], onDelete: Restrict)
   status              MalaStatus           @default(PLANNING)
   observacoes         String?
   createdAt           DateTime             @default(now())
@@ -1202,6 +1208,7 @@ model Mala {
   @@unique([viagemId, codigo])
   @@unique([id, lojaId])
   @@index([lojaId, status])
+  @@index([posicaoId])
 }
 
 model VolumeLogistico {
@@ -1223,19 +1230,23 @@ model VolumeLogistico {
 }
 
 model AlocacaoMala {
-  id                 String           @id @default(cuid())
+  id                 String            @id @default(cuid())
   lojaId             String
   pedidoCompraItemId String
   malaId             String
   volumeLogisticoId  String
   quantidade         Int
-  pesoConteudoKg     Decimal          @db.Decimal(10, 3)
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
-  loja               Loja             @relation(fields: [lojaId], references: [id], onDelete: Restrict)
-  item               PedidoCompraItem @relation(fields: [pedidoCompraItemId, lojaId], references: [id, lojaId], onDelete: Restrict)
-  mala               Mala             @relation(fields: [malaId, lojaId], references: [id, lojaId], onDelete: Restrict)
-  volume             VolumeLogistico  @relation(fields: [volumeLogisticoId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  pesoConteudoKg     Decimal           @db.Decimal(10, 3)
+  status             StatusReservaMala @default(RESERVADA)
+  reservadoPorId     String?
+  reservadoPor       Usuario?          @relation(fields: [reservadoPorId], references: [id], onDelete: Restrict)
+  consumidaEm        DateTime?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  loja               Loja              @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  item               PedidoCompraItem  @relation(fields: [pedidoCompraItemId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  mala               Mala              @relation(fields: [malaId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  volume             VolumeLogistico   @relation(fields: [volumeLogisticoId, lojaId], references: [id, lojaId], onDelete: Restrict)
 
   @@unique([pedidoCompraItemId, malaId, volumeLogisticoId])
   @@index([lojaId, malaId])
@@ -1251,6 +1262,8 @@ model RecebimentoMiami {
   observacao         String?
   atraso             Boolean              @default(false)
   tipoDivergencia    TipoDivergenciaMiami @default(CORRETO)
+  posicaoId          String               @default("posicao-miami-base")
+  posicao            PosicaoOperacional   @relation(fields: [posicaoId], references: [id], onDelete: Restrict)
   createdAt          DateTime             @default(now())
   loja               Loja                 @relation(fields: [lojaId], references: [id], onDelete: Restrict)
   item               PedidoCompraItem     @relation(fields: [pedidoCompraItemId, lojaId], references: [id, lojaId], onDelete: Restrict)
@@ -1258,6 +1271,7 @@ model RecebimentoMiami {
 
   @@index([lojaId, pedidoCompraItemId])
   @@index([lojaId, tipoDivergencia])
+  @@index([posicaoId])
 }
 
 model CheckpointParaguai {
@@ -1709,12 +1723,85 @@ model AtribuicaoItem {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  compraImportada  CompraImportada?  @relation(fields: [compraImportadaId], references: [id], onDelete: Cascade)
+  compraImportada  CompraImportada? @relation(fields: [compraImportadaId], references: [id], onDelete: Cascade)
   pedidoCompraItem PedidoCompraItem @relation(fields: [pedidoCompraItemId, lojaId], references: [id, lojaId], onDelete: Cascade)
-  loja             Loja              @relation(fields: [lojaId], references: [id], onDelete: Restrict)
-  atribuidoPor     Usuario           @relation(fields: [atribuidoPorId], references: [id], onDelete: Restrict)
+  loja             Loja             @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  atribuidoPor     Usuario          @relation(fields: [atribuidoPorId], references: [id], onDelete: Restrict)
 
   @@unique([pedidoCompraItemId, lojaId])
   @@index([lojaId, atribuidoEm])
   @@index([compraImportadaId])
+}
+
+// Posições operacionais (D-2): endereço físico reutilizável e a operação nele. Globais,
+// pois a mesma base atende às duas lojas; não criam estoque patrimonial.
+enum TipoPosicao {
+  PERMANENTE
+  TEMPORARIA
+}
+
+enum StatusPosicao {
+  CRIADA
+  ATIVA
+  ENCERRADA
+  CANCELADA
+}
+
+enum PapelResponsabilidade {
+  PRINCIPAL
+  DELEGADO
+}
+
+enum StatusReservaMala {
+  RESERVADA
+  CONSUMIDA
+}
+
+model Local {
+  id        String               @id @default(cuid())
+  alias     String
+  cidade    String
+  estado    String?
+  pais      String
+  timezone  String
+  endereco  String?
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+  posicoes  PosicaoOperacional[]
+}
+
+model PosicaoOperacional {
+  id                String                       @id @default(cuid())
+  localId           String
+  codigo            String                       @unique
+  nome              String
+  tipo              TipoPosicao
+  status            StatusPosicao                @default(CRIADA)
+  inicioEm          DateTime?
+  fimEm             DateTime?
+  encerradaEm       DateTime?
+  createdAt         DateTime                     @default(now())
+  updatedAt         DateTime                     @updatedAt
+  local             Local                        @relation(fields: [localId], references: [id], onDelete: Restrict)
+  responsabilidades ResponsabilidadeContextual[]
+  pedidosDestinados PedidoCompra[]
+  malas             Mala[]
+  recebimentosMiami RecebimentoMiami[]
+
+  @@index([status])
+}
+
+model ResponsabilidadeContextual {
+  id         String                @id @default(cuid())
+  posicaoId  String
+  usuarioId  String
+  papel      PapelResponsabilidade
+  validoDe   DateTime
+  validoAte  DateTime?
+  revogadoEm DateTime?
+  createdAt  DateTime              @default(now())
+  posicao    PosicaoOperacional    @relation(fields: [posicaoId], references: [id], onDelete: Restrict)
+  usuario    Usuario               @relation(fields: [usuarioId], references: [id], onDelete: Restrict)
+
+  @@index([posicaoId, usuarioId])
 }

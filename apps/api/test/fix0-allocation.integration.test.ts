@@ -66,6 +66,22 @@ describe("FIX-0 — alocação limitada ao recebido em Miami", () => {
         taraKg: 0.5
       }
     });
+    // Recebimento real na posição da mala (Base Miami), como o check-in registra.
+    const receiveAtMiami = async (quantidadeRecebida: number) => {
+      await prisma.recebimentoMiami.create({
+        data: {
+          lojaId: d.id,
+          pedidoCompraItemId: fixture!.item.id,
+          quantidadeRecebida,
+          recebidoEm: new Date(),
+          confirmadoPorId: fixture!.admin.id
+        }
+      });
+      await prisma.pedidoCompraItem.update({
+        where: { id: fixture!.item.id },
+        data: { quantidadeRecebidaMiami: { increment: quantidadeRecebida } }
+      });
+    };
     const body = (volumeLogisticoId: string) => ({
       pedidoCompraItemId: fixture!.item.id,
       malaId: fixture!.bag.id,
@@ -80,10 +96,7 @@ describe("FIX-0 — alocação limitada ao recebido em Miami", () => {
         .send(body(fixture.volume.id));
       expect(semRecebimento.status).toBe(409);
       // Recebida 1 de 2 unidades: alocar 1 passa, a segunda continua bloqueada.
-      await prisma.pedidoCompraItem.update({
-        where: { id: fixture.item.id },
-        data: { quantidadeRecebidaMiami: 1 }
-      });
+      await receiveAtMiami(1);
       const dentroDoRecebido = await request(app)
         .post("/logistics/allocations")
         .set(h(t, d.id))
@@ -95,10 +108,7 @@ describe("FIX-0 — alocação limitada ao recebido em Miami", () => {
         .send(body(volumeB.id));
       expect(acimaDoRecebido.status).toBe(409);
       // Recebimento total libera o restante até o limite do recebido.
-      await prisma.pedidoCompraItem.update({
-        where: { id: fixture.item.id },
-        data: { quantidadeRecebidaMiami: 2 }
-      });
+      await receiveAtMiami(1);
       const aposRecebimentoTotal = await request(app)
         .post("/logistics/allocations")
         .set(h(t, d.id))

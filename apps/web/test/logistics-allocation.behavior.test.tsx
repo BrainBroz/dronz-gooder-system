@@ -27,6 +27,7 @@ function mockReads() {
     if (url === "/purchase-orders/search/numero")
       return { data: config?.headers?.["x-store-id"] === testStores[0].id ? [order] : [] };
     if (url === "/logistics/suitcases/bag-a/weight") return { data: weight };
+    if (url === "/positions") return { data: [] };
     throw new Error(`GET inesperado: ${url}`);
   });
 }
@@ -142,6 +143,7 @@ describe("Logística — transições informadas pelo backend", () => {
         allowedStatusTransitions: ["CLOSED_FOR_ALLOCATION"]
       }] };
       if (url === "/logistics/suitcases") return { data: [] };
+      if (url === "/positions") return { data: [] };
       throw new Error(`GET inesperado: ${url}`);
     });
     const patch = vi.spyOn(api, "patch").mockResolvedValue({ data: {} });
@@ -160,6 +162,7 @@ describe("Logística — transições informadas pelo backend", () => {
     const get = vi.spyOn(api, "get").mockImplementation(async (url) => {
       if (url === "/logistics/travelers" || url === "/logistics/trips") return { data: [] };
       if (url === "/logistics/suitcases") return { data: [currentBag] };
+      if (url === "/positions") return { data: [] };
       throw new Error(`GET inesperado: ${url}`);
     });
     const patch = vi.spyOn(api, "patch").mockImplementation(async () => {
@@ -185,6 +188,7 @@ describe("Logística — transições informadas pelo backend", () => {
       if (url === "/logistics/suitcases") return {
         data: [{ ...bag, allowedStatusTransitions: [] }]
       };
+      if (url === "/positions") return { data: [] };
       throw new Error(`GET inesperado: ${url}`);
     });
     const patch = vi.spyOn(api, "patch").mockResolvedValue({ data: {} });
@@ -203,6 +207,7 @@ describe("Logística — transições informadas pelo backend", () => {
         ? [{ id: "trip-a", origem: "Miami", destino: "Brasil", status: "OPEN_FOR_ALLOCATION", allowedStatusTransitions: ["CLOSED_FOR_ALLOCATION"] }]
         : [] };
       if (url === "/logistics/suitcases") return { data: [] };
+      if (url === "/positions") return { data: [] };
       throw new Error(`GET inesperado: ${url}`);
     });
     const patch = vi.spyOn(api, "patch").mockResolvedValue({ data: {} });
@@ -220,6 +225,7 @@ describe("Logística — transições informadas pelo backend", () => {
     vi.spyOn(api, "get").mockImplementation(async (url) => {
       if (url === "/logistics/travelers" || url === "/logistics/trips") return { data: [] };
       if (url === "/logistics/suitcases") return { data: [{ ...bag, allowedStatusTransitions: transitions }] };
+      if (url === "/positions") return { data: [] };
       throw new Error(`GET inesperado: ${url}`);
     });
     const patch = vi.spyOn(api, "patch").mockResolvedValue({ data: {} });

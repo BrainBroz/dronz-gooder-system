@@ -10,6 +10,8 @@ import { SuitcaseWeightPanel } from "../components/SuitcaseWeightPanel";
 import { api } from "../api/client";
 import { authHeader, useAuthStore } from "../stores/auth";
 import { operationsKeys } from "../hooks/useOperations";
+
+const MIAMI_BASE_ID = "posicao-miami-base";
 import { logisticsQueryKeys, purchasingQueryKeys } from "../queryKeys";
 
 type LogisticsTrip = {
@@ -25,6 +27,7 @@ type LogisticsBag = {
   codigo: string;
   status: string;
   limitePesoKg: string;
+  posicaoId: string;
   volumes: { id: string; codigo: string }[];
   alocacoes: { id: string }[];
   allowedStatusTransitions: string[];
@@ -36,6 +39,7 @@ const statusLabels: Record<string, string> = {
   IN_TRANSIT: "Registrar viagem em trânsito",
   ARRIVED_BRAZIL: "Registrar chegada ao Brasil",
   CLOSED: "Fechar mala",
+  PLANNING: "Reabrir composição",
   CHECKED_IN: "Registrar embarque da mala",
   RECEIVED: "Registrar mala recebida"
 };
@@ -65,6 +69,7 @@ function LogisticsContent() {
     name: string;
     version: number;
   } | null>(null);
+  const [statusReason, setStatusReason] = useState("");
   const travelerForm = useForm<{ nome: string; email: string }>({
     defaultValues: { nome: "", email: "" }
   });
@@ -83,8 +88,8 @@ function LogisticsContent() {
       chegadaPrevistaEm: ""
     }
   });
-  const bagForm = useForm<{ viagemId: string; codigo: string }>({
-    defaultValues: { viagemId: "", codigo: "" }
+  const bagForm = useForm<{ viagemId: string; codigo: string; posicaoId: string }>({
+    defaultValues: { viagemId: "", codigo: "", posicaoId: MIAMI_BASE_ID }
   });
   const volumeForm = useForm<{ malaId: string; codigo: string; taraKg: number }>({
     defaultValues: { malaId: "", codigo: "", taraKg: 0.5 }
@@ -114,6 +119,12 @@ function LogisticsContent() {
     enabled: !!store,
     queryFn: async () => (await api.get("/logistics/trips", { headers })).data
   });
+  const positions = useQuery<{ id: string; nome: string; status: string }[]>({
+    queryKey: logisticsQueryKeys.positions(),
+    queryFn: async () => (await api.get("/positions", { headers })).data
+  });
+  const positionName = (id: string) =>
+    positions.data?.find((position) => position.id === id)?.nome ?? "Base Miami";
   const bags = useQuery<LogisticsBag[]>({
     queryKey: logisticsQueryKeys.suitcases(store),
     enabled: !!store,
@@ -159,7 +170,7 @@ function LogisticsContent() {
     }
   });
   const createBag = useMutation({
-    mutationFn: (data: { viagemId: string; codigo: string }) =>
+    mutationFn: (data: { viagemId: string; codigo: string; posicaoId: string }) =>
       api.post("/logistics/suitcases", data, { headers }),
     onSuccess: async () => {
       bagForm.reset();
@@ -199,8 +210,16 @@ function LogisticsContent() {
   });
   const changeStatus = useMutation({
     mutationFn: (request: NonNullable<typeof statusRequest>) =>
-      api.patch(`/logistics/${request.kind}/${request.id}/status`, { status: request.status }, { headers }),
-    onSuccess: () => setStatusRequest(null),
+      api.patch(
+        `/logistics/${request.kind}/${request.id}/status`,
+        // D-14: reabrir mala fechada exige motivo auditado.
+        request.status === "PLANNING" ? { status: request.status, motivo: statusReason } : { status: request.status },
+        { headers }
+      ),
+    onSuccess: () => {
+      setStatusRequest(null);
+      setStatusReason("");
+    },
     onSettled: async () => {
       await Promise.all([
         client.invalidateQueries({ queryKey: logisticsQueryKeys.trips(store) }),
@@ -352,6 +371,20 @@ function LogisticsContent() {
             label="Código"
             {...bagForm.register("codigo", { required: true })}
           />
+          <TextField
+            select
+            label="Posição de preparo"
+            defaultValue={MIAMI_BASE_ID}
+            {...bagForm.register("posicaoId", { required: true })}
+          >
+            {(positions.data?.length ? positions.data : [{ id: MIAMI_BASE_ID, nome: "Base Miami", status: "ATIVA" }])
+              .filter((position) => position.status === "ATIVA")
+              .map((position) => (
+                <MenuItem key={position.id} value={position.id}>
+                  {position.nome}
+                </MenuItem>
+              ))}
+          </TextField>
           <Button type="submit" disabled={createBag.isPending}>
             Criar mala
           </Button>
@@ -365,6 +398,7 @@ function LogisticsContent() {
                 <Typography>
                   {b.codigo} — {b.status}
                 </Typography>
+                <Typography variant="body2">Posição: {positionName(b.posicaoId)}</Typography>
                 <Typography>
                   Limite {b.limitePesoKg} kg · {b.volumes.length} volume(s) ·{" "}
                   {b.alocacoes.length} alocação(ões)
@@ -468,10 +502,20 @@ function LogisticsContent() {
           <Typography>
             {activeStatusRequest ? `${statusLabels[activeStatusRequest.status] ?? activeStatusRequest.status}: ${activeStatusRequest.name}?` : ""}
           </Typography>
+          {activeStatusRequest?.status === "PLANNING" && (
+            <TextField
+              label="Motivo da reabertura"
+              fullWidth
+              required
+              margin="dense"
+              value={statusReason}
+              onChange={(event) => setStatusReason(event.target.value)}
+            />
+          )}
         </DialogContent>
         <DialogActions>
           <Button disabled={changeStatus.isPending} onClick={() => setStatusRequest(null)}>Voltar</Button>
-          <Button disabled={changeStatus.isPending || !activeStatusRequest} onClick={() => {
+          <Button disabled={changeStatus.isPending || !activeStatusRequest || (activeStatusRequest.status === "PLANNING" && !statusReason.trim())} onClick={() => {
             if (activeStatusRequest) changeStatus.mutate(activeStatusRequest);
           }}>Confirmar</Button>
         </DialogActions>

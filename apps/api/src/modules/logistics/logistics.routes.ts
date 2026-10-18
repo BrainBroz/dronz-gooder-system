@@ -9,6 +9,10 @@ import {
 import * as s from "./logistics.service";
 import { AppError } from "../../lib/app-error";
 export const logisticsRouter = Router();
+const actor = (r: AuthenticatedRequest) => ({
+  userId: r.identity!.user.id,
+  permissions: r.identity!.permissoes.map((permission) => permission.code)
+});
 logisticsRouter.use(requireAuth, requireStore);
 const wrap =
   (fn: (r: AuthenticatedRequest) => Promise<unknown>) =>
@@ -164,11 +168,13 @@ logisticsRouter.post(
           .object({
             viagemId: z.string(),
             codigo: z.string(),
-            limitePesoKg: z.number().positive().max(23).optional()
+            limitePesoKg: z.number().positive().max(23).optional(),
+            posicaoId: z.string().optional()
           })
           .strict(),
         r.body
-      ) as never
+      ) as never,
+      actor(r)
     )
   )
 );
@@ -263,11 +269,13 @@ logisticsRouter.patch(
               "ARRIVED_BRAZIL",
               "RECEIVED",
               "CANCELLED"
-            ])
+            ]),
+            motivo: z.string().trim().max(2000).optional()
           })
           .strict(),
         r.body
-      ).status
+      ).status,
+      typeof r.body?.motivo === "string" ? r.body.motivo : undefined
     )
   )
 );
@@ -286,7 +294,8 @@ logisticsRouter.post(
           })
           .strict(),
         r.body
-      ) as never
+      ) as never,
+      actor(r)
     )
   )
 );
@@ -300,10 +309,11 @@ logisticsRouter.post(
   wrap((r) =>
     s.confirmMiami(
       r.storeId!,
-      r.identity!.user.id,
+      actor(r),
       parse(
         z
           .object({
+            posicaoId: z.string().optional(),
             pedidoCompraItemId: z.string(),
             quantidadeRecebida: z.number().int().positive(),
             recebidoEm: z.coerce.date(),

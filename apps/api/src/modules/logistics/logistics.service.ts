@@ -4,6 +4,12 @@ import { prisma } from "../../lib/prisma";
 import { AppError } from "../../lib/app-error";
 import { audit, idempotentMutation } from "../operations/operations.persistence";
 import { assertBrazilTransition, assertParaguayTransition } from "../operations/operations.policy";
+import {
+  MIAMI_BASE_ID,
+  assertOperable,
+  availableAtPosition,
+  type Actor
+} from "../positions/positions.service";
 
 // Logística opera quantidades e pesos; valores do item e do produto não saem destas respostas (F-10).
 const allocationItem = {
@@ -20,9 +26,10 @@ const tripTransitions: Record<ViagemStatus, ViagemStatus[]> = {
   ARRIVED_BRAZIL: [],
   CANCELLED: []
 };
+const departedTrip: ViagemStatus[] = ["IN_TRANSIT", "ARRIVED_BRAZIL", "CANCELLED"];
 const suitcaseTransitions: Record<MalaStatus, MalaStatus[]> = {
   PLANNING: ["CLOSED", "CANCELLED"],
-  CLOSED: ["CHECKED_IN", "CANCELLED"],
+  CLOSED: ["CHECKED_IN", "CANCELLED", "PLANNING"],
   CHECKED_IN: ["ARRIVED_BRAZIL"],
   ARRIVED_BRAZIL: ["RECEIVED"],
   RECEIVED: [],
@@ -208,6 +215,7 @@ export const suitcases = async (lojaId: string) =>
   })).map(({ viagem, recebimentos, ...bag }) => ({
     ...bag,
     allowedStatusTransitions: suitcaseTransitions[bag.status].filter((next) =>
+      (next !== "PLANNING" || !departedTrip.includes(viagem.status)) &&
       (next !== "ARRIVED_BRAZIL" || viagem.status === "ARRIVED_BRAZIL") &&
       (next !== "RECEIVED" || recebimentos.length > 0) &&
       (next !== "CANCELLED" || bag.alocacoes.length === 0) &&
@@ -218,16 +226,18 @@ export const suitcases = async (lojaId: string) =>
   }));
 export async function createSuitcase(
   lojaId: string,
-  d: { viagemId: string; codigo: string; limitePesoKg?: number }
+  d: { viagemId: string; codigo: string; limitePesoKg?: number; posicaoId?: string },
+  actor: Actor
 ) {
   return prisma.$transaction(async (tx) => {
+    await assertOperable(tx, actor, d.posicaoId ?? MIAMI_BASE_ID);
     await tx.$queryRaw`SELECT id FROM "Viagem" WHERE id = ${d.viagemId} AND "lojaId" = ${lojaId} FOR UPDATE`;
     const trip = await tx.viagem.findFirst({ where: {
       id: d.viagemId, lojaId,
       status: { notIn: ["CANCELLED", "ARRIVED_BRAZIL"] }
     } });
     if (!trip) throw new AppError(404, "not_found");
-    return tx.mala.create({ data: { ...d, lojaId } });
+    return tx.mala.create({ data: { ...d, posicaoId: d.posicaoId ?? MIAMI_BASE_ID, lojaId } });
   });
 }
 export async function addVolume(
@@ -271,7 +281,8 @@ export async function allocate(
     malaId: string;
     volumeLogisticoId: string;
     quantidade: number;
-  }
+  },
+  actor: Actor
 ) {
   return prisma.$transaction(async (tx) => {
     const targetBag = await tx.mala.findFirst({
@@ -297,10 +308,10 @@ export async function allocate(
       where: { id: d.volumeLogisticoId, malaId: d.malaId, lojaId }
     });
     if (!item || !bag || !volume) throw new AppError(404, "not_found");
+    await assertOperable(tx, actor, bag.posicaoId);
     if (!item.produto.peso) throw new AppError(409, "missing_weight");
-    const used = item.alocacoesMala.reduce((sum, allocation) => sum + allocation.quantidade, 0);
-    // Alocação só pode consumir o que já foi fisicamente recebido em Miami.
-    if (d.quantidade < 1 || used + d.quantidade > item.quantidadeRecebidaMiami)
+    // Reserva só consome o que já foi recebido na posição da mala e ainda não foi comprometido ali.
+    if (d.quantidade < 1 || d.quantidade > (await availableAtPosition(tx, item.id, bag.posicaoId)))
       throw new AppError(409, "conflict");
     const content = bag.alocacoes.reduce(
       (sum, allocation) => sum.plus(allocation.pesoConteudoKg),
@@ -313,16 +324,24 @@ export async function allocate(
     const allocationWeight = item.produto.peso.mul(d.quantidade);
     if (content.plus(tare).plus(allocationWeight).greaterThan(bag.limitePesoKg))
       throw new AppError(409, "weight_limit");
-    return tx.alocacaoMala.create({
-      data: { ...d, lojaId, pesoConteudoKg: allocationWeight }
+    // F-8: a seleção cria reserva persistente com responsável; o fechamento da mala a consome.
+    const created = await tx.alocacaoMala.create({
+      data: { ...d, lojaId, pesoConteudoKg: allocationWeight, status: "RESERVADA", reservadoPorId: actor.userId }
     });
+    await audit(tx, {
+      usuarioId: actor.userId, lojaId, permissionCode: null,
+      action: "RESERVE_SUITCASE_ALLOCATION", entity: "AlocacaoMala", entityId: created.id,
+      correlationId: randomUUID(), origin: "API_LOGISTICS", after: created
+    });
+    return created;
   });
 }
 export async function suitcaseStatus(
   lojaId: string,
   userId: string,
   id: string,
-  status: MalaStatus
+  status: MalaStatus,
+  motivo?: string
 ) {
   return prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "Mala" WHERE id = ${id} AND "lojaId" = ${lojaId} FOR UPDATE`;
@@ -339,11 +358,20 @@ export async function suitcaseStatus(
       throw new AppError(409, "conflict");
     if (status === "CLOSED" && (await weight(lojaId, id, tx)).excesso)
       throw new AppError(409, "weight_limit");
+    // D-14: reabrir composição fechada só antes da saída, com motivo auditado.
+    if (status === "PLANNING") {
+      if (!motivo?.trim()) throw new AppError(400, "reason_required");
+      if (departedTrip.includes(m.viagem.status)) throw new AppError(409, "trip_departed");
+    }
+    if (status === "CLOSED")
+      await tx.alocacaoMala.updateMany({ where: { lojaId, malaId: id }, data: { status: "CONSUMIDA", consumidaEm: new Date() } });
+    if (status === "PLANNING")
+      await tx.alocacaoMala.updateMany({ where: { lojaId, malaId: id }, data: { status: "RESERVADA", consumidaEm: null } });
     const result = await tx.mala.update({ where: { id }, data: { status } });
     await audit(tx, {
       usuarioId: userId, lojaId, permissionCode: null,
       action: "UPDATE_SUITCASE_STATUS", entity: "Mala", entityId: id,
-      correlationId: randomUUID(), origin: "API_LOGISTICS",
+      correlationId: randomUUID(), origin: "API_LOGISTICS", reason: motivo,
       before: { status: m.status }, after: { status: result.status }
     });
     return result;
@@ -351,8 +379,9 @@ export async function suitcaseStatus(
 }
 export async function confirmMiami(
   lojaId: string,
-  userId: string,
+  actor: Actor,
   d: {
+    posicaoId?: string;
     pedidoCompraItemId: string;
     quantidadeRecebida: number;
     recebidoEm: Date;
@@ -375,6 +404,11 @@ export async function confirmMiami(
       i.quantidadeRecebidaMiami + d.quantidadeRecebida > i.quantidade
     )
       throw new AppError(409, "conflict");
+    // D-15/T31: recebe-se só no destino do pedido; outro local exige redirecionamento autorizado.
+    if (d.posicaoId && d.posicaoId !== i.pedido.destinoPosicaoId)
+      throw new AppError(409, "destination_mismatch");
+    await assertOperable(tx, actor, i.pedido.destinoPosicaoId);
+    const userId = actor.userId;
     const atraso = Date.now() - d.recebidoEm.getTime() > 86400000;
     const r = await tx.recebimentoMiami.create({
       data: {
@@ -383,6 +417,7 @@ export async function confirmMiami(
         recebidoEm: d.recebidoEm,
         observacao: d.observacao,
         tipoDivergencia: d.tipoDivergencia || "CORRETO",
+        posicaoId: i.pedido.destinoPosicaoId,
         lojaId,
         confirmadoPorId: userId,
         atraso

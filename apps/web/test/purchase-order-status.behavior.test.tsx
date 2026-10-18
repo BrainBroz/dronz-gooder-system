@@ -16,7 +16,7 @@ beforeEach(() => {
   vi.spyOn(api, "get").mockImplementation(async (url, config) => ({
     data: url === "/purchase-orders"
       ? { items: config?.headers?.["x-store-id"] === testStores[0].id ? [order("DRAFT", ["PLACED", "CANCELLED"])] : [order("DRAFT", [])] }
-      : { items: [] }
+      : url === "/positions" ? [] : { items: [] }
   }));
 });
 
@@ -25,7 +25,7 @@ describe("Pedidos Operacionais", () => {
     const user = userEvent.setup();
     let status = "DRAFT";
     vi.mocked(api.get).mockImplementation(async (url) => ({
-      data: url === "/purchase-orders" ? { items: [order(status, status === "DRAFT" ? ["PLACED"] : status === "PLACED" ? ["CONFIRMED"] : [])] } : { items: [] }
+      data: url === "/purchase-orders" ? { items: [order(status, status === "DRAFT" ? ["PLACED"] : status === "PLACED" ? ["CONFIRMED"] : [])] } : url === "/positions" ? [] : { items: [] }
     }));
     const patch = vi.spyOn(api, "patch").mockImplementation(async (_url, body) => {
       status = (body as { status: string }).status;
@@ -59,7 +59,7 @@ describe("Pedidos Operacionais", () => {
     const user = userEvent.setup();
     let status = "DRAFT";
     vi.mocked(api.get).mockImplementation(async (url) => ({
-      data: url === "/purchase-orders" ? { items: [order(status, status === "DRAFT" ? ["PLACED"] : ["CONFIRMED"])] } : { items: [] }
+      data: url === "/purchase-orders" ? { items: [order(status, status === "DRAFT" ? ["PLACED"] : ["CONFIRMED"])] } : url === "/positions" ? [] : { items: [] }
     }));
     const patch = vi.spyOn(api, "patch")
       .mockRejectedValueOnce(new Error("rede indisponível"))
@@ -77,7 +77,7 @@ describe("Pedidos Operacionais", () => {
     const user = userEvent.setup();
     let status = "DRAFT";
     vi.mocked(api.get).mockImplementation(async (url) => ({
-      data: url === "/purchase-orders" ? { items: [order(status, status === "DRAFT" ? ["PLACED"] : [])] } : { items: [] }
+      data: url === "/purchase-orders" ? { items: [order(status, status === "DRAFT" ? ["PLACED"] : [])] } : url === "/positions" ? [] : { items: [] }
     }));
     const patch = vi.spyOn(api, "patch").mockImplementation(async () => {
       status = "CANCELLED";

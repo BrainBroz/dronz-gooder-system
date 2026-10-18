@@ -18,7 +18,7 @@ describe("acesso a pedidos antigos", () => {
     const get = vi.spyOn(api, "get").mockImplementation(async (url, config) => ({
       data: url === "/purchase-orders"
         ? { items: config?.params?.page === 2 ? [order("OLD-ORDER")] : Array.from({ length: 20 }, (_, index) => order(`PAGE-${index}`)) }
-        : { items: [] }
+        : url === "/positions" ? [] : { items: [] }
     }));
     renderWithProviders(<PurchaseOrdersPage />);
     expect(await screen.findByText("PAGE-0")).toBeTruthy();
