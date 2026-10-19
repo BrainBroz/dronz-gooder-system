@@ -18,6 +18,9 @@ const run =
 const key = (req: AuthenticatedRequest) =>
   typeof req.headers["idempotency-key"] === "string" ? req.headers["idempotency-key"] : undefined;
 
+/** Markup mínimo do contrato (domain-contracts.md): o limite de alerta pode subir, nunca ficar abaixo. */
+export const MARKUP_MINIMO = 25;
+
 /** Decimal recebido como número ou texto; devolvido como texto para não perder precisão. */
 export const decimal = (max?: number) =>
   z
@@ -29,7 +32,7 @@ const settingsSchema = z
   .object({
     acrescimoCambialBrl: decimal(100),
     frete: z.object({ valorPorKg: decimal(), moeda: z.enum(["USD", "BRL"]) }).strict().nullable(),
-    markupAlertaPercentual: decimal(10_000),
+    markupAlertaPercentual: decimal(10_000).refine((value) => Number(value) >= MARKUP_MINIMO, "markup_abaixo_do_minimo"),
     notaFiscalPercentual: decimal(100).nullable(),
     notaFiscalBase: z.enum(["VENDA_BRUTA", "BASE_INFORMADA"]).nullable(),
     iofPercentual: decimal(100).nullable(),
@@ -53,7 +56,7 @@ const settingsSchema = z
 // Leitura: quem simula também precisa dos parâmetros vigentes. Gravação: capacidade financeira.
 economicSettingsRouter.get(
   "/",
-  requirePermission("FINANCEIRO_VISUALIZAR", "SIMULACAO_VISUALIZAR"),
+  requirePermission("FINANCEIRO_VISUALIZAR", "SIMULACAO_VISUALIZAR", "SIMULACAO_GERENCIAR"),
   run((req) => service.getSettings(req.storeId!))
 );
 economicSettingsRouter.post(
@@ -63,7 +66,7 @@ economicSettingsRouter.post(
 );
 economicSettingsRouter.get(
   "/exchange-rate",
-  requirePermission("FINANCEIRO_VISUALIZAR", "SIMULACAO_VISUALIZAR"),
+  requirePermission("FINANCEIRO_VISUALIZAR", "SIMULACAO_VISUALIZAR", "SIMULACAO_GERENCIAR"),
   run(async (req) => ({ cotacao: await service.currentQuote(req.storeId!) }))
 );
 economicSettingsRouter.post(

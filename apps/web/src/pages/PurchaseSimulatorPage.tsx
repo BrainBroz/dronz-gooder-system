@@ -37,11 +37,11 @@ import {
   type SettingsResponse
 } from "../api/economic";
 
-type Produto = { id: string; nome: string; codigo: number; peso: string | null; precoVenda: string; categoria?: { nome: string } };
+export type Produto = { id: string; nome: string; codigo: number; peso: string | null; precoVenda: string; categoria?: { nome: string } };
 type EncargoCompraForm = { descricao: string; tipo: "PERCENTUAL_COMPRA" | "VALOR_UNIDADE" | "VALOR_TOTAL"; valor: string; moeda: Moeda };
 type EncargoVendaForm = { descricao: string; tipo: "PERCENTUAL_VENDA_BRUTA" | "VALOR_UNIDADE" | "VALOR_TOTAL"; valor: string };
 type NotaModo = "PERCENTUAL_VENDA_BRUTA" | "PERCENTUAL_BASE_INFORMADA" | "VALOR_INFORMADO" | "BASE_PENDENTE";
-type SimForm = {
+export type SimForm = {
   produto: Produto | null;
   itemLivre: boolean;
   produtoNome: string;
@@ -98,7 +98,7 @@ const NUMBER = /^\d+([.,]\d+)?$/;
 const num = (value: string) => value.trim().replace(",", ".");
 const valid = (value: string) => NUMBER.test(value.trim());
 
-function initialForm(settings: SettingsResponse, quote: CotacaoVigente | null): SimForm {
+export function initialForm(settings: SettingsResponse, quote: CotacaoVigente | null): SimForm {
   const v = settings.vigente;
   const notaModo: NotaModo =
     v?.notaFiscalBase === "VENDA_BRUTA" ? "PERCENTUAL_VENDA_BRUTA" : v?.notaFiscalBase === "BASE_INFORMADA" ? "PERCENTUAL_BASE_INFORMADA" : "BASE_PENDENTE";
@@ -207,6 +207,23 @@ function buildPayload(form: SimForm, settings: SettingsResponse, quote: CotacaoV
     // Sem parâmetro gravado, vale o markup mínimo do contrato (25%).
     markupAlertaPercentual: settings.vigente?.markupAlertaPercentual ?? "25",
     parametroEconomicoId: settings.vigente?.id ?? null
+  };
+}
+
+const productPrice = (produto: Produto | null) => (produto && Number(produto.precoVenda) > 0 ? produto.precoVenda : "");
+
+/**
+ * Peso e preço de venda vêm do cadastro quando o campo está vazio ou ainda tem o valor trazido do
+ * produto anterior; o que o operador digitou é preservado.
+ */
+export function withProduct(current: SimForm, produto: Produto | null): SimForm {
+  const previous = current.produto;
+  const fromPrevious = (value: string, previousValue: string) => value === "" || value === previousValue;
+  return {
+    ...current,
+    produto,
+    peso: fromPrevious(current.peso, previous?.peso ?? "") ? produto?.peso ?? "" : current.peso,
+    precoVenda: fromPrevious(current.precoVenda, productPrice(previous)) ? productPrice(produto) : current.precoVenda
   };
 }
 
@@ -457,15 +474,7 @@ function SimulatorForm({
               <ProductPicker
                 store={store}
                 value={form.produto}
-                onChange={(produto) =>
-                  setForm((current) => ({
-                    ...current,
-                    produto,
-                    // Dados do cadastro só preenchem campos vazios; o operador pode alterar.
-                    peso: current.peso || produto?.peso || "",
-                    precoVenda: current.precoVenda || (produto && Number(produto.precoVenda) > 0 ? produto.precoVenda : "")
-                  }))
-                }
+                onChange={(produto) => setForm((current) => withProduct(current, produto))}
               />
             )}
             {canSearch ? (

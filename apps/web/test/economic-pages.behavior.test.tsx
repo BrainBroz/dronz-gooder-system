@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../src/api/client";
 import { EconomicSettingsPage } from "../src/pages/EconomicSettingsPage";
-import { PurchaseSimulatorPage } from "../src/pages/PurchaseSimulatorPage";
+import { PurchaseSimulatorPage, initialForm, withProduct, type Produto } from "../src/pages/PurchaseSimulatorPage";
 import { renderWithProviders, testStores } from "./render";
 
 beforeEach(() => vi.restoreAllMocks());
@@ -253,5 +253,31 @@ describe("Simulador de compra", () => {
     vi.spyOn(api, "get").mockImplementation(() => new Promise(() => undefined));
     renderWithProviders(<PurchaseSimulatorPage />, { permissions });
     expect(await screen.findByText("Carregando parâmetros e cotação…")).toBeTruthy();
+  });
+});
+
+describe("troca de produto no simulador", () => {
+  const settingsData = { vigente, versoes: [], referenciasPO } as never;
+  const a: Produto = { id: "a", nome: "A", codigo: 1, peso: "0.5", precoVenda: "900" };
+  const b: Produto = { id: "b", nome: "B", codigo: 2, peso: "2.0", precoVenda: "3000" };
+
+  it("valores trazidos do produto anterior são trocados pelos do novo", () => {
+    const withA = withProduct(initialForm(settingsData, null), a);
+    expect([withA.peso, withA.precoVenda]).toEqual(["0.5", "900"]);
+    const withB = withProduct(withA, b);
+    expect([withB.peso, withB.precoVenda]).toEqual(["2.0", "3000"]);
+    const cleared = withProduct(withB, null);
+    expect([cleared.peso, cleared.precoVenda]).toEqual(["", ""]);
+  });
+
+  it("o que o operador digitou é preservado", () => {
+    const edited = { ...withProduct(initialForm(settingsData, null), a), peso: "0.7", precoVenda: "950" };
+    const withB = withProduct(edited, b);
+    expect([withB.peso, withB.precoVenda]).toEqual(["0.7", "950"]);
+  });
+
+  it("produto sem preço de venda no cadastro não preenche preço", () => {
+    const zero = withProduct(initialForm(settingsData, null), { ...a, precoVenda: "0" });
+    expect(zero.precoVenda).toBe("");
   });
 });

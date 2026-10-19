@@ -1,7 +1,7 @@
 import { Router, type NextFunction, type Response } from "express";
 import { z } from "zod";
 import { requireAuth, requirePermission, requireStore, type AuthenticatedRequest } from "../../middlewares/auth";
-import { decimal } from "../economic-settings/economic-settings.routes";
+import { decimal, MARKUP_MINIMO } from "../economic-settings/economic-settings.routes";
 import * as service from "./purchase-simulation.service";
 
 export const purchaseSimulationRouter = Router();
@@ -87,7 +87,7 @@ const inputSchema = z
           .default([])
       })
       .strict(),
-    markupAlertaPercentual: decimal(10_000),
+    markupAlertaPercentual: decimal(10_000).refine((value) => Number(value) >= MARKUP_MINIMO, "markup_abaixo_do_minimo"),
     parametroEconomicoId: z.string().min(1).nullable().default(null)
   })
   .strict()

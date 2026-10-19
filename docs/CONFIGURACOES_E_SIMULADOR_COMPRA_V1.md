@@ -48,7 +48,7 @@ markup%   = (preço_venda − custo_u) ÷ custo_u × 100          (definição d
 margem%   = (preço_venda − custo_u) ÷ preço_venda × 100      (definição do contrato)
 resultado sobre a venda% = lucro_u ÷ venda_bruta_u × 100     (nome próprio, base diferente)
 resultado sobre o custo% = lucro_u ÷ custo_u × 100
-alerta    = markup% < limite configurado (padrão do contrato: 25%)
+alerta    = markup% < limite configurado (≥ 25%: o piso do contrato não pode ser reduzido)
 ```
 
 Preço de venda zero é "a definir": sem markup, margem nem divisão por zero. Custo ou encargo indispensável ausente deixa o resultado `INCOMPLETO`, com a lista de pendências; o custo continua visível quando calculável.

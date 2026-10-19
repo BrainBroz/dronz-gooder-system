@@ -292,6 +292,7 @@ function SettingsForm({ data, store, canWrite }: { data: SettingsResponse; store
               <MenuItem value="BRL">R$ por kg</MenuItem>
             </TextField>
             <TextField size="small" label="Alerta de markup abaixo de (%)" value={form.markupAlertaPercentual} disabled={disabled} required
+              helperText="Mínimo do contrato: 25%"
               onChange={(event) => set("markupAlertaPercentual", event.target.value)} />
             <TextField size="small" label="Nota fiscal de saída (%)" value={form.notaFiscalPercentual} disabled={disabled}
               onChange={(event) => set("notaFiscalPercentual", event.target.value)} />

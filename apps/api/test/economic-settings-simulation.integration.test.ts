@@ -189,6 +189,30 @@ describe("Configurações econômicas", () => {
     expect(await prisma.parametroEconomico.count()).toBe(0);
   });
 
+  it("limite de alerta de markup não fica abaixo do mínimo contratual de 25%", async () => {
+    const { dronz } = await stores();
+    const { app, headers } = await admin();
+    expect((await request(app).post("/economic-settings").set(headers).send({ ...settings(), markupAlertaPercentual: "24.99" })).status).toBe(400);
+    expect((await request(app).post("/economic-settings").set(headers).send({ ...settings(), markupAlertaPercentual: "30" })).status).toBe(201);
+    const mac = await product(dronz.id, "MacBook");
+    const q = await quote(dronz.id);
+    expect(
+      (await request(app).post("/purchase-simulations/calculate").set(headers).send(simulation(mac.id, q.id, { markupAlertaPercentual: "0" }))).status
+    ).toBe(400);
+    // R$ 100 de custo vendido a R$ 110 (markup 10%) fica abaixo do piso e gera alerta.
+    const cheap = await request(app)
+      .post("/purchase-simulations/calculate")
+      .set(headers)
+      .send(
+        simulation(mac.id, q.id, {
+          compra: { precoUnitario: "100", moeda: "BRL" },
+          frete: { valorPorKg: "0", moeda: "BRL" },
+          venda: { ...simulation(mac.id, q.id).venda, precoUnitarioBrl: "110" }
+        })
+      );
+    expect(cheap.body.resultado.indicadores).toMatchObject({ markupPercentual: "10.00", abaixoDoLimite: true });
+  });
+
   it("isola por loja e exige permissão financeira para gravar", async () => {
     const { dronz, gooder } = await stores();
     const { app, headers } = await admin(dronz.id);
@@ -362,6 +386,18 @@ describe("Simulador de compra", () => {
     const nobody = await userWith(["CATALOGO_VISUALIZAR"]);
     expect((await request(nobody.app).post("/purchase-simulations/calculate").set(nobody.headers).send(simulation(mac.id, q.id))).status).toBe(403);
     expect((await request(nobody.app).get("/purchase-simulations").set(nobody.headers)).status).toBe(403);
+  });
+
+  it("só a permissão de gerenciar simulações basta para abrir, calcular e salvar", async () => {
+    const { dronz } = await stores();
+    const mac = await product(dronz.id, "MacBook");
+    const q = await quote(dronz.id);
+    const manager = await userWith(["SIMULACAO_GERENCIAR"]);
+    expect((await request(manager.app).get("/economic-settings").set(manager.headers)).status).toBe(200);
+    expect((await request(manager.app).get("/economic-settings/exchange-rate").set(manager.headers)).status).toBe(200);
+    expect((await request(manager.app).post("/purchase-simulations/calculate").set(manager.headers).send(simulation(mac.id, q.id))).status).toBe(200);
+    expect((await request(manager.app).post("/purchase-simulations").set(manager.headers).send(simulation(mac.id, q.id))).status).toBe(201);
+    expect((await request(manager.app).post("/economic-settings").set(manager.headers).send(settings())).status).toBe(403);
   });
 
   it("simulação de outra loja não é encontrada", async () => {
