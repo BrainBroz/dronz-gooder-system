@@ -17,7 +17,7 @@ import { formatSalePrice } from "../src/utils/formatting";
 import { ContentCard } from "../src/components/ui/ContentCard";
 import { PageContainer } from "../src/components/ui/PageContainer";
 import { PageHeader } from "../src/components/ui/PageHeader";
-import { appTheme, visualTokens } from "../src/theme";
+import { appTheme, storeColor, storeTextColor, visualTokens } from "../src/theme";
 
 describe("web app", () => {
   it("aplica a fundação visual oficial em componentes compartilhados", () => {
@@ -57,6 +57,14 @@ describe("web app", () => {
     expect(contrast("#FFFFFF", visualTokens.blueSolidHover)).toBeGreaterThanOrEqual(4.5);
     for (const background of [visualTokens.bg, visualTokens.bg2])
       expect(contrast(appTheme.palette.primary.main, background)).toBeGreaterThanOrEqual(4.5);
+    // Nome da loja como texto: fundo, cards, menus e o botão ativo (tinta da loja a 15% sobre o fundo).
+    const tint = (hex: string, alpha: number, base: string) =>
+      "#" + [1, 3, 5].map((i) =>
+        Math.round(parseInt(hex.slice(i, i + 2), 16) * alpha + parseInt(base.slice(i, i + 2), 16) * (1 - alpha))
+          .toString(16).padStart(2, "0")).join("");
+    for (const slug of ["dronz", "gooder", undefined])
+      for (const background of [visualTokens.bg, visualTokens.bg2, visualTokens.bg3, tint(storeColor(slug), 0x26 / 255, visualTokens.bg)])
+        expect(contrast(storeTextColor(slug), background)).toBeGreaterThanOrEqual(4.5);
   });
 
   it("redireciona a raiz para o fluxo autenticado", () => {

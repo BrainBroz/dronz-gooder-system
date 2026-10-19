@@ -15,7 +15,7 @@ import {
 } from "@mui/material";
 import { api, queryClient } from "../../api/client";
 import { useAuthStore } from "../../stores/auth";
-import { appTheme, storeColor, visualTokens } from "../../theme";
+import { appTheme, storeColor, storeTextColor, visualTokens } from "../../theme";
 import { currentPageLabel, visibleNavigation, type AppNavGroup } from "../../navigation/appNavigation";
 import { Icon } from "./icons";
 
@@ -251,6 +251,7 @@ function StoreSwitcher() {
       {stores.map((store) => {
         const active = store.id === activeStoreId;
         const color = storeColor(store.slug);
+        const textColor = storeTextColor(store.slug);
         return (
           <ButtonBase
             key={store.id}
@@ -263,10 +264,10 @@ function StoreSwitcher() {
               fontSize: "0.75rem",
               fontWeight: 600,
               whiteSpace: "nowrap",
-              color: active ? color : visualTokens.textSecondary,
+              color: active ? textColor : visualTokens.textSecondary,
               bgcolor: active ? `${color}26` : "transparent",
               border: `1px solid ${active ? `${color}4D` : "transparent"}`,
-              "&:hover": { color },
+              "&:hover": { color: textColor },
               ...focusRing
             }}
           >
@@ -331,7 +332,7 @@ function UserMenu() {
           {user?.name && <Typography sx={{ fontSize: "0.75rem", color: visualTokens.textMuted }}>{user.email}</Typography>}
           {activeStore && (
             <Typography sx={{ fontSize: "0.75rem", color: visualTokens.textSecondary, mt: 0.5 }}>
-              Loja ativa: <Box component="span" sx={{ color: storeColor(activeStore.slug), fontWeight: 600 }}>{activeStore.nome}</Box>
+              Loja ativa: <Box component="span" sx={{ color: storeTextColor(activeStore.slug), fontWeight: 600 }}>{activeStore.nome}</Box>
             </Typography>
           )}
         </Box>

@@ -152,6 +152,49 @@ describe("dashboard", () => {
     expect(screen.queryByText("Nenhuma viagem ativa nesta loja.")).toBeNull();
   });
 
+  it("trocar de loja com o dashboard aberto não mistura dados; resposta atrasada da loja anterior é descartada", async () => {
+    const user = userEvent.setup();
+    let releaseDronz!: () => void;
+    const dronzGate = new Promise<void>((resolve) => (releaseDronz = resolve));
+    const order = (numero: string) => ({
+      id: numero, numeroPedido: numero, status: "PLACED", dataCompra: "2026-10-10T12:00:00.000Z",
+      total: "10", moeda: "USD", fornecedor: { nome: `Fornecedor ${numero}` }
+    });
+    const byStore = (store: string) =>
+      store === testStores[0]!.id
+        ? { orders: [order("PEDIDO-DRONZ")], count: 3 }
+        : { orders: [order("PEDIDO-GOODER")], count: 9 };
+    vi.spyOn(api, "get").mockImplementation(async (url, config) => {
+      const store = (config as { headers: Record<string, string> }).headers["x-store-id"]!;
+      if (store === testStores[0]!.id) await dronzGate;
+      const data = byStore(store);
+      if (url === "/operations/home") return { data: home };
+      if (url === "/logistics/trips") return { data: [] };
+      if (url === "/purchase-orders") return { data: { items: data.orders } };
+      if (url === "/analytics/dashboard") return { data: { ...summary, orders: { ...summary.orders, count: data.count } } };
+      throw new Error(`GET inesperado: ${url}`);
+    });
+    renderWithProviders(
+      <Shell>
+        <HomePage />
+      </Shell>,
+      { permissions: ["ANALYTICS_VISUALIZAR", "PEDIDOS_COMPRA_VISUALIZAR"] }
+    );
+    expect(await screen.findByText("Carregando os indicadores…")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Gooder" }));
+    expect(await screen.findByText("PEDIDO-GOODER")).toBeTruthy();
+    expect(screen.getByText("9")).toBeTruthy();
+
+    releaseDronz();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText("PEDIDO-DRONZ")).toBeNull();
+    expect(screen.getByText("PEDIDO-GOODER")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Dronz" }));
+    expect(await screen.findByText("PEDIDO-DRONZ")).toBeTruthy();
+    expect(screen.queryByText("PEDIDO-GOODER")).toBeNull();
+  });
+
   it("remove códigos internos das definições", () => {
     expect(plainDefinition("Linhas de reserva em volumes ainda não fechados (F-8).")).toBe(
       "Linhas de reserva em volumes ainda não fechados."

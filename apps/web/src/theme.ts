@@ -23,7 +23,9 @@ export const visualTokens = {
   amber: "#F59E0B",
   red: "#EF4444",
   dronz: "#22C55E",
-  gooder: "#A855F7"
+  gooder: "#A855F7",
+  // Texto em roxo usa o tom 400 (como os badges do Bolt): #A855F7 fica abaixo de 4,5:1 em menus e no botão ativo.
+  gooderText: "#C084FC"
 } as const;
 
 export const fontMono =
@@ -140,4 +142,11 @@ export function storeColor(slug: string | undefined) {
   if (slug === "dronz") return visualTokens.dronz;
   if (slug === "gooder") return visualTokens.gooder;
   return visualTokens.blue;
+}
+
+// Cor de texto da loja: garante contraste AA; pontos, bordas e fundos continuam com storeColor.
+export function storeTextColor(slug: string | undefined) {
+  if (slug === "dronz") return visualTokens.dronz;
+  if (slug === "gooder") return visualTokens.gooderText;
+  return visualTokens.blueSoft;
 }

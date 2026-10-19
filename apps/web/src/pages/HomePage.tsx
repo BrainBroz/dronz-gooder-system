@@ -18,7 +18,7 @@ import { MutationStatus } from "../components/ui/MutationStatus";
 import { PageContainer } from "../components/ui/PageContainer";
 import { Icon, type IconName } from "../components/layout/icons";
 import { dashboardQueryKeys, logisticsQueryKeys, purchasingQueryKeys } from "../queryKeys";
-import { fontMono, storeColor, visualTokens } from "../theme";
+import { fontMono, storeColor, storeTextColor, visualTokens } from "../theme";
 
 type HomeResponse = {
   referenciaEm: string;
@@ -328,7 +328,7 @@ function HomeContent() {
           <Typography variant="h4" component="h1">Dashboard</Typography>
           <Typography variant="body2" color="text.secondary">
             Visão geral da loja{" "}
-            <Box component="span" sx={{ color: storeColor(activeStore?.slug), fontWeight: 600 }}>{activeStore?.nome ?? "—"}</Box>
+            <Box component="span" sx={{ color: storeTextColor(activeStore?.slug), fontWeight: 600 }}>{activeStore?.nome ?? "—"}</Box>
             {home.data && ` · pendências calculadas em ${dateTime(home.data.referenciaEm)}`}
           </Typography>
         </Box>
