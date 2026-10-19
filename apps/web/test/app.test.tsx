@@ -17,7 +17,7 @@ import { formatSalePrice } from "../src/utils/formatting";
 import { ContentCard } from "../src/components/ui/ContentCard";
 import { PageContainer } from "../src/components/ui/PageContainer";
 import { PageHeader } from "../src/components/ui/PageHeader";
-import { appTheme, visualTokens } from "../src/theme";
+import { appTheme, storeColor, storeTextColor, visualTokens } from "../src/theme";
 
 describe("web app", () => {
   it("aplica a fundação visual oficial em componentes compartilhados", () => {
@@ -31,9 +31,43 @@ describe("web app", () => {
     expect(html).toContain("Operação");
     expect(html).toContain("Loja ativa: Dronz");
     expect(html).toContain("Dados da operação");
-    expect(visualTokens.dronz).toBe("#a78bfa");
-    expect(visualTokens.gooder).toBe("#2dd4bf");
+    // Referência visual aprovada (Bolt): Dronz verde, Gooder roxo.
+    expect(visualTokens.dronz).toBe("#22C55E");
+    expect(visualTokens.gooder).toBe("#A855F7");
     expect(appTheme.palette.background.default).toBe(visualTokens.bg);
+  });
+
+  it("textos secundários mantêm contraste AA sobre fundo, cards e menus", () => {
+    const luminance = (hex: string) => {
+      const [r, g, b] = [1, 3, 5].map((i) => {
+        const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+        return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+    };
+    const contrast = (a: string, b: string) => {
+      const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+      return (hi! + 0.05) / (lo! + 0.05);
+    };
+    for (const text of [visualTokens.text, visualTokens.textSecondary, visualTokens.textMuted])
+      for (const background of [visualTokens.bg, visualTokens.bg2, visualTokens.bg3])
+        expect(contrast(text, background)).toBeGreaterThanOrEqual(4.5);
+    // Rótulo branco dos botões preenchidos e texto azul de botões/links sobre fundo e cards.
+    expect(contrast("#FFFFFF", visualTokens.blueSolid)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast("#FFFFFF", visualTokens.blueSolidHover)).toBeGreaterThanOrEqual(4.5);
+    for (const background of [visualTokens.bg, visualTokens.bg2])
+      expect(contrast(appTheme.palette.primary.main, background)).toBeGreaterThanOrEqual(4.5);
+    // Nome da loja como texto: fundo, cards, menus e o botão ativo (tinta da loja a 15% sobre o fundo).
+    const tint = (hex: string, alpha: number, base: string) =>
+      "#" + [1, 3, 5].map((i) =>
+        Math.round(parseInt(hex.slice(i, i + 2), 16) * alpha + parseInt(base.slice(i, i + 2), 16) * (1 - alpha))
+          .toString(16).padStart(2, "0")).join("");
+    for (const slug of ["dronz", "gooder", undefined])
+      for (const background of [visualTokens.bg, visualTokens.bg2, visualTokens.bg3, tint(storeColor(slug), 0x26 / 255, visualTokens.bg)])
+        expect(contrast(storeTextColor(slug), background)).toBeGreaterThanOrEqual(4.5);
+    // Badges de status: rótulo claro sobre a tinta do próprio tom (12%) no card escuro.
+    for (const [tone, text] of [[visualTokens.gooder, visualTokens.gooderText], [visualTokens.blue, visualTokens.blueSoft]] as const)
+      expect(contrast(text, tint(tone, 0x1f / 255, visualTokens.bg))).toBeGreaterThanOrEqual(4.5);
   });
 
   it("redireciona a raiz para o fluxo autenticado", () => {

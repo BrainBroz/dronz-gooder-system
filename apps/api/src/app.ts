@@ -19,6 +19,8 @@ import { operationsRouter } from "./modules/operations/operations.routes";
 import { unifiedPurchasesRouter } from "./modules/unified-purchases/unified-purchases.routes";
 import { marketplaceIntegrationsRouter } from "./modules/marketplace-integrations/marketplace-integrations.routes";
 import { positionsRouter } from "./modules/positions/positions.routes";
+import { economicSettingsRouter } from "./modules/economic-settings/economic-settings.routes";
+import { purchaseSimulationRouter } from "./modules/purchase-simulation/purchase-simulation.routes";
 
 export function createApp() {
   const app = express();
@@ -42,6 +44,8 @@ export function createApp() {
   app.use("/imported-purchases", unifiedPurchasesRouter);
   app.use("/integrations/marketplaces", marketplaceIntegrationsRouter);
   app.use("/positions", positionsRouter);
+  app.use("/economic-settings", economicSettingsRouter);
+  app.use("/purchase-simulations", purchaseSimulationRouter);
   app.use(errorHandler);
   return app;
 }

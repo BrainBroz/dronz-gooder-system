@@ -40,6 +40,34 @@ export function setAuditFailureForTests(
   auditFailureForTests = predicate;
 }
 
+/**
+ * Resposta já gravada para esta chave, conferida contra o conteúdo original do pedido (null se não há).
+ * Permite repetir com segurança uma operação que depende de algo externo antes da transação.
+ */
+export async function findIdempotentReplay<T>(input: {
+  lojaId: string;
+  operation: string;
+  entityId: string;
+  key?: string;
+  payload: unknown;
+}): Promise<T | null> {
+  if (!input.key) return null;
+  const existing = await prisma.idempotencyRecord.findUnique({
+    where: {
+      lojaId_operation_entityId_idempotencyKey: {
+        lojaId: input.lojaId,
+        operation: input.operation,
+        entityId: input.entityId,
+        idempotencyKey: input.key
+      }
+    }
+  });
+  if (!existing) return null;
+  if (existing.requestHash !== requestHash(input.payload))
+    throw new AppError(409, "idempotency_conflict");
+  return existing.responseData as T;
+}
+
 export async function idempotentMutation<T>(input: {
   lojaId: string;
   operation: string;
@@ -101,15 +129,20 @@ export async function idempotentMutation<T>(input: {
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
     );
   } catch (error) {
-    if (isSerializationConflict(error))
-      throw new AppError(409, "concurrent_modification");
+    // Duas requisições idênticas em paralelo: a perdedora pode cair em conflito de serialização ou de
+    // unicidade. Se a vencedora gravou a mesma chave com o mesmo conteúdo, devolve a resposta gravada.
+    const serialization = isSerializationConflict(error);
     if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2002"
+      serialization ||
+      (error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002")
     ) {
       const replay = await prisma.idempotencyRecord.findUnique({ where });
       if (replay?.requestHash === hash) return replay.responseData as T;
-      throw new AppError(409, "idempotency_conflict");
+      throw new AppError(
+        409,
+        serialization && !replay ? "concurrent_modification" : "idempotency_conflict"
+      );
     }
     throw error;
   }

@@ -35,6 +35,8 @@ model Loja {
   estoquesEntradas              EstoqueEntrada[]
   movimentacoesEstoque          MovimentacaoEstoque[]
   cotacoesCambio                CotacaoCambio[]
+  parametrosEconomicos          ParametroEconomico[]
+  simulacoesCompra              SimulacaoCompra[]
   despesas                      Despesa[]
   contasFinanceiras             ContaFinanceira[]
   faturasCartao                 FaturaCartao[]
@@ -88,6 +90,8 @@ model Usuario {
   vendasCriadas                  Venda[]                        @relation("VendaCriadaPor")
   vendasConfirmadas              Venda[]                        @relation("VendaConfirmadaPor")
   simulacoesViagemCriadas        SimulacaoViagem[]
+  parametrosEconomicosCriados    ParametroEconomico[]
+  simulacoesCompraCriadas        SimulacaoCompra[]
   atribuicoes                    AtribuicaoItem[]
   contasExternasCriadas          ContaExterna[]
   mapeamentosProdutoRevisados    MapeamentoItemProduto[]
@@ -1617,6 +1621,8 @@ model CotacaoCambio {
   responsavel   Usuario       @relation(fields: [responsavelId], references: [id], onDelete: Restrict)
   custos        CustoPedido[]
 
+  simulacoesCompra SimulacaoCompra[]
+
   @@unique([id, lojaId])
   @@index([lojaId, cotadoEm])
 }
@@ -2336,4 +2342,83 @@ model PacoteItem {
 
   @@unique([pacoteExternoId, pedidoCompraItemId])
   @@index([pedidoCompraItemId])
+}
+
+// Parâmetros econômicos de estimativa por loja. Cada gravação cria uma versão nova (append-only):
+// alterar a configuração nunca recalcula simulações ou operações já registradas.
+enum NotaFiscalBase {
+  VENDA_BRUTA
+  BASE_INFORMADA
+}
+
+enum ModalidadeTaxaMarketplace {
+  A_VISTA
+  PARCELADO
+}
+
+model ParametroEconomico {
+  id                     String          @id @default(cuid())
+  lojaId                 String
+  versao                 Int
+  // Acréscimo somado uma única vez à cotação de referência USD→BRL (valor em BRL por USD).
+  acrescimoCambialBrl    Decimal         @db.Decimal(18, 6)
+  freteValorPorKg        Decimal?        @db.Decimal(18, 6)
+  freteMoeda             String?
+  markupAlertaPercentual Decimal         @db.Decimal(8, 4)
+  notaFiscalPercentual   Decimal?        @db.Decimal(8, 4)
+  // Nula = base de incidência ainda não definida; a simulação exige escolha explícita.
+  notaFiscalBase         NotaFiscalBase?
+  iofPercentual          Decimal?        @db.Decimal(8, 4)
+  observacoes            String?
+  criadoPorId            String
+  createdAt              DateTime        @default(now())
+
+  loja             Loja                       @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  criadoPor        Usuario                    @relation(fields: [criadoPorId], references: [id], onDelete: Restrict)
+  taxasMarketplace TaxaMarketplaceParametro[]
+  simulacoesCompra SimulacaoCompra[]
+
+  @@unique([lojaId, versao])
+  @@unique([id, lojaId])
+}
+
+model TaxaMarketplaceParametro {
+  id                   String                    @id @default(cuid())
+  lojaId               String
+  parametroEconomicoId String
+  canal                CanalVenda
+  modalidade           ModalidadeTaxaMarketplace
+  // Quantidade de parcelas do plano (obrigatória em PARCELADO, nula em A_VISTA).
+  parcelas             Int?
+  percentual           Decimal                   @db.Decimal(8, 4)
+  descricao            String?
+
+  parametro ParametroEconomico @relation(fields: [parametroEconomicoId, lojaId], references: [id, lojaId], onDelete: Cascade)
+
+  @@index([lojaId, parametroEconomicoId])
+}
+
+// Simulação de compra: projeção, sem efeito operacional. Guarda a entrada resolvida (com os
+// parâmetros e a cotação usados) e o resultado calculado como snapshot.
+model SimulacaoCompra {
+  id                   String   @id @default(cuid())
+  lojaId               String
+  nome                 String
+  produtoId            String?
+  produtoNome          String
+  produtoCodigo        Int?
+  parametroEconomicoId String?
+  cotacaoCambioId      String?
+  entrada              Json
+  resultado            Json
+  criadoPorId          String
+  createdAt            DateTime @default(now())
+
+  loja      Loja                @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  criadoPor Usuario             @relation(fields: [criadoPorId], references: [id], onDelete: Restrict)
+  parametro ParametroEconomico? @relation(fields: [parametroEconomicoId, lojaId], references: [id, lojaId], onDelete: Restrict)
+  cotacao   CotacaoCambio?      @relation(fields: [cotacaoCambioId, lojaId], references: [id, lojaId], onDelete: Restrict)
+
+  @@unique([id, lojaId])
+  @@index([lojaId, createdAt])
 }

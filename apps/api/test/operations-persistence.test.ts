@@ -41,7 +41,8 @@ describe("idempotentMutation serialization errors", () => {
         execute: vi.fn()
       })).rejects.toMatchObject({ status: 409, code: "concurrent_modification" });
       expect(database.transaction).toHaveBeenCalledOnce();
-      expect(database.findUnique).toHaveBeenCalledTimes(key ? 1 : 0);
+      // Com chave: verificação prévia e, após o conflito, checagem de uma gravação concorrente idêntica.
+      expect(database.findUnique).toHaveBeenCalledTimes(key ? 2 : 0);
     });
 
     it(`preserves unrelated raw query errors with key ${key ?? "absent"}`, async () => {
@@ -57,4 +58,23 @@ describe("idempotentMutation serialization errors", () => {
       })).rejects.toBe(error);
     });
   }
+
+  it("conflito de serialização com o mesmo pedido já gravado por outra requisição devolve a resposta gravada", async () => {
+    const { createHash } = await import("node:crypto");
+    database.transaction.mockRejectedValue(knownError("P2010", "40001"));
+    const payload = { quantity: 1 };
+    const hash = createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+    database.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce({ requestHash: hash, responseData: { id: "saved" } });
+    await expect(
+      idempotentMutation({ lojaId: "store", operation: "TEST", entityId: "item", key: "same-key", payload, execute: vi.fn() })
+    ).resolves.toEqual({ id: "saved" });
+  });
+
+  it("conflito de serialização com a mesma chave e outro conteúdo é conflito de idempotência", async () => {
+    database.transaction.mockRejectedValue(knownError("P2010", "40001"));
+    database.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce({ requestHash: "outro", responseData: {} });
+    await expect(
+      idempotentMutation({ lojaId: "store", operation: "TEST", entityId: "item", key: "same-key", payload: { quantity: 1 }, execute: vi.fn() })
+    ).rejects.toMatchObject({ status: 409, code: "idempotency_conflict" });
+  });
 });

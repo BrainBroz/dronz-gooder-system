@@ -15,6 +15,10 @@ Em caso de conflito, prevalecem, nesta ordem:
 
 ## 2. Objetivo do sistema
 
+### Direção de produto atualizada em 2026-10-19
+
+O Product Owner aprovou o visual da reconstrução Bolt Etapa 1 em `e4e243b`, ainda local, sem declarar concluídas as jornadas internas. [DECISOES_PRODUTO_2026-10-19.md](DECISOES_PRODUTO_2026-10-19.md) registra a prioridade de Compras mensais e detalhe econômico, configurações/câmbio, catálogo e simuladores, operação física no formato Bolt e importação de vendas históricas. Projeção e realizado são fases distintas; venda recebida já líquida das taxas do marketplace não pode sofrer esse desconto novamente. Catálogo e histórico de vendas exigem preview, conciliação, idempotência e rastreabilidade; importar legado não cria automaticamente estoque ou saídas atuais. Essas capacidades adicionais são requisitos aprovados, não implementações concluídas. As decisões, dependências e a sequência verificável D1–D6 estão no documento específico.
+
 ### Estado funcional em 2026-10-18
 
 A baseline `caa148c` da PR #4 foi ampliada pela linha `5617800` (Codex, integrada na PR #5). As PRs #6–#14 acrescentaram posições, remessas, recebimento parcial, Home operacional, revisão humana multicanal (B10), adapter eBay Buyer (B11), painel mensal/CSV (B13), tracking manual (B14) e Financeiro (B16). Vendas (B17, PR #15) e Analytics (B18, PR #16) completam esta rodada de implementação; os SHAs de merge devem ser consultados no histórico Git. Batch 12 e Batch 15 permanecem dependentes de mailbox/OAuth e APIs de transportadoras, respectivamente. O adapter eBay está implementado e desabilitado até configuração e homologação seguras.
@@ -103,6 +107,7 @@ O frontend não reconstrói RBAC, transições, elegibilidade, cálculo financei
 - `EBAY_BUYER_SPECIFICATION_V1.md`: especificação oficial comprovada para OAuth e Trading API `GetOrders` buyer, campos, paginação, tracking, quota e segurança.
 - `BUYER_PURCHASE_INGESTION_CONTRACT_V1.md`: evidências multicanal, reconciliação, aprovação humana, atribuição e visão mensal.
 - `UX_OPERATIONAL_FOUNDATION_V1.md`: contrato aprovado para a futura reconstrução incremental da experiência, com navegação por jornada, três projeções ortogonais, camada econômica, decisões F-1 a F-12, gaps e roadmap FIX-0/UX-0 a UX-9.
+- `DECISOES_PRODUTO_2026-10-19.md`: complemento aprovado de produto e UX; distingue estimativa de realizado, importação de venda líquida, catálogo/variantes e histórico, com sequência de entregas D1–D6.
 - `AMAZON_BUSINESS_ONBOARDING_GATE_V1.md`: Gate 9.1, papéis/capabilities oficiais, checklist do responsável e comprovação pendente da conta real.
 - `AMAZON_BUSINESS_ONBOARDING_RUNBOOK_V1.md`: Gate 9.2, pacote operacional preenchível para Marco executar onboarding, consentimento e prova sanitizada.
 - `PRODUCTION_READINESS.md`: requisitos de ambiente, publicação e riscos operacionais.
@@ -150,6 +155,8 @@ Implementado e coberto por testes:
 - reconciliação humana multicanal, adapter eBay configurável e painel mensal/CSV;
 - tracking manual, contas/faturas e conciliação financeira manual;
 - vendas com baixa por lote/custo em snapshot e indicadores derivados com controle financeiro.
+- reconstrução visual Etapa 1 (referência Bolt aprovada): shell com navegação agrupada por permissão, seletor de loja e dashboard sobre read models reais (`docs/UX_OPERATIONAL_FOUNDATION_V1.md`, seção 20); demais telas ainda sem redesenho.
+- configurações econômicas versionadas por loja, captura sob demanda da PTAX de venda (fechamento) do Banco Central e simulador de compra com busca de produto, composição de custos e venda, snapshot e sem efeitos operacionais (`docs/CONFIGURACOES_E_SIMULADOR_COMPRA_V1.md`); modalidade cambial definitiva, base da nota fiscal, plano parcelado e frete por kg aguardam confirmação do PO.
 
 Não implementado:
 
@@ -236,6 +243,8 @@ Sequência aprovada e estado atual; dependências externas não autorizam atalho
 7. Batch 15 — motor de tracking e alertas bloqueado por APIs/credenciais de transportadoras;
 8. Batches 16–18 — Financeiro, Vendas e Analytics implementados, com integração de Vendas/Analytics pelas PRs #15/#16;
 9. Amazon Business API — retomada em batch próprio após aprovação do onboarding externo.
+10. Reconstrução visual baseada no Bolt — Etapa 1 (navegação e dashboard) entregue localmente; próximas etapas por área conforme `UX_OPERATIONAL_FOUNDATION_V1.md` §20.3.
+11. D1/D2 parcial — configurações econômicas e simulador de compra implementados localmente; importação de catálogo, simulador de viagem na nova interface e demais frentes D2–D6 permanecem pendentes.
 
 Cada módulo deve preservar os contratos existentes, isolamento por loja, auditoria e migrations incrementais. Este roadmap não declara esses itens implementados nem autoriza iniciá-los automaticamente.
 
