@@ -249,3 +249,96 @@ describe("dashboard", () => {
     );
   });
 });
+
+describe("lateral no desktop", () => {
+  // jsdom não tem matchMedia: simula a largura de desktop só neste bloco.
+  beforeEach(() => {
+    vi.stubGlobal("matchMedia", (media: string) => ({
+      matches: true,
+      media,
+      onchange: null,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      dispatchEvent: () => false
+    }));
+    return () => vi.unstubAllGlobals();
+  });
+
+  it("começa aberta, recolhe e reabre ao escolher um grupo com submenu", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Shell>Conteúdo</Shell>, { permissions: ["SYSTEM_ADMIN"] });
+    expect(screen.queryByRole("button", { name: "Abrir menu" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Dashboard" }).getAttribute("aria-current")).toBe("page");
+
+    await user.click(screen.getByRole("button", { name: "Recolher menu lateral" }));
+    expect(screen.getByRole("button", { name: "Expandir menu lateral" })).toBeTruthy();
+    expect(screen.queryByText("Fila de compras")).toBeNull();
+    // Recolhida, cada grupo continua identificável pelo nome acessível.
+    const compras = screen.getByRole("button", { name: "Compras" });
+    expect(compras.getAttribute("aria-expanded")).toBe("false");
+
+    await user.click(compras);
+    expect(screen.getByRole("button", { name: "Recolher menu lateral" })).toBeTruthy();
+    expect(await screen.findByRole("link", { name: "Fila de compras" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Compras" }).getAttribute("aria-expanded")).toBe("true");
+  });
+});
+
+describe("dashboard: ramos financeiros", () => {
+  const rate = (overrides: object) => ({
+    id: "r1", valor: "5.4321", cotadoEm: "2026-10-17T15:00:00.000Z", vigente: true, idadeDias: 0, aviso: null, ...overrides
+  });
+  const mockFinance = (rates: () => Promise<unknown>) => {
+    const get = vi.spyOn(api, "get").mockImplementation(async (url) => {
+      if (url === "/operations/home") return { data: home };
+      if (url === "/logistics/trips") return { data: [] };
+      if (url === "/finance/exchange-rates") return { data: await rates() };
+      if (url === "/analytics/dashboard")
+        return {
+          data: {
+            ...summary,
+            orders: { ...summary.orders, total: { USD: "10.5", BRL: "20" } },
+            payments: { pending: 2, paid: { USD: "5" } }
+          }
+        };
+      throw new Error(`GET inesperado: ${url}`);
+    });
+    renderWithProviders(<HomePage />, { permissions: ["ANALYTICS_VISUALIZAR", "FINANCEIRO_VISUALIZAR"] });
+    return get;
+  };
+
+  it("com acesso financeiro mostra totais separados por moeda, sem conversão", async () => {
+    mockFinance(async () => []);
+    expect((await screen.findAllByText(/US\$\s10,50 · R\$\s20,00/)).length).toBe(2);
+    expect(screen.getByText(/^US\$\s5,00$/)).toBeTruthy();
+    expect(screen.getByText("Valores separados por moeda, sem conversão.", { exact: false })).toBeTruthy();
+    expect(screen.queryByText("Valores econômicos exigem acesso financeiro.")).toBeNull();
+  });
+
+  it("cotação vigente aparece com valor e idade, pedindo o par USD→BRL", async () => {
+    const get = mockFinance(async () => [rate({})]);
+    expect(await screen.findByText("USD→BRL 5,4321 · hoje")).toBeTruthy();
+    const call = get.mock.calls.find(([url]) => url === "/finance/exchange-rates")!;
+    expect((call[1] as { params: object }).params).toEqual({ moedaOrigem: "USD", moedaDestino: "BRL" });
+  });
+
+  it("cotação antiga é sinalizada", async () => {
+    mockFinance(async () => [rate({ valor: "5.1", idadeDias: 9, aviso: "COTACAO_ANTIGA" })]);
+    const chip = await screen.findByText("USD→BRL 5,1 · há 9 d");
+    expect(chip.getAttribute("aria-label")).toBe("Cotação vigente antiga: registre uma nova no Financeiro.");
+  });
+
+  it("sem cotação ou com erro, o chip diz isso em vez de mostrar valor", async () => {
+    mockFinance(async () => {
+      throw new Error("offline");
+    });
+    expect(await screen.findByText("Câmbio indisponível")).toBeTruthy();
+  });
+
+  it("lista vazia de cotações é declarada", async () => {
+    mockFinance(async () => []);
+    expect(await screen.findByText("Sem cotação USD→BRL")).toBeTruthy();
+  });
+});
