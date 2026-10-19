@@ -397,6 +397,23 @@ describe("Simulador de compra", () => {
     expect(conflict.status).toBe(409);
   });
 
+  it("repetir um salvamento já gravado devolve o registro mesmo se o produto foi excluído depois", async () => {
+    const { dronz } = await stores();
+    const { app, headers } = await admin();
+    const mac = await product(dronz.id, "MacBook");
+    const q = await quote(dronz.id);
+    const keyed = { ...headers, "Idempotency-Key": randomUUID() };
+    const first = await request(app).post("/purchase-simulations").set(keyed).send(simulation(mac.id, q.id));
+    expect(first.status).toBe(201);
+    await prisma.produto.delete({ where: { id: mac.id } });
+    const again = await request(app).post("/purchase-simulations").set(keyed).send(simulation(mac.id, q.id));
+    expect(again.status).toBe(201);
+    expect(again.body.id).toBe(first.body.id);
+    expect(await prisma.simulacaoCompra.count()).toBe(1);
+    // Sem chave (ou com chave nova) o produto excluído continua sendo recusado.
+    expect((await request(app).post("/purchase-simulations").set(headers).send(simulation(mac.id, q.id))).status).toBe(404);
+  });
+
   it("permissões: visualizar calcula mas não salva; sem permissão não acessa", async () => {
     const { dronz } = await stores();
     const mac = await product(dronz.id, "MacBook");

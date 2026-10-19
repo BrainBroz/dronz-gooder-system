@@ -96,7 +96,9 @@ function useContentKey() {
   };
 }
 
-const orNull = (value: string) => (value.trim() === "" ? null : value.trim().replace(",", "."));
+const textOrNull = (value: string) => (value.trim() === "" ? null : value.trim());
+// Vírgula decimal só em números; texto livre é gravado como digitado.
+const orNull = (value: string) => textOrNull(value)?.replace(",", ".") ?? null;
 
 function Section({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
   return (
@@ -249,13 +251,13 @@ function SettingsForm({ data, store, canWrite }: { data: SettingsResponse; store
           notaFiscalPercentual: orNull(form.notaFiscalPercentual),
           notaFiscalBase: form.notaFiscalBase || null,
           iofPercentual: orNull(form.iofPercentual),
-          observacoes: orNull(form.observacoes),
+          observacoes: textOrNull(form.observacoes),
           taxasMarketplace: form.taxas.map((taxa) => ({
             canal: taxa.canal,
             modalidade: taxa.modalidade,
             parcelas: taxa.modalidade === "A_VISTA" ? null : Number(taxa.parcelas),
             percentual: orNull(taxa.percentual) ?? "",
-            descricao: orNull(taxa.descricao)
+            descricao: textOrNull(taxa.descricao)
           }))
       };
       return api.post("/economic-settings", body, { headers: { ...authHeader(), "x-store-id": store, "Idempotency-Key": saveKey(body) } });

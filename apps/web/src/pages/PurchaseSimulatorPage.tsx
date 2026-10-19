@@ -83,7 +83,7 @@ type SavedSimulation = {
   criadoPor: { name: string };
 };
 type SavedDetail = SavedSimulation & { entrada: SavedEntrada };
-type SavedEntrada = {
+export type SavedEntrada = {
   quantidade: number;
   compra: { precoUnitario: string | null; moeda: Moeda };
   pesoUnitarioKg: string | null;
@@ -247,12 +247,21 @@ export function withProduct(current: SimForm, produto: Produto | null): SimForm 
   };
 }
 
-function formFromSaved(entrada: SavedEntrada, current: SimForm): SimForm {
+export function formFromSaved(entrada: SavedEntrada, current: SimForm): SimForm {
   const nota = entrada.venda.notaFiscal;
   const marketplace = entrada.venda.marketplace;
   return {
     ...current,
-    produto: entrada.produto.id ? { id: entrada.produto.id, nome: entrada.produto.nome, codigo: entrada.produto.codigo ?? 0, peso: null, precoVenda: "0" } : null,
+    // Peso e preço restaurados contam como valores do produto reaberto: escolher outro produto os substitui.
+    produto: entrada.produto.id
+      ? {
+          id: entrada.produto.id,
+          nome: entrada.produto.nome,
+          codigo: entrada.produto.codigo ?? 0,
+          peso: entrada.pesoUnitarioKg,
+          precoVenda: entrada.venda.precoUnitarioBrl ?? "0"
+        }
+      : null,
     itemLivre: !entrada.produto.id,
     produtoNome: entrada.produto.id ? "" : entrada.produto.nome,
     quantidade: String(entrada.quantidade),

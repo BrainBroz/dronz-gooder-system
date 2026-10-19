@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../src/api/client";
 import { EconomicSettingsPage } from "../src/pages/EconomicSettingsPage";
-import { PurchaseSimulatorPage, buildPayload, initialForm, toggleItemLivre, withProduct, type Produto } from "../src/pages/PurchaseSimulatorPage";
+import { PurchaseSimulatorPage, buildPayload, formFromSaved, initialForm, toggleItemLivre, withProduct, type Produto, type SavedEntrada } from "../src/pages/PurchaseSimulatorPage";
 import { renderWithProviders, testStores } from "./render";
 
 beforeEach(() => vi.restoreAllMocks());
@@ -279,6 +279,26 @@ describe("troca de produto no simulador", () => {
     expect([withB.peso, withB.precoVenda]).toEqual(["2.0", "3000"]);
   });
 
+  it("simulação reaberta e depois outro produto: o novo não herda peso e preço da reaberta", () => {
+    const saved = {
+      quantidade: 3,
+      compra: { precoUnitario: "100", moeda: "USD" },
+      pesoUnitarioKg: "0.5",
+      cambio: { referencia: "5", acrescimo: "0.2" },
+      cambioOrigem: { origem: "COTACAO_REGISTRADA" },
+      frete: { valorPorKg: "10", moeda: "USD" },
+      encargosCompra: [],
+      venda: { precoUnitarioBrl: "900", marketplace: null, notaFiscal: { modo: "PERCENTUAL_VENDA_BRUTA", percentual: "5" }, outrosEncargos: [] },
+      markupAlertaPercentual: "25",
+      parametroEconomicoId: "param-1",
+      produto: { id: "a", nome: "A", codigo: 1 }
+    } as SavedEntrada;
+    const reopened = formFromSaved(saved, initialForm(settingsData, null));
+    expect([reopened.peso, reopened.precoVenda]).toEqual(["0.5", "900"]);
+    const withB = withProduct(reopened, b);
+    expect([withB.peso, withB.precoVenda]).toEqual(["2.0", "3000"]);
+  });
+
   it("o que o operador digitou é preservado", () => {
     const edited = { ...withProduct(initialForm(settingsData, null), a), peso: "0.7", precoVenda: "950" };
     const withB = withProduct(edited, b);
@@ -389,5 +409,29 @@ describe("idempotência nas Configurações e paginação das simulações", () 
     expect(await screen.findByText("Simulação página 2")).toBeTruthy();
     const pages = get.mock.calls.filter(([url]) => url === "/purchase-simulations").map(([, config]) => (config as { params: { page: number } }).params.page);
     expect(pages).toEqual([1, 2]);
+  });
+});
+
+describe("texto livre nas Configurações", () => {
+  it("vírgula decimal vira ponto só nos números; observações e descrições ficam como digitadas", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(api, "get").mockImplementation(async (url) => {
+      if (url === "/economic-settings") return { data: { vigente, versoes: [], referenciasPO } };
+      if (url === "/economic-settings/exchange-rate") return { data: { cotacao: quote } };
+      throw new Error(`GET inesperado: ${url}`);
+    });
+    const post = vi.spyOn(api, "post").mockResolvedValue({ data: {} });
+    renderWithProviders(<EconomicSettingsPage />, { permissions: ["FINANCEIRO_VISUALIZAR", "FINANCEIRO_REGISTRAR"] });
+    const acrescimo = await screen.findByLabelText(/Acréscimo cambial/);
+    await user.clear(acrescimo);
+    await user.type(acrescimo, "0,25");
+    await user.type(screen.getByLabelText("Observações"), "Plano A, confirmar parcelas");
+    await user.type(screen.getByLabelText("Descrição"), "Referência PO, 2x");
+    await user.click(screen.getByRole("button", { name: "Gravar nova versão" }));
+    await waitFor(() => expect(post).toHaveBeenCalled());
+    const body = post.mock.calls[0]![1] as { acrescimoCambialBrl: string; observacoes: string; taxasMarketplace: { descricao: string }[] };
+    expect(body.acrescimoCambialBrl).toBe("0.25");
+    expect(body.observacoes).toBe("Plano A, confirmar parcelas");
+    expect(body.taxasMarketplace[0]!.descricao).toBe("Referência PO, 2x");
   });
 });

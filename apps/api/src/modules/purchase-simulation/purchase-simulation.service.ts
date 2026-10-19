@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { AppError } from "../../lib/app-error";
-import { audit, idempotentMutation } from "../operations/operations.persistence";
+import { audit, findIdempotentReplay, idempotentMutation } from "../operations/operations.persistence";
 import { projectPurchase, type EncargoCompra, type Moeda, type ProjecaoEntrada } from "./purchase-projection";
 
 const ORIGIN = "API_PURCHASE_SIMULATION";
@@ -83,15 +83,16 @@ export async function calculate(lojaId: string, input: SimulationInput) {
 
 /** Salva a simulação com a entrada resolvida e o resultado como snapshot. Não cria compra, estoque, venda nem pagamento. */
 export async function save(lojaId: string, userId: string, input: SimulationInput, key?: string) {
+  // Repetição de um envio já gravado devolve o registro antes de consultar produto, cotação ou parâmetros,
+  // que podem ter mudado (ou sido excluídos) depois do salvamento.
+  const idempotency = { lojaId, operation: "SAVE_PURCHASE_SIMULATION", entityId: lojaId, key, payload: input };
+  const replay = await findIdempotentReplay<Awaited<ReturnType<typeof prisma.simulacaoCompra.create>>>(idempotency);
+  if (replay) return replay;
   const { projecao, entrada, produto, cotacaoCambioId } = await resolve(lojaId, input);
   const resultado = projectPurchase(projecao);
   const produtoNome = produto?.nome ?? input.produtoNome!.trim();
   return idempotentMutation({
-    lojaId,
-    operation: "SAVE_PURCHASE_SIMULATION",
-    entityId: lojaId,
-    key,
-    payload: input,
+    ...idempotency,
     execute: async (tx, correlationId) => {
       const created = await tx.simulacaoCompra.create({
         data: {

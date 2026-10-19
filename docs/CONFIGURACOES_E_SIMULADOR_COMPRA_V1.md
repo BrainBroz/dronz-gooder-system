@@ -21,6 +21,8 @@ Estado: implementado na branch `claude/economic-settings-simulator` (a partir de
 
 Tudo é escopado por `x-store-id`: produto, cotação, versão de parâmetros e simulação de outra loja respondem 404.
 
+Idempotência: salvar simulação, gravar parâmetros e capturar PTAX aceitam `Idempotency-Key`. A repetição de um envio já gravado devolve o registro antes de consultar o estado atual (produto, cotação ou fonte externa). No `idempotentMutation` compartilhado, uma requisição idêntica que perde a corrida por conflito de serialização também recebe a resposta gravada, em vez de `409 concurrent_modification`; sem gravação concorrente idêntica, o 409 continua.
+
 ## 3. Fórmulas e unidades
 
 Resultado em BRL. Decimal no backend, precisão total no cálculo; arredondamento `HALF_UP` só na saída (dinheiro 2 casas, cotação 6, percentuais 2, peso 3). Totais = valor unitário em precisão total × quantidade.
