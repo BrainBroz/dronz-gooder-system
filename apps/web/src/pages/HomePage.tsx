@@ -249,9 +249,10 @@ function Kpi({ label, value, sub, tone, icon }: { label: string; value: ReactNod
   );
 }
 
-function StatusBadge({ label, tone }: { label: string; tone: string }) {
+// tone pinta fundo e borda; text é o tom claro do mesmo matiz, para o rótulo manter contraste AA sobre a tinta.
+function StatusBadge({ label, tone, text }: { label: string; tone: string; text: string }) {
   return (
-    <Box component="span" sx={{ px: 0.875, py: 0.25, borderRadius: "6px", fontSize: "0.6875rem", fontWeight: 600, color: tone, bgcolor: `${tone}1F`, border: `1px solid ${tone}33`, whiteSpace: "nowrap" }}>
+    <Box component="span" sx={{ px: 0.875, py: 0.25, borderRadius: "6px", fontSize: "0.6875rem", fontWeight: 600, color: text, bgcolor: `${tone}1F`, border: `1px solid ${tone}33`, whiteSpace: "nowrap" }}>
       {label}
     </Box>
   );
@@ -459,7 +460,10 @@ function HomeContent() {
                   <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>
                     {trip.origem} → {trip.destino}
                   </Typography>
-                  <StatusBadge label={tripStatusLabel[trip.status] ?? trip.status} tone={trip.status === "IN_TRANSIT" ? visualTokens.gooder : visualTokens.blue} />
+                  <StatusBadge label={tripStatusLabel[trip.status] ?? trip.status} {...(trip.status === "IN_TRANSIT"
+                      ? { tone: visualTokens.gooder, text: visualTokens.gooderText }
+                      : { tone: visualTokens.blue, text: visualTokens.blueSoft })}
+                  />
                 </Stack>
                 <Typography sx={{ fontSize: "0.75rem", color: visualTokens.textSecondary, mt: 0.25 }}>
                   {trip.viajante?.nome ?? (trip.modalidade === "CAIXA_AEREA" ? "Caixa aérea" : "Sem viajante")} · {trip.malas.length} volume(s) · partida {date(trip.partidaEm)} · chegada prevista {date(trip.chegadaPrevistaEm)}

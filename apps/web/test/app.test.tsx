@@ -65,6 +65,9 @@ describe("web app", () => {
     for (const slug of ["dronz", "gooder", undefined])
       for (const background of [visualTokens.bg, visualTokens.bg2, visualTokens.bg3, tint(storeColor(slug), 0x26 / 255, visualTokens.bg)])
         expect(contrast(storeTextColor(slug), background)).toBeGreaterThanOrEqual(4.5);
+    // Badges de status: rótulo claro sobre a tinta do próprio tom (12%) no card escuro.
+    for (const [tone, text] of [[visualTokens.gooder, visualTokens.gooderText], [visualTokens.blue, visualTokens.blueSoft]] as const)
+      expect(contrast(text, tint(tone, 0x1f / 255, visualTokens.bg))).toBeGreaterThanOrEqual(4.5);
   });
 
   it("redireciona a raiz para o fluxo autenticado", () => {
