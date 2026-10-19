@@ -531,3 +531,58 @@ describe("gravação dos parâmetros com outros operadores", () => {
     expect(second!.key).not.toBe(first!.key);
   });
 });
+
+describe("pendências da revisão de Configurações", () => {
+  const mockSettings = (state: { current: object }) =>
+    vi.spyOn(api, "get").mockImplementation(async (url) => {
+      if (url === "/economic-settings") return { data: state.current };
+      if (url === "/economic-settings/exchange-rate") return { data: { cotacao: quote } };
+      throw new Error(`GET inesperado: ${url}`);
+    });
+
+  it("resposta perdida + refetch com a versão criada + retry: mesma chave e mesmo payload", async () => {
+    const user = userEvent.setup();
+    const state = { current: { vigente, versoes: [], referenciasPO } as object };
+    mockSettings(state);
+    // 1-2. O servidor grava, mas a resposta se perde.
+    const post = vi.spyOn(api, "post").mockRejectedValueOnce(new Error("resposta perdida")).mockResolvedValue({ data: {} });
+    const { queryClient } = renderWithProviders(<EconomicSettingsPage />, { permissions: ["FINANCEIRO_VISUALIZAR", "FINANCEIRO_REGISTRAR"] });
+    const save = await screen.findByRole("button", { name: "Gravar nova versão" });
+    await user.click(save);
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    // 3. Um refetch traz a versão que o próprio salvamento criou (mesmos valores, outra versão de base).
+    state.current = { vigente: { ...vigente, id: "param-2", versao: 2 }, versoes: [], referenciasPO };
+    await queryClient.invalidateQueries();
+    await waitFor(() => expect((save as HTMLButtonElement).disabled).toBe(false));
+    // 4. O operador repete o salvamento.
+    await user.click(save);
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+    const [first, retry] = post.mock.calls.map(([, body, config]) => ({
+      body: JSON.stringify(body),
+      key: (config as { headers: Record<string, string> }).headers["Idempotency-Key"]
+    }));
+    // 5. O retry não é uma operação nova: o servidor devolve o registro já gravado.
+    expect(retry!.body).toBe(first!.body);
+    expect(retry!.key).toBe(first!.key);
+  });
+
+  it("cotação manual: campos e botão bloqueados enquanto o envio está pendente, liberados depois", async () => {
+    const user = userEvent.setup();
+    mockSettings({ current: { vigente, versoes: [], referenciasPO } });
+    let respond!: () => void;
+    const post = vi.spyOn(api, "post").mockReturnValue(new Promise((resolve) => (respond = () => resolve({ data: {} }))));
+    renderWithProviders(<EconomicSettingsPage />, { permissions: ["FINANCEIRO_VISUALIZAR", "FINANCEIRO_REGISTRAR"] });
+    const field = (label: RegExp) => screen.getByLabelText(label) as HTMLInputElement;
+    await user.type(await screen.findByLabelText(/^Referência \(R\$ por US\$\)/), "5,1");
+    await user.type(field(/^Fonte/), "banco X");
+    await user.type(field(/^Cotada em/), "2026-10-19T10:00");
+    await user.click(screen.getByRole("button", { name: "Registrar" }));
+    await waitFor(() => expect(post.mock.calls.some(([url]) => url === "/finance/exchange-rates")).toBe(true));
+    for (const label of [/^Referência \(R\$ por US\$\)/, /^Acréscimo \(R\$\)/, /^Fonte/, /^Cotada em/]) expect(field(label).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Registrar" }) as HTMLButtonElement).disabled).toBe(true);
+    respond();
+    await waitFor(() => expect(field(/^Fonte/).disabled).toBe(false));
+    for (const label of [/^Referência \(R\$ por US\$\)/, /^Acréscimo \(R\$\)/, /^Cotada em/]) expect(field(label).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "Registrar" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+});

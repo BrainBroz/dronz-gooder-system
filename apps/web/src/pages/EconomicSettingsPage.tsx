@@ -216,13 +216,13 @@ function ExchangeSection({ store, canWrite, acrescimoPadrao }: { store: string; 
             }}
             sx={{ display: "grid", gap: 1, gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", lg: "1fr 1fr 2fr 1.4fr auto" }, alignItems: "start" }}
           >
-            <TextField size="small" label="Referência (R$ por US$)" value={manual.referencia} required inputMode="decimal"
+            <TextField size="small" label="Referência (R$ por US$)" value={manual.referencia} required inputMode="decimal" disabled={register.isPending}
               onChange={(event) => setManual({ ...manual, referencia: event.target.value })} />
-            <TextField size="small" label="Acréscimo (R$)" value={manual.acrescimo} required inputMode="decimal"
+            <TextField size="small" label="Acréscimo (R$)" value={manual.acrescimo} required inputMode="decimal" disabled={register.isPending}
               onChange={(event) => setManual({ ...manual, acrescimo: event.target.value })} />
-            <TextField size="small" label="Fonte" value={manual.fonte} required placeholder="Ex.: cotação do banco X"
+            <TextField size="small" label="Fonte" value={manual.fonte} required placeholder="Ex.: cotação do banco X" disabled={register.isPending}
               onChange={(event) => setManual({ ...manual, fonte: event.target.value })} />
-            <TextField size="small" label="Cotada em" type="datetime-local" value={manual.cotadoEm} required
+            <TextField size="small" label="Cotada em" type="datetime-local" value={manual.cotadoEm} required disabled={register.isPending}
               slotProps={{ inputLabel: { shrink: true } }} onChange={(event) => setManual({ ...manual, cotadoEm: event.target.value })} />
             <Button type="submit" variant="outlined" disabled={register.isPending}>Registrar</Button>
           </Box>
@@ -261,6 +261,15 @@ function SettingsForm({ data, store, canWrite }: { data: SettingsResponse; store
   };
   // Cliques repetidos com o mesmo conteúdo não criam versões duplicadas.
   const saveKey = useContentKey();
+  // Tentativa ainda não confirmada: a repetição do mesmo conteúdo usa a mesma chave, mesmo que um refetch
+  // tenha mudado a versão de base (resposta perdida após o servidor gravar). Só um sucesso a encerra.
+  const pendingAttempt = useRef<{ body: string; key: string } | null>(null);
+  const attemptKey = (body: object) => {
+    const text = JSON.stringify(body);
+    if (pendingAttempt.current?.body === text) return pendingAttempt.current.key;
+    pendingAttempt.current = { body: text, key: saveKey({ base: baseId, body }) };
+    return pendingAttempt.current.key;
+  };
   const save = useMutation({
     mutationFn: async () => {
       const frete = orNull(form.freteValorPorKg);
@@ -280,14 +289,15 @@ function SettingsForm({ data, store, canWrite }: { data: SettingsResponse; store
             descricao: textOrNull(taxa.descricao)
           }))
       };
-      // A chave inclui a versão de base: regravar o mesmo conteúdo depois de outra versão cria versão nova,
-      // enquanto a repetição da mesma tentativa (resposta perdida) reaproveita a chave.
+      // Nova operação: chave por conteúdo e versão de base (regravar depois de outra versão cria versão nova).
+      // Repetição de tentativa não confirmada: a chave original.
       return api.post("/economic-settings", body, {
-        headers: { ...authHeader(), "x-store-id": store, "Idempotency-Key": saveKey({ base: baseId, body }) }
+        headers: { ...authHeader(), "x-store-id": store, "Idempotency-Key": attemptKey(body) }
       });
     },
     onSuccess: () => {
       // Gravado: a versão que voltar do servidor substitui o formulário.
+      pendingAttempt.current = null;
       setDirty(false);
       setOutdated(null);
       return client.invalidateQueries({ queryKey: economicQueryKeys.settings(store) });
@@ -470,4 +480,3 @@ export function EconomicSettingsPage() {
     </PageContainer>
   );
 }
-
