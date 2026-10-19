@@ -66,6 +66,8 @@ margem% = ((precoVenda - custoTotalUnitario) / precoVenda) × 100
 
 Markup mínimo: 25%. Venda zero é “A definir” e não produz markup/margem. Não dividir por zero. `calcSimulacao` é protegida e deve ser reutilizada, se localizada como fonte oficial, sem alteração.
 
+Projeção de compra (estimativa, sem efeito operacional): fórmulas, unidades e parâmetros versionados em `CONFIGURACOES_E_SIMULADOR_COMPRA_V1.md`. `calcSimulacao` corresponde a `calcularSimulacao` (simulação de viagem) e não é usada nem alterada pela projeção de compra.
+
 ## Dashboard e relatórios
 
 Indicadores: pedidos por status e valor/período; pedidos aguardando ou parcialmente recebidos em Miami; itens alocáveis/em trânsito; viagens abertas; malas em planejamento e pesos; recebimentos pendentes; estoque disponível/zerado/reservado e seu valor; pagamentos pendentes/total pago; custo médio; Produtos abaixo do markup; alertas de deadline. Filtros: loja, período e status aplicável. Somente dados reais.

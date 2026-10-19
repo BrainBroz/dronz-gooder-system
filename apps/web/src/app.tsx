@@ -96,6 +96,16 @@ const OperationsPage = React.lazy(() =>
     default: module.OperationsPage
   }))
 );
+const EconomicSettingsPage = React.lazy(() =>
+  import("./pages/EconomicSettingsPage").then((module) => ({
+    default: module.EconomicSettingsPage
+  }))
+);
+const PurchaseSimulatorPage = React.lazy(() =>
+  import("./pages/PurchaseSimulatorPage").then((module) => ({
+    default: module.PurchaseSimulatorPage
+  }))
+);
 const PurchaseQueuePage = React.lazy(() =>
   import("./pages/PurchaseQueuePage").then((module) => ({
     default: module.PurchaseQueuePage
@@ -394,6 +404,26 @@ export function AppRoutes() {
                 <AuthGate>
                   <Shell>
                     <BuyerReviewPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/compras/simulador"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <PurchaseSimulatorPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/configuracoes"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <EconomicSettingsPage />
                   </Shell>
                 </AuthGate>
               }

@@ -14,7 +14,7 @@ import { renderWithProviders, testStores } from "./render";
 const routesInApp = [
   "/", "/operacao", "/checkpoints", "/categorias", "/produtos", "/fornecedores", "/compras", "/pedidos",
   "/logistica", "/estoque", "/financeiro", "/relatorios", "/vendas", "/compras/painel-mensal",
-  "/compras/revisao", "/posicoes"
+  "/compras/revisao", "/posicoes", "/compras/simulador", "/configuracoes"
 ];
 
 beforeEach(() => vi.restoreAllMocks());

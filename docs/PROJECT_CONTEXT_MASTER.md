@@ -156,6 +156,7 @@ Implementado e coberto por testes:
 - tracking manual, contas/faturas e conciliação financeira manual;
 - vendas com baixa por lote/custo em snapshot e indicadores derivados com controle financeiro.
 - reconstrução visual Etapa 1 (referência Bolt aprovada): shell com navegação agrupada por permissão, seletor de loja e dashboard sobre read models reais (`docs/UX_OPERATIONAL_FOUNDATION_V1.md`, seção 20); demais telas ainda sem redesenho.
+- configurações econômicas versionadas por loja, captura sob demanda da PTAX de venda (fechamento) do Banco Central e simulador de compra com busca de produto, composição de custos e venda, snapshot e sem efeitos operacionais (`docs/CONFIGURACOES_E_SIMULADOR_COMPRA_V1.md`); modalidade cambial definitiva, base da nota fiscal, plano parcelado e frete por kg aguardam confirmação do PO.
 
 Não implementado:
 
@@ -243,6 +244,7 @@ Sequência aprovada e estado atual; dependências externas não autorizam atalho
 8. Batches 16–18 — Financeiro, Vendas e Analytics implementados, com integração de Vendas/Analytics pelas PRs #15/#16;
 9. Amazon Business API — retomada em batch próprio após aprovação do onboarding externo.
 10. Reconstrução visual baseada no Bolt — Etapa 1 (navegação e dashboard) entregue localmente; próximas etapas por área conforme `UX_OPERATIONAL_FOUNDATION_V1.md` §20.3.
+11. D1/D2 parcial — configurações econômicas e simulador de compra implementados localmente; importação de catálogo, simulador de viagem na nova interface e demais frentes D2–D6 permanecem pendentes.
 
 Cada módulo deve preservar os contratos existentes, isolamento por loja, auditoria e migrations incrementais. Este roadmap não declara esses itens implementados nem autoriza iniciá-los automaticamente.
 

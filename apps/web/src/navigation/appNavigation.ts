@@ -32,7 +32,8 @@ export const appNavigation: readonly AppNavGroup[] = [
       { label: "Fila de compras", path: "/compras", permissions: ["COMPRAS_IMPORTADAS_VISUALIZAR"] },
       { label: "Revisão de compras", path: "/compras/revisao", permissions: ["BUYER_INGESTION_VISUALIZAR"] },
       { label: "Pedidos operacionais", path: "/pedidos", permissions: ["PEDIDOS_COMPRA_VISUALIZAR"] },
-      { label: "Painel mensal", path: "/compras/painel-mensal", permissions: ["COMPRAS_IMPORTADAS_VISUALIZAR"] }
+      { label: "Painel mensal", path: "/compras/painel-mensal", permissions: ["COMPRAS_IMPORTADAS_VISUALIZAR"] },
+      { label: "Simulador de compra", path: "/compras/simulador", permissions: ["SIMULACAO_VISUALIZAR", "SIMULACAO_GERENCIAR"] }
     ]
   },
   {
@@ -83,7 +84,8 @@ export const appNavigation: readonly AppNavGroup[] = [
     icon: "settings",
     children: [
       { label: "Categorias", path: "/categorias", permissions: ["CATALOGO_VISUALIZAR"] },
-      { label: "Fornecedores", path: "/fornecedores", permissions: ["CATALOGO_VISUALIZAR"] }
+      { label: "Fornecedores", path: "/fornecedores", permissions: ["CATALOGO_VISUALIZAR"] },
+      { label: "Configurações econômicas", path: "/configuracoes", permissions: ["FINANCEIRO_VISUALIZAR", "SIMULACAO_VISUALIZAR"] }
     ]
   }
 ];

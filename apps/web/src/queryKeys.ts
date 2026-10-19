@@ -58,3 +58,10 @@ export const reportQueryKeys = {
       status
     ] as const
 };
+export const economicQueryKeys = {
+  settings: (id: string | null) => ["economic-settings", id] as const,
+  exchangeRate: (id: string | null) => ["economic-settings", id, "exchange-rate"] as const,
+  simulations: (id: string | null) => ["purchase-simulations", id] as const,
+  calculation: (id: string | null, payload: string) => ["purchase-simulations", id, "calculate", payload] as const,
+  productSearch: (id: string | null, term: string) => ["products", id, "search", term] as const
+};
