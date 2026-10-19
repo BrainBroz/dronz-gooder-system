@@ -330,13 +330,15 @@ Continuam abertas e bloqueiam somente seus batches: vigência de cotação (`E-2
   - Encerramento de posição: conta pacotes destinados com saldo, e também pacote redirecionado sem conteúdo declarado.
   - Concorrência entre redirecionar e encerrar: destino de pacote, conteúdo de pacote e destino de pedido "reivindicam" a posição (`claimOpenPosition`, UPDATE condicional). Posição já encerrada recusa (`position_closed`); encerramento concorrente falha por serialização e, na nova tentativa, enxerga a pendência.
   - Lote de devolução: aponta para a baixa original (`MovimentacaoEstoque.baixaOrigemId`) e herda o custo congelado dela.
+    - A FK é composta (`baixaOrigemId`, `lojaId`) → `BaixaVenda` (`id`, `lojaId`): o banco recusa baixa de outra loja.
   - Relatório `costs`: filtra pela competência do pedido (`dataCompra`), não pela data do lançamento. `competencia=AAAA-MM` aplica o mês de America/Sao_Paulo com fim exclusivo; os outros relatórios recusam o parâmetro.
   - Regra comum de quantidades por posição: `positions/expectations.ts`.
     - O pendente na posição é o saldo recebível de cada caminho que termina nela (pacotes destinados e, no destino do pedido, o fora de pacote), limitado ao que falta receber do item.
     - Recebimento antigo (atribuição desconhecida) pesa só nesse limite; nenhum vínculo histórico é inventado. No caso ambíguo, as posições candidatas seguem pendentes até a unidade chegar.
   - Conteúdo de pacote que diminui devolve o saldo ao destino do pedido, e esse destino também é reivindicado (posição encerrada recusa).
   - Editar conteúdo ou destino de pacote faz UPDATE nas linhas dos itens (ordem fixa). Um recebimento Serializable concorrente falha por serialização e, na nova tentativa, usa o conteúdo e o destino atuais.
-  - Voltar o destino de um pacote ao padrão reivindica o destino do pedido de cada item presente no pacote, das duas lojas.
+  - Voltar o destino de um pacote ao padrão reivindica só os destinos dos pedidos que têm itens no pacote, das duas lojas.
+    - Sem conteúdo declarado, vale o caminho conservador: o destino do pedido de quem chama.
   - Os comandos de pacote leem o destino dos pedidos sob a trava do pedido (a mesma de `setDestination`).
     - Ordem de travas nos comandos de pacote: pacote → pedidos → itens → posições.
     - Em `setDestination`: pedido → itens → posição; ele também toca as linhas dos itens, para serializar com recebimentos.

@@ -1572,7 +1572,8 @@ model MovimentacaoEstoque {
   movimentoOriginal   MovimentacaoEstoque?      @relation("MovimentoCompensacao", fields: [movimentoOriginalId, lojaId], references: [id, lojaId], onDelete: Restrict)
   compensacoes        MovimentacaoEstoque[]     @relation("MovimentoCompensacao")
   pedidoItem          PedidoCompraItem?         @relation(fields: [pedidoCompraItemId, lojaId], references: [id, lojaId], onDelete: Restrict)
-  baixaOrigem         BaixaVenda?               @relation("BaixaOrigemDevolucao", fields: [baixaOrigemId], references: [id], onDelete: Restrict)
+  // Tenant-safe: a baixa de origem é sempre da mesma loja da movimentação.
+  baixaOrigem         BaixaVenda?               @relation("BaixaOrigemDevolucao", fields: [baixaOrigemId, lojaId], references: [id, lojaId], onDelete: Restrict)
   baixasComoLote      BaixaVenda[]              @relation("BaixaLote")
   baixasComoSaida     BaixaVenda[]              @relation("BaixaSaida")
   reconciliacoesLote  ReconciliacaoLote[]       @relation("ReconciliacaoLote")
@@ -2252,6 +2253,7 @@ model BaixaVenda {
   lote                    MovimentacaoEstoque   @relation("BaixaLote", fields: [movimentoEntradaId, lojaId], references: [id, lojaId], onDelete: Restrict)
   saida                   MovimentacaoEstoque   @relation("BaixaSaida", fields: [movimentoSaidaId, lojaId], references: [id, lojaId], onDelete: Restrict)
 
+  @@unique([id, lojaId])
   @@index([lojaId, movimentoEntradaId])
   @@index([vendaItemId])
 }

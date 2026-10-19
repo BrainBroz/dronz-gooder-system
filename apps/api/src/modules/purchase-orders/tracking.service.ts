@@ -285,15 +285,17 @@ export async function setPackageDestination(
     ].sort())
       await tx.$executeRaw`UPDATE "PedidoCompraItem" SET "updatedAt" = (now() AT TIME ZONE 'UTC') WHERE id = ${itemId}`;
     // Quem passa a esperar o pacote: a posição informada ou, ao voltar ao padrão, o destino do pedido
-    // de cada item presente no pacote (de qualquer loja).
+    // de cada item presente no pacote (de qualquer loja). Sem conteúdo declarado não se sabe de quem
+    // são as unidades: reivindica-se, de forma conservadora, o destino do pedido de quem chama.
     const claims = input.posicaoId
       ? [input.posicaoId]
-      : [
-          ...new Set([
-            destinations.get(pedidoCompraId)!,
-            ...lines.map((line) => destinations.get(line.item.pedidoCompraId)!)
-          ])
-        ].sort();
+      : lines.length
+        ? [
+            ...new Set(
+              lines.map((line) => destinations.get(line.item.pedidoCompraId)!)
+            )
+          ].sort()
+        : [destinations.get(pedidoCompraId)!];
     for (const posicaoId of claims) await claimOpenPosition(tx, posicaoId);
     if (
       await tx.recebimentoMiami.count({

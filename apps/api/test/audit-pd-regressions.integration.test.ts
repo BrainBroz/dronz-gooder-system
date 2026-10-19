@@ -1996,3 +1996,250 @@ describe("revisão local do Codex (332f28c): achado corrigido", () => {
     expect(await closurePendencies(prisma, ctx.hotel.id)).toEqual([]);
   });
 });
+
+describe("auditoria independente do PR #21: ajustes finais", () => {
+  it("voltar ao padrão um pacote só com item Gooder, chamado pelo pedido Dronz, usa o destino Gooder", async () => {
+    const ctx = await packages();
+    const { transition } =
+      await import("../src/modules/positions/positions.service");
+    const gooderStore = await prisma.loja.findUniqueOrThrow({
+      where: { slug: "gooder" }
+    });
+    const gooder = await createOperationalFixture(prisma, gooderStore.id);
+    const temp = (codigo: string) =>
+      prisma.posicaoOperacional.create({
+        data: {
+          localId: ctx.base.localId,
+          codigo: `${codigo}-${randomUUID()}`,
+          nome: codigo,
+          tipo: "TEMPORARIA",
+          status: "ATIVA",
+          inicioEm: new Date(Date.now() - 86_400_000),
+          fimEm: new Date(Date.now() + 86_400_000)
+        }
+      });
+    const dronzDest = await temp("AUD-DRZ");
+    const gooderDest = await temp("AUD-GDR");
+    const purchaseId = (
+      await prisma.pedidoCompra.findUniqueOrThrow({
+        where: { id: ctx.data.order.id }
+      })
+    ).compraImportadaId!;
+    await prisma.pedidoCompra.update({
+      where: { id: ctx.data.order.id },
+      data: { destinoPosicaoId: dronzDest.id }
+    });
+    await prisma.pedidoCompra.update({
+      where: { id: gooder.order.id },
+      data: { compraImportadaId: purchaseId, destinoPosicaoId: gooderDest.id }
+    });
+    cleanups.push(async () => {
+      await prisma.pacoteItem.deleteMany({
+        where: { pedidoCompraItemId: gooder.item.id }
+      });
+      await prisma.pacoteExterno.updateMany({
+        where: { id: { in: [ctx.a.id, ctx.b.id] } },
+        data: { destinoPosicaoId: null }
+      });
+      await prisma.pedidoCompra.update({
+        where: { id: ctx.data.order.id },
+        data: { destinoPosicaoId: ctx.base.id }
+      });
+      await prisma.pedidoCompra.update({
+        where: { id: gooder.order.id },
+        data: {
+          compraImportadaId: null,
+          destinoPosicaoId: "posicao-miami-base"
+        }
+      });
+      await gooder.cleanup();
+      await prisma.posicaoOperacional.deleteMany({
+        where: { id: { in: [dronzDest.id, gooderDest.id] } }
+      });
+    });
+    // Pacote A só com o item da Gooder, redirecionado ao hotel; pacote B sem conteúdo, também redirecionado.
+    expect(
+      (
+        await ctx.put(ctx.a.id, "destination", {
+          posicaoId: ctx.hotel.id,
+          motivo: "Hotel"
+        })
+      ).status
+    ).toBe(200);
+    expect(
+      (
+        await ctx.put(ctx.b.id, "destination", {
+          posicaoId: ctx.hotel.id,
+          motivo: "Hotel"
+        })
+      ).status
+    ).toBe(200);
+    await prisma.pacoteItem.create({
+      data: {
+        lojaId: gooderStore.id,
+        pacoteExternoId: ctx.a.id,
+        pedidoCompraItemId: gooder.item.id,
+        quantidade: 2
+      }
+    });
+    // Destino Dronz encerrado (todas as unidades Dronz estão no pacote B, sem conteúdo declarado → conservador:
+    // força o encerramento direto para montar o cenário).
+    await prisma.posicaoOperacional.update({
+      where: { id: dronzDest.id },
+      data: { status: "ENCERRADA", encerradaEm: new Date() }
+    });
+    // Remover o redirecionamento do pacote só Gooder, chamado pelo pedido Dronz: sucesso.
+    const cleared = await ctx.put(ctx.a.id, "destination", {
+      posicaoId: null,
+      motivo: "Voltar ao padrão"
+    });
+    expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
+    expect(
+      (
+        await prisma.pacoteExterno.findUniqueOrThrow({
+          where: { id: ctx.a.id }
+        })
+      ).destinoPosicaoId
+    ).toBeNull();
+    // Pacote sem conteúdo declarado: continua conservador (usa o destino do pedido de quem chama, encerrado).
+    expect(
+      (
+        await ctx.put(ctx.b.id, "destination", {
+          posicaoId: null,
+          motivo: "Voltar ao padrão"
+        })
+      ).body.error
+    ).toBe("position_closed");
+    expect(
+      (
+        await prisma.pacoteExterno.findUniqueOrThrow({
+          where: { id: ctx.b.id }
+        })
+      ).destinoPosicaoId
+    ).toBe(ctx.hotel.id);
+    // O destino Gooder segue aberto e passa a esperar as unidades do pacote.
+    expect(
+      (
+        await prisma.posicaoOperacional.findUniqueOrThrow({
+          where: { id: gooderDest.id }
+        })
+      ).status
+    ).toBe("ATIVA");
+    await expect(
+      transition(ctx.admin, gooderDest.id, "ENCERRAR")
+    ).rejects.toMatchObject({ code: "items_not_received" });
+  });
+
+  it("movimentação não pode apontar para baixa de outra loja (FK composta baixaOrigemId + lojaId)", async () => {
+    const [dronzStore, gooderStore] = await Promise.all(
+      ["dronz", "gooder"].map((slug) =>
+        prisma.loja.findUniqueOrThrow({ where: { slug } })
+      )
+    );
+    const g = await createOperationalFixture(prisma, gooderStore.id);
+    const d = await createOperationalFixture(prisma, dronzStore.id);
+    const gStock = await prisma.estoque.create({
+      data: {
+        lojaId: gooderStore.id,
+        produtoId: g.product.id,
+        quantidadeFisica: 1
+      }
+    });
+    const dStock = await prisma.estoque.create({
+      data: {
+        lojaId: dronzStore.id,
+        produtoId: d.product.id,
+        quantidadeFisica: 0
+      }
+    });
+    const movement = (tipo: "ENTRY" | "EXIT") =>
+      prisma.movimentacaoEstoque.create({
+        data: {
+          lojaId: gooderStore.id,
+          produtoId: g.product.id,
+          estoqueId: gStock.id,
+          tipo,
+          motivo: tipo === "ENTRY" ? "PURCHASE_RECEIPT" : "SALE",
+          quantidade: 1,
+          quantidadeAnterior: 0,
+          quantidadePosterior: 1,
+          responsavelId: g.admin.id
+        }
+      });
+    const lot = await movement("ENTRY");
+    const exit = await movement("EXIT");
+    const sale = await prisma.venda.create({
+      data: {
+        lojaId: gooderStore.id,
+        canal: "OUTRO",
+        dataVenda: new Date(),
+        moeda: "USD",
+        estado: "CONFIRMADA",
+        criadoPorId: g.admin.id
+      }
+    });
+    const saleItem = await prisma.vendaItem.create({
+      data: {
+        lojaId: gooderStore.id,
+        vendaId: sale.id,
+        produtoId: g.product.id,
+        quantidade: 1,
+        precoUnitario: 10
+      }
+    });
+    const gooderBaixa = await prisma.baixaVenda.create({
+      data: {
+        lojaId: gooderStore.id,
+        vendaItemId: saleItem.id,
+        movimentoEntradaId: lot.id,
+        movimentoSaidaId: exit.id,
+        quantidade: 1,
+        politica: "X-10-LOTE-v1"
+      }
+    });
+    cleanups.push(async () => {
+      await prisma.baixaVenda.delete({ where: { id: gooderBaixa.id } });
+      await prisma.vendaItem.delete({ where: { id: saleItem.id } });
+      await prisma.venda.delete({ where: { id: sale.id } });
+      await g.cleanup();
+      await d.cleanup();
+    });
+    // Lote de devolução da Dronz apontando para a baixa da Gooder: recusado pelo banco.
+    await expect(
+      prisma.movimentacaoEstoque.create({
+        data: {
+          lojaId: dronzStore.id,
+          produtoId: d.product.id,
+          estoqueId: dStock.id,
+          tipo: "RETURN_ENTRY",
+          motivo: "RETURN",
+          quantidade: 1,
+          quantidadeAnterior: 0,
+          quantidadePosterior: 1,
+          responsavelId: d.admin.id,
+          baixaOrigemId: gooderBaixa.id
+        }
+      })
+    ).rejects.toMatchObject({ code: "P2003" });
+    // Na mesma loja, o vínculo é aceito.
+    const sameStore = await prisma.movimentacaoEstoque.create({
+      data: {
+        lojaId: gooderStore.id,
+        produtoId: g.product.id,
+        estoqueId: gStock.id,
+        tipo: "RETURN_ENTRY",
+        motivo: "RETURN",
+        quantidade: 1,
+        quantidadeAnterior: 1,
+        quantidadePosterior: 2,
+        responsavelId: g.admin.id,
+        baixaOrigemId: gooderBaixa.id
+      }
+    });
+    expect(sameStore.baixaOrigemId).toBe(gooderBaixa.id);
+    await prisma.movimentacaoEstoque.update({
+      where: { id: sameStore.id },
+      data: { baixaOrigemId: null }
+    });
+  });
+});
