@@ -107,7 +107,11 @@ analyticsRouter.get(
       .object({
         from: z.coerce.date().optional(),
         to: z.coerce.date().optional(),
-        status: z.string().min(1).optional()
+        status: z.string().min(1).optional(),
+        competencia: z
+          .string()
+          .regex(/^\d{4}-(0[1-9]|1[0-2])$/)
+          .optional()
       })
       .strict()
       .parse(r.query);

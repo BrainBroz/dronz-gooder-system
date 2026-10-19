@@ -29,6 +29,11 @@ afterEach(async () => {
     };
     await prisma.recebivelVenda.deleteMany({ where: sales });
     await prisma.devolucaoVenda.deleteMany({ where: sales });
+    // Lote de devolução aponta para a baixa original (baixaOrigemId): soltar antes de apagar a baixa.
+    await prisma.movimentacaoEstoque.updateMany({
+      where: { produtoId: data.product.id, baixaOrigemId: { not: null } },
+      data: { baixaOrigemId: null }
+    });
     await prisma.baixaVenda.deleteMany({
       where: { item: { produtoId: data.product.id } }
     });

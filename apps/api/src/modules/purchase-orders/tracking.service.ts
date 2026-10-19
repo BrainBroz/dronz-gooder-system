@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { AppError } from "../../lib/app-error";
 import { audit } from "../operations/operations.persistence";
+import { claimOpenPosition } from "../positions/positions.service";
 
 // Batch 14: tracking por pedido operacional. Tracking é evidência de envio, nunca confirma
 // recebimento, checkpoint ou estoque. Fallback manual auditável quando o marketplace não informa.
@@ -230,6 +231,22 @@ export async function lookupTracking(lojaId: string, rawCode: string) {
 
 // D-15: destino por pacote. Alteração auditada só antes de qualquer recebimento da compra; depois,
 // o caminho é transferência operacional. O pacote é físico e pode servir pedidos das duas lojas.
+// Trava os pedidos (ordem fixa) e devolve o destino atual de cada um. Ordem de travas nos comandos de
+// pacote: pacote → pedidos → itens → posições; setDestination: pedido → itens → posição.
+async function lockedOrderDestinations(
+  tx: Prisma.TransactionClient,
+  orderIds: string[]
+) {
+  const destinations = new Map<string, string>();
+  for (const id of [...new Set(orderIds)].sort()) {
+    const [row] = await tx.$queryRaw<
+      { destinoPosicaoId: string }[]
+    >`SELECT "destinoPosicaoId" FROM "PedidoCompra" WHERE id = ${id} FOR NO KEY UPDATE`;
+    if (row) destinations.set(id, row.destinoPosicaoId);
+  }
+  return destinations;
+}
+
 export async function setPackageDestination(
   lojaId: string,
   userId: string,
@@ -239,7 +256,9 @@ export async function setPackageDestination(
 ) {
   return prisma.$transaction(async (tx) => {
     const order = await orderWithPurchase(tx, lojaId, pedidoCompraId);
-    await tx.$queryRaw`SELECT id FROM "PacoteExterno" WHERE id = ${pacoteId} FOR UPDATE`;
+    // FOR NO KEY UPDATE: exclusivo entre editores, compatível com o KEY SHARE da FK de um recebimento
+    // por pacote (que já segura o pedido); FOR UPDATE fecharia um ciclo de espera.
+    await tx.$queryRaw`SELECT id FROM "PacoteExterno" WHERE id = ${pacoteId} FOR NO KEY UPDATE`;
     const pkg = await tx.pacoteExterno.findFirst({
       where: {
         id: pacoteId,
@@ -247,14 +266,37 @@ export async function setPackageDestination(
       }
     });
     if (!pkg) throw new AppError(404, "package_not_found");
-    if (input.posicaoId) {
-      const position = await tx.posicaoOperacional.findUnique({
-        where: { id: input.posicaoId }
-      });
-      if (!position) throw new AppError(404, "position_not_found");
-      if (position.status === "ENCERRADA" || position.status === "CANCELADA")
-        throw new AppError(409, "position_closed");
-    }
+    // O pacote é físico e pode ter linhas das duas lojas. Trocar o destino muda o que cada item pode
+    // receber e onde: toca as linhas dos itens (ordem fixa) para serializar com recebimentos.
+    const lines = await tx.pacoteItem.findMany({
+      where: { pacoteExternoId: pacoteId },
+      select: {
+        pedidoCompraItemId: true,
+        item: { select: { pedidoCompraId: true } }
+      }
+    });
+    // Destinos dos pedidos lidos só depois de travar os pedidos (mesma trava de setDestination).
+    const destinations = await lockedOrderDestinations(tx, [
+      pedidoCompraId,
+      ...lines.map((line) => line.item.pedidoCompraId)
+    ]);
+    for (const itemId of [
+      ...new Set(lines.map((line) => line.pedidoCompraItemId))
+    ].sort())
+      await tx.$executeRaw`UPDATE "PedidoCompraItem" SET "updatedAt" = (now() AT TIME ZONE 'UTC') WHERE id = ${itemId}`;
+    // Quem passa a esperar o pacote: a posição informada ou, ao voltar ao padrão, o destino do pedido
+    // de cada item presente no pacote (de qualquer loja). Sem conteúdo declarado não se sabe de quem
+    // são as unidades: reivindica-se, de forma conservadora, o destino do pedido de quem chama.
+    const claims = input.posicaoId
+      ? [input.posicaoId]
+      : lines.length
+        ? [
+            ...new Set(
+              lines.map((line) => destinations.get(line.item.pedidoCompraId)!)
+            )
+          ].sort()
+        : [destinations.get(pedidoCompraId)!];
+    for (const posicaoId of claims) await claimOpenPosition(tx, posicaoId);
     if (
       await tx.recebimentoMiami.count({
         where: {
@@ -298,7 +340,9 @@ export async function setPackageItems(
 ) {
   return prisma.$transaction(async (tx) => {
     const order = await orderWithPurchase(tx, lojaId, pedidoCompraId);
-    await tx.$queryRaw`SELECT id FROM "PacoteExterno" WHERE id = ${pacoteId} FOR UPDATE`;
+    // FOR NO KEY UPDATE: exclusivo entre editores, compatível com o KEY SHARE da FK de um recebimento
+    // por pacote (que já segura o pedido); FOR UPDATE fecharia um ciclo de espera.
+    await tx.$queryRaw`SELECT id FROM "PacoteExterno" WHERE id = ${pacoteId} FOR NO KEY UPDATE`;
     const pkg = await tx.pacoteExterno.findFirst({
       where: {
         id: pacoteId,
@@ -307,6 +351,22 @@ export async function setPackageItems(
       include: { itens: { where: { lojaId } } }
     });
     if (!pkg) throw new AppError(404, "package_not_found");
+    // O destino do pedido é relido sob a trava do pedido: um redirecionamento concorrente não fica de fora.
+    const orderDestination = (
+      await lockedOrderDestinations(tx, [pedidoCompraId])
+    ).get(pedidoCompraId)!;
+    const ids = input.itens.map((entry) => entry.pedidoCompraItemId);
+    if (new Set(ids).size !== ids.length)
+      throw new AppError(400, "bad_request");
+    // A quantidade comprada do item é o recurso compartilhado entre pacotes: trava as linhas dos itens
+    // (novos e os que saem deste pacote) em ordem fixa antes de somar, e só então confere recebimentos.
+    const lockIds = [
+      ...new Set([...ids, ...pkg.itens.map((line) => line.pedidoCompraItemId)])
+    ].sort();
+    // UPDATE (e não só FOR UPDATE): um recebimento Serializable que esperava esta linha falha por
+    // serialização ao retomar, em vez de validar contra o conteúdo antigo.
+    for (const itemId of lockIds)
+      await tx.$executeRaw`UPDATE "PedidoCompraItem" SET "updatedAt" = (now() AT TIME ZONE 'UTC') WHERE id = ${itemId} AND "lojaId" = ${lojaId}`;
     if (
       await tx.recebimentoMiami.count({
         where: {
@@ -315,9 +375,25 @@ export async function setPackageItems(
       })
     )
       throw new AppError(409, "already_received");
-    const ids = input.itens.map((entry) => entry.pedidoCompraItemId);
-    if (new Set(ids).size !== ids.length)
-      throw new AppError(400, "bad_request");
+    // Conteúdo declarado vira pendência no destino efetivo do pacote; o que sai do pacote (redução ou
+    // remoção) volta a ser esperado no destino do pedido. Toda posição que ganha saldo é reivindicada.
+    const before = new Map(
+      pkg.itens.map((line) => [line.pedidoCompraItemId, line.quantidade])
+    );
+    const grows = input.itens.some(
+      (entry) => entry.quantidade > (before.get(entry.pedidoCompraItemId) ?? 0)
+    );
+    const shrinks = [...before].some(
+      ([itemId, quantidade]) =>
+        quantidade >
+        (input.itens.find((entry) => entry.pedidoCompraItemId === itemId)
+          ?.quantidade ?? 0)
+    );
+    const claims = new Set<string>();
+    if (grows) claims.add(pkg.destinoPosicaoId ?? orderDestination);
+    if (shrinks) claims.add(orderDestination);
+    for (const posicaoId of [...claims].sort())
+      await claimOpenPosition(tx, posicaoId);
     const items = await tx.pedidoCompraItem.findMany({
       where: { id: { in: ids }, lojaId, pedidoCompraId },
       include: { pacotes: { where: { pacoteExternoId: { not: pacoteId } } } }

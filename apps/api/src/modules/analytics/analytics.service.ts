@@ -97,7 +97,13 @@ export async function dashboard(
   };
 }
 
-type ReportFilters = { from?: Date; to?: Date; status?: string };
+type ReportFilters = {
+  from?: Date;
+  to?: Date;
+  status?: string;
+  // Competência "AAAA-MM" (fuso normativo de São Paulo); hoje só o relatório de custos a aceita.
+  competencia?: string;
+};
 export async function report(
   lojaId: string,
   type: string,
@@ -155,6 +161,8 @@ export async function report(
     (!allowedStatuses[type] || !allowedStatuses[type].includes(filters.status))
   )
     throw new AppError(400, "invalid_status");
+  if (filters.competencia && type !== "costs")
+    throw new AppError(400, "competence_not_supported");
   switch (type) {
     case "purchase-orders":
       return prisma.pedidoCompra.findMany({
@@ -244,8 +252,23 @@ export async function report(
     case "costs": {
       // PD-11 (E-4): encargo pertence à competência do pedido original (mês de dataCompra em
       // São Paulo); lançado depois do fim desse mês recebe a marca e mantém a data de lançamento.
+      // Filtro pela competência (data do pedido), não pela data em que o custo foi lançado.
+      // Com `competencia`, o mês vem de competenceRange (início inclusivo, fim exclusivo).
+      const competence = filters.competencia
+        ? competenceRange(
+            Number(filters.competencia.slice(0, 4)),
+            Number(filters.competencia.slice(5, 7))
+          )
+        : null;
       const costs = await prisma.custoPedido.findMany({
-        where: { lojaId, createdAt: period },
+        where: {
+          lojaId,
+          pedido: {
+            dataCompra: competence
+              ? { gte: competence.from, lt: competence.to }
+              : period
+          }
+        },
         include: { itens: true, pedido: true }
       });
       return costs.map((cost) => {

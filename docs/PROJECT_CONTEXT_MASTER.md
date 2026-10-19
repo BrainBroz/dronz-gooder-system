@@ -316,7 +316,7 @@ Continuam abertas e bloqueiam somente seus batches: vigência de cotação (`E-2
   - PD-01: `POST /sales/:id/reverse` (VENDA_CORRIGIR) reverte as baixas, devolve o saldo ao lote original e marca a venda ESTORNADA (relatório `VENDAS_ESTORNADAS`); é bloqueado se houve recebimento ou devolução.
   - PD-02: `POST /sales/:id/returns` registra a devolução sem mexer no estoque; `POST /sales/returns/:id/check` (DEVOLUCAO_CONFERIR), quando apta, cria lote novo com o item de compra do lote vendido.
   - PD-03: `ReconciliacaoLote`. `GET /inventory/lots/:produtoId` diagnostica; `POST .../reconcile` atribui as saídas sem lote aos lotes mais antigos, com motivo; `POST /inventory/lots/entries/:id/purchase-item` liga lote sem custo ao item, limitado ao comprado.
-  - PD-04: `PacoteItem` (conteúdo por pacote); "a caminho" por posição = pacotes destinados + parte sem pacote − recebido. O recebimento ainda não informa o pacote.
+  - PD-04: `PacoteItem` (conteúdo por pacote); "a caminho" por posição = pacotes destinados + parte sem pacote − recebido.
   - PD-08: alerta `ENVIO_QUINTA_ATRASADO` na Home (08:00–12:00 no fuso do Local da posição de origem, sem bloqueio).
   - PD-09: `GET /finance/exchange-rates` traz vigente e idade; o custo avisa `COTACAO_ANTIGA` (mais de 7 dias) ou `COTACAO_SUBSTITUIDA`.
   - PD-10: listas de pedidos e de pagamentos ocultam cancelados e estornos por padrão (`incluirCancelados=true`); os pagamentos trazem totais por moeda.
@@ -324,6 +324,31 @@ Continuam abertas e bloqueiam somente seus batches: vigência de cotação (`E-2
   - PD-12: com `ESTOQUE_PERDA_LIMITE_UNIDADES` definido, perda ou ajuste negativo acima do limite vira proposta (`POST /inventory/movements/loss-requests`), aprovada por outro usuário na fila D-17. Sem a variável, nada muda; o limite é decisão do PO.
   - PD-13: `GESTOR_LOJA` recebe revisão e aprovação buyer, gestão logística, `VENDA_CORRIGIR` e `DEVOLUCAO_CONFERIR`.
   - De passagem, o contador "pedidos a pagar" da Home deixou de descontar reembolsos (regra do B16).
+- Correções da auditoria do Codex sobre PD-01..PD-13 (baseline `363db60`, branch `claude/audit-pd-fixes`):
+  - Conteúdo de pacote: `setPackageItems` trava as linhas de `PedidoCompraItem` em ordem fixa antes de somar, então dois pacotes não ultrapassam juntos a quantidade comprada.
+  - Recebimento: `confirmMiami` aceita `pacoteExternoId`. Valida o vínculo pacote–item–loja, recebe no destino efetivo do pacote (com autorização na posição) até o saldo declarado e grava `RecebimentoMiami.pacoteExternoId`. Sem pacote, só recebe o que não está declarado em pacote algum (`package_receipt_required`).
+  - Encerramento de posição: conta pacotes destinados com saldo, e também pacote redirecionado sem conteúdo declarado.
+  - Concorrência entre redirecionar e encerrar: destino de pacote, conteúdo de pacote e destino de pedido "reivindicam" a posição (`claimOpenPosition`, UPDATE condicional). Posição já encerrada recusa (`position_closed`); encerramento concorrente falha por serialização e, na nova tentativa, enxerga a pendência.
+  - Lote de devolução: aponta para a baixa original (`MovimentacaoEstoque.baixaOrigemId`) e herda o custo congelado dela.
+    - A FK é composta (`baixaOrigemId`, `lojaId`) → `BaixaVenda` (`id`, `lojaId`): o banco recusa baixa de outra loja.
+  - Relatório `costs`: filtra pela competência do pedido (`dataCompra`), não pela data do lançamento. `competencia=AAAA-MM` aplica o mês de America/Sao_Paulo com fim exclusivo; os outros relatórios recusam o parâmetro.
+  - Regra comum de quantidades por posição: `positions/expectations.ts`.
+    - O pendente na posição é o saldo recebível de cada caminho que termina nela (pacotes destinados e, no destino do pedido, o fora de pacote), limitado ao que falta receber do item.
+    - Recebimento antigo (atribuição desconhecida) pesa só nesse limite; nenhum vínculo histórico é inventado. No caso ambíguo, as posições candidatas seguem pendentes até a unidade chegar.
+  - Conteúdo de pacote que diminui devolve o saldo ao destino do pedido, e esse destino também é reivindicado (posição encerrada recusa).
+  - Editar conteúdo ou destino de pacote faz UPDATE nas linhas dos itens (ordem fixa). Um recebimento Serializable concorrente falha por serialização e, na nova tentativa, usa o conteúdo e o destino atuais.
+  - Voltar o destino de um pacote ao padrão reivindica só os destinos dos pedidos que têm itens no pacote, das duas lojas.
+    - Sem conteúdo declarado, vale o caminho conservador: o destino do pedido de quem chama.
+  - Os comandos de pacote leem o destino dos pedidos sob a trava do pedido (a mesma de `setDestination`).
+    - Ordem de travas nos comandos de pacote: pacote → pedidos → itens → posições.
+    - Em `setDestination`: pedido → itens → posição; ele também toca as linhas dos itens, para serializar com recebimentos.
+    - O recebimento (`confirmMiami`) segue a mesma ordem: pedido → item. Não há impasse com redirecionamentos e edições de pacote.
+    - As travas de pacote, pedido e item nesses comandos usam `FOR NO KEY UPDATE`: exclusivas entre editores e compatíveis com o `KEY SHARE` das chaves estrangeiras de recebimentos por pacote.
+    - Edição de itens do pedido (`addItem`/`updateItem`/`removeItem`) também trava o pedido antes do item. Incluir item ou aumentar quantidade reivindica o destino do pedido.
+    - Impasse do PostgreSQL (`40P01`) é tratado como conflito de concorrência (409), não como erro interno.
+  - `RecebimentoMiami.atribuicaoPacoteConhecida` vale true nos recebimentos novos, com pacote citado ou explicitamente fora de pacote.
+    - Os recebimentos anteriores ficam false (atribuição desconhecida): não consomem o saldo fora de pacote e só contam no limite total do item.
+  - Lote de devolução vale pelo custo congelado da baixa original, mesmo quando ele é desconhecido, e não pode ser religado a item de compra (`lot_cost_frozen`).
 - Identidade física unitária, compensação pós-materialização e anexos de evidência (D-6) são gaps de backend ou schema, não capacidades atuais.
 - As três projeções do contrato de UX não podem ser colapsadas no frontend. Materialização comercial não prova localização física e reembolso econômico não move mercadoria automaticamente.
 

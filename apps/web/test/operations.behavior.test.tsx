@@ -84,6 +84,26 @@ describe("UI-3C operacional", () => {
     expect(vi.mocked(api.post).mock.calls[0][2]).toEqual(expect.objectContaining({ headers: expect.objectContaining({ "x-store-id": "store-dronz", Authorization: "Bearer access-test" }) }));
   });
 
+  it("D-15/PD-04: com conteúdo declarado, o recebimento Miami escolhe o pacote e o envia à API", async () => {
+    const withPackages = {
+      ...miami,
+      recebivel: {
+        pacotes: [{ pacoteId: "pkg-a", pacote: "A", destinoPosicaoId: "hotel", quantidade: 1, saldo: 1 }],
+        saldoSemPacote: 1
+      }
+    };
+    installGetMock({ "/operations/miami/candidates": [withPackages] });
+    renderWithProviders(<OperationsPage />);
+    await screen.findByText("Produto Miami");
+    await userEvent.click(screen.getByRole("button", { name: "Confirmar em Miami" }));
+    expect(screen.getByLabelText("Pacote")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Confirmar", exact: true }));
+    await waitFor(() => expect(api.post).toHaveBeenCalled());
+    expect(vi.mocked(api.post).mock.calls[0][1]).toEqual(
+      expect.objectContaining({ pedidoCompraItemId: "item-1", pacoteExternoId: "pkg-a", quantidadeRecebida: 1 })
+    );
+  });
+
   it("reflete NOT_APPLICABLE, bloqueios e ausência de ação exatamente como a API", async () => {
     installGetMock({ "/operations/paraguay/candidates": [{ ...paraguay, applicability: "NOT_APPLICABLE", status: "NOT_APPLICABLE", allowedActions: [], blockedReasons: [{ code: "CHECKPOINT_NOT_APPLICABLE", message: "CHECKPOINT_NOT_APPLICABLE" }] }] });
     renderWithProviders(<OperationsPage />);

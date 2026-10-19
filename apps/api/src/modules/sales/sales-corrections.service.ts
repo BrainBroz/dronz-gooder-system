@@ -243,6 +243,7 @@ export function checkReturn(
               produtoId: item.produtoId,
               estoqueId: stock.id,
               pedidoCompraItemId: baixa.lote.pedidoCompraItemId,
+              baixaOrigemId: baixa.id,
               tipo: "RETURN_ENTRY",
               motivo: "RETURN",
               quantidade: take,

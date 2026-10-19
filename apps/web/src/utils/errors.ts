@@ -88,7 +88,13 @@ const KNOWN_ERROR_MESSAGES: Record<string, string> = {
   purchase_item_not_found: "Item de compra não encontrado neste pedido.",
   loss_requires_approval:
     "Perda acima do limite: registre uma proposta para aprovação por outro usuário.",
-  loss_within_limit: "A perda está dentro do limite; registre o movimento direto."
+  loss_within_limit: "A perda está dentro do limite; registre o movimento direto.",
+  package_item_not_declared: "Este pacote não tem este item declarado.",
+  package_quantity_exceeded: "A quantidade passa do saldo declarado no pacote.",
+  lot_cost_frozen:
+    "Lote de devolução: o custo vem da venda original e não pode ser religado.",
+  package_receipt_required:
+    "As unidades restantes estão declaradas em pacote: escolha o pacote no recebimento."
 };
 const STATUS_FALLBACK_MESSAGES: Record<number, string> = {
   400: "Dados inválidos. Verifique os campos e tente novamente.",

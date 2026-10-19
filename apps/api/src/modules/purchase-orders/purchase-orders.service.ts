@@ -4,6 +4,7 @@ import type { z } from "zod";
 import { prisma } from "../../lib/prisma";
 import { AppError } from "../../lib/app-error";
 import { audit } from "../operations/operations.persistence";
+import { claimOpenPosition } from "../positions/positions.service";
 import type { itemSchema, itemUpdateSchema, orderCreateSchema, orderUpdateSchema } from "./purchase-orders.schemas";
 type OrderCreate = z.infer<typeof orderCreateSchema>;
 type OrderUpdate = z.infer<typeof orderUpdateSchema>;
@@ -151,10 +152,20 @@ export async function changeStatus(
   if (!updated.count) throw new AppError(409, "conflict");
   return get(lojaId, id);
 }
+// Ordem única de travas para quem escreve pedido e itens: pedido → item (recebimento, pacotes,
+// redirecionamento e edição de itens). Itens alterados antes do pedido fechariam ciclo de espera.
+async function lockOrder(tx: Prisma.TransactionClient, lojaId: string, id: string) {
+  const [row] = await tx.$queryRaw<{ destinoPosicaoId: string }[]>`SELECT "destinoPosicaoId" FROM "PedidoCompra" WHERE id = ${id} AND "lojaId" = ${lojaId} FOR NO KEY UPDATE`;
+  return row?.destinoPosicaoId;
+}
+
 export async function addItem(lojaId: string, id: string, d: Item) {
   const o = await get(lojaId, id);
   await product(lojaId, d.produtoId);
   return prisma.$transaction(async (tx) => {
+    // Unidades novas passam a ser esperadas no destino do pedido: ele precisa estar aberto.
+    const destino = await lockOrder(tx, lojaId, o.id);
+    if (destino) await claimOpenPosition(tx, destino);
     await tx.pedidoCompraItem.create({
       data: {
         pedidoCompraId: o.id,
@@ -178,10 +189,14 @@ export async function updateItem(
 ) {
   await get(lojaId, id);
   return prisma.$transaction(async (tx) => {
+    const destino = await lockOrder(tx, lojaId, id);
     const i = await tx.pedidoCompraItem.findFirst({
       where: { id: itemId, pedidoCompraId: id, lojaId }
     });
     if (!i) throw new AppError(404, "not_found");
+    // Aumentar a quantidade cria unidades esperadas no destino do pedido: ele precisa estar aberto.
+    if (destino && d.quantidade !== undefined && d.quantidade > i.quantidade)
+      await claimOpenPosition(tx, destino);
     const q = d.quantidade ?? i.quantidade,
       p = Number(d.precoUnitario ?? i.precoUnitario),
       di = Number(d.descontoItem ?? i.descontoItem);
@@ -195,6 +210,7 @@ export async function updateItem(
 export async function removeItem(lojaId: string, id: string, itemId: string) {
   await get(lojaId, id);
   return prisma.$transaction(async (tx) => {
+    await lockOrder(tx, lojaId, id);
     const r = await tx.pedidoCompraItem.deleteMany({
       where: { id: itemId, pedidoCompraId: id, lojaId }
     });
@@ -249,10 +265,12 @@ export async function setDestination(
     await tx.$queryRaw`SELECT id FROM "PedidoCompra" WHERE id = ${id} AND "lojaId" = ${lojaId} FOR UPDATE`;
     const order = await tx.pedidoCompra.findFirst({ where: { id, lojaId } });
     if (!order) throw new AppError(404, "not_found");
-    const position = await tx.posicaoOperacional.findUnique({ where: { id: posicaoId } });
-    if (!position) throw new AppError(404, "position_not_found");
-    if (position.status === "ENCERRADA" || position.status === "CANCELADA")
-      throw new AppError(409, "position_closed");
+    // Redirecionar o pedido muda onde suas unidades podem ser recebidas: toca as linhas dos itens
+    // (ordem fixa) para que um recebimento concorrente falhe por serialização em vez de usar o destino antigo.
+    const items = await tx.pedidoCompraItem.findMany({ where: { pedidoCompraId: id, lojaId }, select: { id: true }, orderBy: { id: "asc" } });
+    for (const item of items)
+      await tx.$executeRaw`UPDATE "PedidoCompraItem" SET "updatedAt" = (now() AT TIME ZONE 'UTC') WHERE id = ${item.id}`;
+    await claimOpenPosition(tx, posicaoId);
     if (await tx.recebimentoMiami.count({ where: { lojaId, item: { pedidoCompraId: id } } }))
       throw new AppError(409, "already_received");
     const updated = await tx.pedidoCompra.update({

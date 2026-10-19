@@ -1,3 +1,4 @@
+import { expectationSelect, receivableSummary } from "../positions/expectations";
 import { prisma } from "../../lib/prisma";
 import { AppError } from "../../lib/app-error";
 import { hasPermission, type OperationalAction } from "./operations.types";
@@ -51,10 +52,16 @@ export async function miamiCandidates(lojaId: string, permissions: string[], ite
     },
     orderBy: { createdAt: "asc" }
   });
+  // D-15/PD-04: pacotes declarados e saldo fora de pacote para escolher o recebimento correto.
+  const expectations = new Map(
+    (await prisma.pedidoCompraItem.findMany({ where: { id: { in: items.map((item) => item.id) } }, select: expectationSelect }))
+      .map((item) => [item.id, receivableSummary(item)])
+  );
   return items.filter((item) => item.quantidadeRecebidaMiami < item.quantidade).map((item) => {
     const physicalReceivedAt = item.recebimentosMiami[0]?.recebidoEm ?? null;
     return {
       ...item,
+      recebivel: expectations.get(item.id),
       quantidadePendente: item.quantidade - item.quantidadeRecebidaMiami,
       physicalReceivedAt,
       alerta24h: physicalReceivedAt ? now - physicalReceivedAt.getTime() > 86_400_000 : false,
