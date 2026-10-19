@@ -5,7 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Route, Routes } from "react-router-dom";
 import { api } from "../src/api/client";
 import { Shell } from "../src/app";
-import { HomePage, plainDefinition } from "../src/pages/HomePage";
+import { HomePage, date, plainDefinition } from "../src/pages/HomePage";
+import { dashboardQueryKeys } from "../src/queryKeys";
 import { appNavigation, currentPageLabel, visibleNavigation } from "../src/navigation/appNavigation";
 import { useAuthStore } from "../src/stores/auth";
 import { renderWithProviders, testStores } from "./render";
@@ -134,6 +135,48 @@ describe("dashboard", () => {
     );
     expect(plainDefinition("Volumes em PLANNING com pelo menos uma reserva.")).toBe(
       "Volumes em preparação com pelo menos uma reserva."
+    );
+  });
+
+  it("datas usam o fuso operacional, não o do navegador", () => {
+    // 02:00 UTC do dia 18 ainda é dia 17 em America/Sao_Paulo.
+    expect(date("2026-10-18T02:00:00.000Z")).toBe("17/10/2026");
+  });
+
+  it("mantém o rótulo de escopo da seção nas pendências", async () => {
+    vi.spyOn(api, "get").mockImplementation(async (url) => {
+      if (url === "/operations/home")
+        return {
+          data: {
+            referenciaEm: "2026-10-17T12:00:00.000Z",
+            secoes: [{ codigo: "COMPRAS", titulo: "Compras (staging global)", rota: "/compras", itens: [{ codigo: "C1", titulo: "Conflitos", quantidade: 2, definicao: "Conflitos abertos." }] }]
+          }
+        };
+      if (url === "/logistics/trips") return { data: [] };
+      throw new Error(`GET inesperado: ${url}`);
+    });
+    renderWithProviders(<HomePage />, { permissions: [] });
+    expect(await screen.findByText("Compras (staging global)")).toBeTruthy();
+    expect(screen.getByText("Conflitos")).toBeTruthy();
+  });
+
+  it("aprovar compensação recalcula os indicadores do dashboard", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(api, "get").mockImplementation(async (url) => {
+      if (url === "/operations/home")
+        return { data: { referenciaEm: "2026-10-17T12:00:00.000Z", secoes: [{ codigo: "CORRECOES", titulo: "Correções", rota: "/", itens: [] }] } };
+      if (url === "/logistics/trips") return { data: [] };
+      if (url === "/analytics/dashboard") return { data: summary };
+      if (url === "/operations/corrections/requests")
+        return { data: [{ id: "req-1", createdAt: "2026-10-17T11:00:00.000Z", payload: { reason: "Avaria", adjustments: [{ quantityDelta: -1 }] }, propostoPor: { name: "Ana" } }] };
+      throw new Error(`GET inesperado: ${url}`);
+    });
+    vi.spyOn(api, "post").mockResolvedValue({ data: {} });
+    const { queryClient } = renderWithProviders(<HomePage />, { permissions: ["ANALYTICS_VISUALIZAR"] });
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    await user.click(await screen.findByRole("button", { name: "Aprovar" }));
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: dashboardQueryKeys.summary(testStores[0]!.id) })
     );
   });
 });

@@ -421,7 +421,7 @@ Escopo implementado nesta etapa, sem alterar backend, endpoints, schema, migrati
 | Compras recentes | `GET /purchase-orders?page=1&limit=5` (sem cancelados) | loja ativa; mais recentes por `dataCompra` | moeda do pedido | `PEDIDOS_COMPRA_VISUALIZAR` | sem permissão: aviso, nenhuma consulta |
 | Câmbio | `GET /finance/exchange-rates?moedaOrigem=USD&moedaDestino=BRL` → item `vigente`, `idadeDias`, `aviso` | loja ativa | USD→BRL | `FINANCEIRO_VISUALIZAR` | chip omitido sem permissão; "Sem cotação USD→BRL" quando vazio; âmbar para `COTACAO_ANTIGA` |
 
-Falha de carregamento aparece como erro do bloco, nunca como vazio ou zero. Códigos internos (PD-xx, D-xx, X-xx, F-x) e o enum `PLANNING` são removidos do texto exibido das definições.
+Falha de carregamento aparece como erro do bloco, nunca como vazio ou zero. Datas e horários são exibidos em `America/Sao_Paulo` (X-13). As pendências ficam agrupadas pelo título de seção do backend, preservando o escopo (por exemplo, compras em staging global). Aprovar ou rejeitar compensação invalida também os indicadores do dashboard. Códigos internos (PD-xx, D-xx, X-xx, F-x) e o enum `PLANNING` são removidos do texto exibido das definições.
 
 ### 20.2 Limitações e lacunas
 

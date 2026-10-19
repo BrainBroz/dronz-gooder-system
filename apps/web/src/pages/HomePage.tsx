@@ -61,7 +61,9 @@ function CompensationQueue({ store }: { store: string }) {
   const refresh = () =>
     Promise.all([
       client.invalidateQueries({ queryKey: ["compensation-requests", store] }),
-      client.invalidateQueries({ queryKey: homeKey(store) })
+      client.invalidateQueries({ queryKey: homeKey(store) }),
+      // A decisão altera estoque: os indicadores do dashboard precisam ser recalculados.
+      client.invalidateQueries({ queryKey: dashboardQueryKeys.summary(store) })
     ]);
   const decide = useMutation({
     mutationFn: ({ id, approve }: { id: string; approve: boolean }) =>
@@ -193,7 +195,10 @@ const byCurrency = (totals: Record<string, string>) => {
   const entries = Object.entries(totals);
   return entries.length ? entries.map(([currency, value]) => money(currency, value)).join(" · ") : "Sem valores";
 };
-const date = (value: string) => new Date(value).toLocaleDateString("pt-BR");
+// Exibição padrão no fuso operacional Brasil (X-13), independente do fuso do navegador.
+const TIME_ZONE = "America/Sao_Paulo";
+export const date = (value: string) => new Date(value).toLocaleDateString("pt-BR", { timeZone: TIME_ZONE });
+const dateTime = (value: string) => new Date(value).toLocaleString("pt-BR", { timeZone: TIME_ZONE });
 
 function Panel({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return (
@@ -271,7 +276,7 @@ function ExchangeChip({ store }: { store: string }) {
         ? `USD→BRL ${Number(current.valor).toLocaleString("pt-BR", { maximumFractionDigits: 4 })} · ${current.idadeDias === 0 ? "hoje" : `há ${current.idadeDias} d`}`
         : "Sem cotação USD→BRL";
   return (
-    <Tooltip title={old ? "Cotação vigente antiga: registre uma nova no Financeiro." : current ? `Cotada em ${new Date(current.cotadoEm).toLocaleString("pt-BR")}` : ""}>
+    <Tooltip title={old ? "Cotação vigente antiga: registre uma nova no Financeiro." : current ? `Cotada em ${dateTime(current.cotadoEm)}` : ""}>
       <Box sx={{ alignSelf: "flex-start", px: 1.25, py: 0.5, borderRadius: "8px", fontFamily: fontMono, fontSize: "0.75rem", color: old || !current ? visualTokens.amber : visualTokens.textSecondary, bgcolor: old || !current ? "rgba(245, 158, 11, 0.12)" : visualTokens.bg3, border: `1px solid ${visualTokens.border}` }}>
         {label}
       </Box>
@@ -308,10 +313,10 @@ function HomeContent() {
     queryFn: async () => (await api.get("/purchase-orders", { headers, params: { page: 1, limit: 5 } })).data
   });
 
-  const pendingItems =
-    home.data?.secoes.flatMap((section) =>
-      section.itens.filter((item) => item.quantidade > 0).map((item) => ({ ...item, rota: section.rota }))
-    ) ?? [];
+  // Mantém o título da seção vindo do backend: ele carrega o escopo (ex.: compras em staging global).
+  const pendingSections = (home.data?.secoes ?? [])
+    .map((section) => ({ ...section, itens: section.itens.filter((item) => item.quantidade > 0) }))
+    .filter((section) => section.itens.length > 0);
   const activeTrips = (trips.data ?? []).filter((trip) => activeTripStatuses.includes(trip.status));
   const statusEntries = Object.entries(summary.data?.orders.byStatus ?? {}).sort((a, b) => b[1] - a[1]);
   const maxStatus = Math.max(1, ...statusEntries.map(([, count]) => count));
@@ -324,7 +329,7 @@ function HomeContent() {
           <Typography variant="body2" color="text.secondary">
             Visão geral da loja{" "}
             <Box component="span" sx={{ color: storeColor(activeStore?.slug), fontWeight: 600 }}>{activeStore?.nome ?? "—"}</Box>
-            {home.data && ` · pendências calculadas em ${new Date(home.data.referenciaEm).toLocaleString("pt-BR")}`}
+            {home.data && ` · pendências calculadas em ${dateTime(home.data.referenciaEm)}`}
           </Typography>
         </Box>
         {store && can("FINANCEIRO_VISUALIZAR") && <ExchangeChip store={store} />}
@@ -422,16 +427,23 @@ function HomeContent() {
                   {can("CATALOGO_VISUALIZAR") && <Button size="small" onClick={() => navigate("/produtos")}>Ver</Button>}
                 </Stack>
               )}
-              {pendingItems.length === 0 && <Muted>Nenhuma ação pendente neste contexto.</Muted>}
-              {pendingItems.map((item) => (
+              {pendingSections.length === 0 && <Muted>Nenhuma ação pendente neste contexto.</Muted>}
+              {pendingSections.map((section) => (
+                <Box key={section.codigo}>
+                  <Typography component="h3" sx={{ fontSize: "0.6875rem", fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: visualTokens.textMuted, mt: 0.5 }}>
+                    {section.titulo}
+                  </Typography>
+                  {section.itens.map((item) => (
                 <Stack key={item.codigo} direction="row" gap={1.25} alignItems="flex-start" sx={{ py: 0.75, borderBottom: `1px solid ${visualTokens.border}`, "&:last-child": { borderBottom: 0 } }}>
                   <Typography sx={{ fontFamily: fontMono, fontWeight: 600, color: visualTokens.amber, minWidth: 28 }}>{item.quantidade}</Typography>
                   <Box sx={{ flex: 1, minWidth: 0 }}>
                     <Typography variant="body2" sx={{ fontWeight: 600 }}>{item.titulo}</Typography>
                     <Typography sx={{ fontSize: "0.75rem", color: visualTokens.textSecondary }}>{plainDefinition(item.definicao)}</Typography>
                   </Box>
-                  {item.rota !== "/" && <Button size="small" onClick={() => navigate(item.rota)}>Abrir</Button>}
+                  {section.rota !== "/" && <Button size="small" onClick={() => navigate(section.rota)}>Abrir</Button>}
                 </Stack>
+                  ))}
+                </Box>
               ))}
             </Stack>
           )}
