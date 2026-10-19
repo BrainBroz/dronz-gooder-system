@@ -183,7 +183,9 @@ export function buildPayload(form: SimForm, quote: CotacaoVigente | null) {
     const valor = required(form.notaValor);
     if (!valor) return null;
     notaFiscal = { modo: form.notaModo, valorUnitarioBrl: valor };
-  } else if (form.notaModo === "BASE_PENDENTE") notaFiscal = { modo: form.notaModo };
+  } else if (form.notaModo === "BASE_PENDENTE")
+    // O percentual conhecido vai junto, para o snapshot guardá-lo enquanto a base não é definida.
+    notaFiscal = { modo: form.notaModo, ...(valid(form.notaPercentual) ? { percentual: num(form.notaPercentual) } : {}) };
   else {
     const percentual = required(form.notaPercentual);
     if (!percentual) return null;

@@ -435,3 +435,53 @@ describe("texto livre nas Configurações", () => {
     expect(body.taxasMarketplace[0]!.descricao).toBe("Referência PO, 2x");
   });
 });
+
+describe("atualização em segundo plano e nota com base pendente", () => {
+  const mockSettings = (state: { current: object }) =>
+    vi.spyOn(api, "get").mockImplementation(async (url) => {
+      if (url === "/economic-settings") return { data: state.current };
+      if (url === "/economic-settings/exchange-rate") return { data: { cotacao: quote } };
+      throw new Error(`GET inesperado: ${url}`);
+    });
+  const v2 = { ...vigente, id: "param-2", versao: 2, acrescimoCambialBrl: "0.35" };
+
+  it("com rascunho, uma versão nova não apaga a edição e é avisada", async () => {
+    const user = userEvent.setup();
+    const state = { current: { vigente, versoes: [], referenciasPO } as object };
+    mockSettings(state);
+    const { queryClient } = renderWithProviders(<EconomicSettingsPage />, { permissions: ["FINANCEIRO_VISUALIZAR", "FINANCEIRO_REGISTRAR"] });
+    await user.type(await screen.findByLabelText("Observações"), "rascunho em andamento");
+    await user.type(screen.getByLabelText(/^Fonte/), "banco X");
+    state.current = { vigente: v2, versoes: [], referenciasPO };
+    await queryClient.invalidateQueries();
+    expect(await screen.findByText(/A versão 2 foi gravada enquanto você editava/)).toBeTruthy();
+    expect((screen.getByLabelText("Observações") as HTMLInputElement).value).toBe("rascunho em andamento");
+    expect((screen.getByLabelText(/Acréscimo cambial/) as HTMLInputElement).value).toBe("0.2");
+    expect((screen.getByLabelText(/^Fonte/) as HTMLInputElement).value).toBe("banco X");
+    await user.click(screen.getByRole("button", { name: "Descartar rascunho e carregar a versão vigente" }));
+    expect((screen.getByLabelText(/Acréscimo cambial/) as HTMLInputElement).value).toBe("0.35");
+    expect((screen.getByLabelText("Observações") as HTMLInputElement).value).toBe("");
+  });
+
+  it("sem edição local, o formulário passa a mostrar a versão nova", async () => {
+    const state = { current: { vigente, versoes: [], referenciasPO } as object };
+    mockSettings(state);
+    const { queryClient } = renderWithProviders(<EconomicSettingsPage />, { permissions: ["FINANCEIRO_VISUALIZAR", "FINANCEIRO_REGISTRAR"] });
+    expect(((await screen.findByLabelText(/Acréscimo cambial/)) as HTMLInputElement).value).toBe("0.2");
+    state.current = { vigente: v2, versoes: [], referenciasPO };
+    await queryClient.invalidateQueries();
+    await waitFor(() => expect((screen.getByLabelText(/Acréscimo cambial/) as HTMLInputElement).value).toBe("0.35"));
+    expect(screen.queryByText(/foi gravada enquanto você editava/)).toBeNull();
+  });
+
+  it("base pendente guarda o percentual conhecido e a reabertura o recupera", () => {
+    const settingsPendente = { vigente: { ...vigente, notaFiscalBase: null }, versoes: [], referenciasPO } as never;
+    const form = { ...withProduct(initialForm(settingsPendente, quote as never), { id: "a", nome: "A", codigo: 1, peso: "0.5", precoVenda: "900" }), precoCompra: "100" };
+    expect(form.notaModo).toBe("BASE_PENDENTE");
+    const payload = buildPayload(form, quote as never) as { venda: { notaFiscal: object } } & Record<string, unknown>;
+    expect(payload.venda.notaFiscal).toEqual({ modo: "BASE_PENDENTE", percentual: "5" });
+    const entrada = { ...payload, cambio: null, cambioOrigem: { origem: "COTACAO_REGISTRADA" }, produto: { id: "a", nome: "A", codigo: 1 } } as unknown as SavedEntrada;
+    const reopened = formFromSaved(entrada, initialForm(settingsPendente, null));
+    expect([reopened.notaModo, reopened.notaPercentual]).toEqual(["BASE_PENDENTE", "5"]);
+  });
+});

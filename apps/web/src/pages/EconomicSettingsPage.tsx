@@ -236,9 +236,29 @@ function ExchangeSection({ store, canWrite, acrescimoPadrao }: { store: string; 
 function SettingsForm({ data, store, canWrite }: { data: SettingsResponse; store: string; canWrite: boolean }) {
   const client = useQueryClient();
   const [form, setForm] = useState<FormState>(() => initialForm(data));
-  const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((current) => ({ ...current, [key]: value }));
+  const [dirty, setDirty] = useState(false);
+  const edit = (update: (current: FormState) => FormState) => {
+    setDirty(true);
+    setForm(update);
+  };
+  const set = <K extends keyof FormState>(key: K, value: FormState[K]) => edit((current) => ({ ...current, [key]: value }));
   const setTaxa = (index: number, patch: Partial<TaxaForm>) =>
-    setForm((current) => ({ ...current, taxas: current.taxas.map((taxa, i) => (i === index ? { ...taxa, ...patch } : taxa)) }));
+    edit((current) => ({ ...current, taxas: current.taxas.map((taxa, i) => (i === index ? { ...taxa, ...patch } : taxa)) }));
+  // Nova versão gravada por outra pessoa: sem edição local, o formulário passa a mostrá-la; com rascunho,
+  // o rascunho é mantido e o aviso informa a versão nova (ajuste durante o render, sem efeito).
+  const [baseId, setBaseId] = useState(data.vigente?.id ?? null);
+  const [outdated, setOutdated] = useState<number | null>(null);
+  const incomingId = data.vigente?.id ?? null;
+  if (incomingId !== baseId) {
+    setBaseId(incomingId);
+    if (dirty) setOutdated(data.vigente?.versao ?? null);
+    else setForm(initialForm(data));
+  }
+  const discardDraft = () => {
+    setForm(initialForm(data));
+    setDirty(false);
+    setOutdated(null);
+  };
   // Cliques repetidos com o mesmo conteúdo não criam versões duplicadas.
   const saveKey = useContentKey();
   const save = useMutation({
@@ -263,6 +283,9 @@ function SettingsForm({ data, store, canWrite }: { data: SettingsResponse; store
       return api.post("/economic-settings", body, { headers: { ...authHeader(), "x-store-id": store, "Idempotency-Key": saveKey(body) } });
     },
     onSuccess: () => {
+      // Gravado: a versão que voltar do servidor substitui o formulário.
+      setDirty(false);
+      setOutdated(null);
       return client.invalidateQueries({ queryKey: economicQueryKeys.settings(store) });
     }
   });
@@ -276,6 +299,14 @@ function SettingsForm({ data, store, canWrite }: { data: SettingsResponse; store
       }}
     >
       <Stack gap={2}>
+        {outdated !== null && (
+          <Box role="status" sx={{ p: 1.25, borderRadius: "8px", bgcolor: "rgba(245, 158, 11, 0.08)", border: "1px solid rgba(245, 158, 11, 0.25)" }}>
+            <Typography variant="body2" sx={{ color: visualTokens.amber }}>
+              A versão {outdated} foi gravada enquanto você editava. Seu rascunho foi mantido; ao gravar, ele vira uma nova versão.
+            </Typography>
+            <Button size="small" onClick={discardDraft}>Descartar rascunho e carregar a versão vigente</Button>
+          </Box>
+        )}
         <Section
           title="Parâmetros de estimativa"
           description="Usados para pré-preencher o simulador. Gravar cria uma nova versão; simulações salvas guardam os valores que usaram e não são recalculadas."
@@ -408,9 +439,9 @@ function SettingsContent() {
         </Typography>
       </Box>
       {store && settings.data && (
-        // Montada após os parâmetros: o acréscimo vigente pré-preenche o registro manual.
+        // Montada após os parâmetros: o acréscimo vigente pré-preenche o registro manual. Sem key por versão,
+        // para uma atualização em segundo plano não apagar um registro manual em digitação.
         <ExchangeSection
-          key={settings.data.vigente?.id ?? "sem-parametros"}
           store={store}
           canWrite={canWrite}
           acrescimoPadrao={settings.data.vigente?.acrescimoCambialBrl ?? null}
@@ -419,8 +450,7 @@ function SettingsContent() {
       {settings.isLoading && <Typography variant="body2" role="status">Carregando parâmetros…</Typography>}
       {settings.isError && <Typography variant="body2" role="alert">Não foi possível carregar os parâmetros.</Typography>}
       {settings.data && store && (
-        // Remonta o formulário quando chega uma nova versão gravada.
-        <SettingsForm key={settings.data.vigente?.id ?? "novo"} data={settings.data} store={store} canWrite={canWrite} />
+        <SettingsForm data={settings.data} store={store} canWrite={canWrite} />
       )}
     </Stack>
   );
