@@ -80,7 +80,8 @@ describe("sessão web", () => {
         </Routes>,
         { route: "/operacao" }
       );
-      await user.click(screen.getByRole("button", { name: "Sair" }));
+      await user.click(screen.getByRole("button", { name: "Menu do usuário" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Sair" }));
       await screen.findByText("Login após saída");
       expect(queryClient.getQueryData(["private"])).toBeUndefined();
       expect(useAuthStore.getState().accessToken).toBeNull();
@@ -97,9 +98,11 @@ describe("sessão web", () => {
       { route: "/operacao", permissions: ["CATALOGO_VISUALIZAR"] }
     );
 
-    expect(screen.getByRole("button", { name: "Abrir menu" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Financeiro" })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Categorias" }));
+    await user.click(screen.getByRole("button", { name: "Abrir menu" }));
+    expect(screen.queryByRole("link", { name: "Financeiro" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Vendas e Financeiro" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Administração" }));
+    await user.click(screen.getByRole("link", { name: "Categorias" }));
     expect(await screen.findByText("Categorias acessíveis")).toBeTruthy();
   });
 

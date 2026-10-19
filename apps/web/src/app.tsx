@@ -1,18 +1,13 @@
 import React from "react";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import {
-  AppBar,
   Box,
   Button,
   Card,
   CardContent,
   CssBaseline,
-  Drawer,
-  MenuItem,
-  Select,
   Stack,
   TextField,
-  Toolbar,
   Typography,
   ThemeProvider
 } from "@mui/material";
@@ -24,6 +19,7 @@ import { appTheme } from "./theme";
 import { api, queryClient } from "./api/client";
 import { useAuthStore } from "./stores/auth";
 import { extractErrorMessage } from "./utils/errors";
+import { AppShell } from "./components/layout/AppShell";
 
 const DashboardPage = React.lazy(() =>
   import("./pages/DashboardPage").then((module) => ({
@@ -235,129 +231,7 @@ export function LoginPage() {
 }
 
 export function Shell({ children }: { children: React.ReactNode }) {
-  const { user, stores, activeStoreId, setActiveStoreId, clear, permissions } =
-    useAuthStore();
-  const navigate = useNavigate();
-  const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
-  // Só esconde atalhos: a autorização continua sendo decidida pela API.
-  const allNavigationItems: [string, string, string[]?][] = [
-    ["Início", "/"],
-    ["Operação", "/operacao"],
-    ["Checkpoints", "/checkpoints"],
-    ["Categorias", "/categorias", ["CATALOGO_VISUALIZAR"]],
-    ["Produtos", "/produtos", ["CATALOGO_VISUALIZAR"]],
-    ["Fornecedores", "/fornecedores", ["CATALOGO_VISUALIZAR"]],
-    ["Compras", "/compras", ["COMPRAS_IMPORTADAS_VISUALIZAR"]],
-    ["Revisão buyer", "/compras/revisao", ["BUYER_INGESTION_VISUALIZAR"]],
-    ["Painel mensal", "/compras/painel-mensal", ["COMPRAS_IMPORTADAS_VISUALIZAR"]],
-    ["Pedidos Operacionais", "/pedidos", ["PEDIDOS_COMPRA_VISUALIZAR"]],
-    ["Logística", "/logistica"],
-    ["Posições", "/posicoes"],
-    ["Estoque", "/estoque", ["ESTOQUE_VISUALIZAR", "RECEBIMENTO_VISUALIZAR"]],
-    ["Vendas", "/vendas", ["VENDA_VISUALIZAR"]],
-    ["Financeiro", "/financeiro", ["FINANCEIRO_VISUALIZAR"]],
-    ["Relatórios", "/relatorios", ["ANALYTICS_VISUALIZAR"]]
-  ];
-  const navigationItems = allNavigationItems.filter(
-    ([, , required]) =>
-      !required ||
-      permissions.includes("SYSTEM_ADMIN") ||
-      required.some((code) => permissions.includes(code))
-  );
-  const navigateFromMenu = (path: string) => {
-    setMobileMenuOpen(false);
-    navigate(path);
-  };
-  const drawerContent = (
-    <Box p={2} sx={{ width: 224 }}>
-      <Typography variant="h6">Dronz & Gooder</Typography>
-      <Stack mt={2} gap={1}>
-        {stores.map((store) => (
-          <Button
-            key={store.id}
-            variant={store.id === activeStoreId ? "contained" : "text"}
-            onClick={() => setActiveStoreId(store.id)}
-          >
-            {store.nome}
-          </Button>
-        ))}
-        {navigationItems.map(([label, path]) => (
-          <Button key={path} onClick={() => navigateFromMenu(path)}>
-            {label}
-          </Button>
-        ))}
-      </Stack>
-    </Box>
-  );
-  const logout = async () => {
-    try {
-      await api.post("/auth/logout");
-    } catch {
-      // A intenção de sair deve encerrar a sessão local mesmo sem resposta da API.
-    } finally {
-      queryClient.clear();
-      clear();
-      navigate("/login");
-    }
-  };
-  return (
-    <Box sx={{ display: "flex" }}>
-      <Drawer
-        variant="temporary"
-        open={mobileMenuOpen}
-        onClose={() => setMobileMenuOpen(false)}
-        sx={{ display: { xs: "block", md: "none" } }}
-        slotProps={{ paper: { sx: { width: 224 } } }}
-      >
-        {drawerContent}
-      </Drawer>
-      <Drawer
-        variant="permanent"
-        sx={{ display: { xs: "none", md: "block" } }}
-      >
-        {drawerContent}
-      </Drawer>
-      <Box
-        component="main"
-        sx={{ flex: 1, minWidth: 0, ml: { xs: 0, md: 28 } }}
-      >
-        <AppBar position="static">
-          <Toolbar sx={{ gap: 1 }}>
-            <Button
-              onClick={() => setMobileMenuOpen(true)}
-              sx={{ display: { xs: "inline-flex", md: "none" }, mr: 1 }}
-              aria-label="Abrir menu"
-            >
-              Menu
-            </Button>
-            <Typography
-              sx={{ flex: 1, display: { xs: "none", sm: "block" } }}
-            >
-              {user?.email}
-            </Typography>
-            <Select
-              size="small"
-              value={activeStoreId ?? ""}
-              onChange={(event) => setActiveStoreId(String(event.target.value))}
-              sx={{
-                ml: "auto",
-                mr: { xs: 0, sm: 1 },
-                minWidth: { xs: 110, sm: 140 }
-              }}
-            >
-              {stores.map((store) => (
-                <MenuItem key={store.id} value={store.id}>
-                  {store.nome}
-                </MenuItem>
-              ))}
-            </Select>
-            <Button onClick={logout}>Sair</Button>
-          </Toolbar>
-        </AppBar>
-        {children}
-      </Box>
-    </Box>
-  );
+  return <AppShell>{children}</AppShell>;
 }
 
 export function NotFoundPage() {

@@ -31,8 +31,9 @@ describe("web app", () => {
     expect(html).toContain("Operação");
     expect(html).toContain("Loja ativa: Dronz");
     expect(html).toContain("Dados da operação");
-    expect(visualTokens.dronz).toBe("#a78bfa");
-    expect(visualTokens.gooder).toBe("#2dd4bf");
+    // Referência visual aprovada (Bolt): Dronz verde, Gooder roxo.
+    expect(visualTokens.dronz).toBe("#22C55E");
+    expect(visualTokens.gooder).toBe("#A855F7");
     expect(appTheme.palette.background.default).toBe(visualTokens.bg);
   });
 

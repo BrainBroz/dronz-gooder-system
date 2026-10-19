@@ -16,7 +16,7 @@ Este contrato não declara a nova interface implementada. Capacidades planejadas
 6. Cor nunca é a única forma de identificar Dronz, Gooder, pendência, divergência ou estado.
 7. Métrica sem fonte suficiente é exibida como indisponível ou não calculável, nunca simulada.
 8. Valores projetados e realizados permanecem separados.
-9. O Modernize é somente referência visual. Não introduzir Next.js nem copiar código, assets ou arquivos sem licença confirmada.
+9. A referência principal aprovada pelo Product Owner para produto, navegação, organização das áreas e aparência é o protótipo Bolt (`SISTEMA BOLT/project`; publicado em `international-purcha-oyoe.bolt.host`). O Modernize deixa de ser a referência principal. A reprodução é feita em MUI, sem introduzir Tailwind, Next.js ou Supabase e sem portar dados simulados, autenticação em memória, notificações fictícias, valores fixos ou cálculos de negócio do protótipo (ver seção 20).
 
 ## 3. Diagnóstico da experiência atual
 
@@ -394,3 +394,46 @@ Cada batch define escopo, fora de escopo, dependências, critérios de aceite, t
 ## 19. Status
 
 O contrato de UX está aprovado para registro documental. As decisões E-2 a E-5 e os gaps listados permanecem locais aos batches correspondentes. A reconstrução não começa automaticamente com este documento e exige autorização por batch.
+
+## 20. Reconstrução visual baseada no Bolt — Etapa 1 (navegação e dashboard)
+
+Escopo implementado nesta etapa, sem alterar backend, endpoints, schema, migrations, RBAC, auditoria, idempotência ou regras de domínio:
+
+- **Tema:** fundo escuro `#0B0F1A`, superfícies `#131929`/`#1E2A3A`, azul `#3B82F6` para ações primárias, Dronz verde `#22C55E`, Gooder roxo `#A855F7`, Plus Jakarta Sans e IBM Plex Mono (Google Fonts via `index.html`), cards compactos e cabeçalhos de tabela densos (`apps/web/src/theme.ts`).
+- **Shell** (`components/layout/AppShell.tsx`): lateral de 240 px aberta por padrão no desktop e recolhível para 60 px; drawer acessível no celular ("Abrir menu"); cabeçalho compacto com a página atual, seletor de loja e menu do usuário (nome, e-mail, loja ativa, "Sair").
+- **Navegação agrupada** (`navigation/appNavigation.ts`), só com rotas existentes e visibilidade por permissão (a autorização continua no backend): Dashboard; Compras (Fila, Revisão, Pedidos operacionais, Painel mensal); Logística (Viagens e malas, Posições, Checkpoints); Estoque; Produtos; Vendas e Financeiro (Vendas, Financeiro); Relatórios (Relatórios, Resumo analítico); Administração (Categorias, Fornecedores). Grupo sem link permitido some.
+- **Loja:** botões por loja acessível (Dronz verde, Gooder roxo). `Todos` aparece desabilitado com explicação, porque não existe read model consolidado e o backend responde por `x-store-id`; não há consolidação no cliente. A troca remonta o dashboard pela chave da loja.
+- **Dashboard** (`/`, `pages/HomePage.tsx`): indicadores, visão econômica quando autorizada, pendências e alertas, situação logística, compras recentes; a fila de compensações (aprovar/rejeitar) foi preservada.
+
+### 20.1 Fontes dos indicadores
+
+| Bloco | Endpoint e campo | Escopo e período | Moeda | Permissão | Sem dado / sem permissão |
+|---|---|---|---|---|---|
+| Pedidos de compra | `GET /analytics/dashboard` → `orders.count`, `orders.total` | loja ativa; acumulado (sem filtro de período), inclui cancelados | por moeda, sem conversão | `ANALYTICS_VISUALIZAR`; total exige `FINANCEIRO_VISUALIZAR` (`null` do backend) | sem análise: aviso, nenhuma consulta; `total = null` → "Valores exigem acesso financeiro" |
+| Viagens abertas | `/analytics/dashboard` → `openTrips` | loja ativa; status PLANNED, OPEN/CLOSED_FOR_ALLOCATION, IN_TRANSIT | — | `ANALYTICS_VISUALIZAR` | idem |
+| Recebimentos pendentes | `/analytics/dashboard` → `pendingReceiving` | loja ativa; não COMPLETED/REJECTED | — | `ANALYTICS_VISUALIZAR` | idem |
+| Estoque disponível | `/analytics/dashboard` → `inventory.available/reserved/zero` | loja ativa; saldo atual | unidades | `ANALYTICS_VISUALIZAR` | idem |
+| Visão econômica | `/analytics/dashboard` → `orders.total`, `payments.paid`, `payments.pending` | loja ativa; acumulado | por moeda | `ANALYTICS_VISUALIZAR` + `FINANCEIRO_VISUALIZAR` | "Valores econômicos exigem acesso financeiro." |
+| Pedidos por situação | `/analytics/dashboard` → `orders.byStatus` | loja ativa; acumulado | — | `ANALYTICS_VISUALIZAR` | "Nenhum pedido registrado nesta loja." |
+| Markup | `/analytics/dashboard` → `belowMarkup` (< 25%) | loja ativa | — | `ANALYTICS_VISUALIZAR` | alerta só quando > 0 |
+| Pendências | `GET /operations/home` → `secoes[].itens[]` (`quantidade > 0`) e `rota` | loja ativa (seção Compras é staging global, como no backend); instante `referenciaEm` | — | autenticado; seções filtradas pelo backend | "Nenhuma ação pendente neste contexto." |
+| Situação logística | `GET /logistics/trips` (status ativos, 5 primeiras) | loja ativa | — | autenticado + loja | "Nenhuma viagem ativa nesta loja." |
+| Compras recentes | `GET /purchase-orders?page=1&limit=5` (sem cancelados) | loja ativa; mais recentes por `dataCompra` | moeda do pedido | `PEDIDOS_COMPRA_VISUALIZAR` | sem permissão: aviso, nenhuma consulta |
+| Câmbio | `GET /finance/exchange-rates?moedaOrigem=USD&moedaDestino=BRL` → item `vigente`, `idadeDias`, `aviso` | loja ativa | USD→BRL | `FINANCEIRO_VISUALIZAR` | chip omitido sem permissão; "Sem cotação USD→BRL" quando vazio; âmbar para `COTACAO_ANTIGA` |
+
+Falha de carregamento aparece como erro do bloco, nunca como vazio ou zero. Códigos internos (PD-xx, D-xx, X-xx, F-x) e o enum `PLANNING` são removidos do texto exibido das definições.
+
+### 20.2 Limitações e lacunas
+
+- Sem série histórica: o backend entrega só o acumulado; os gráficos de receita/lucro e estoque por empresa do Bolt não foram reproduzidos, e o painel declara a lacuna.
+- Sem visão `Todos`: depende de read model global com RBAC global.
+- Simulador de compras (backend `/simulations` existe, sem tela), Simulador de viagem e Configurações/Usuários não existem e ficaram fora do menu.
+- Caixa de prazos semanais e taxa operacional na lateral do Bolt não foram portadas, para não fixar valores no cliente.
+- Notificações (sino) não existem no backend e não foram simuladas.
+- A loja ativa e o estado recolhido da lateral não persistem após recarregar a página.
+- Rotas-alias (`/viajantes`, `/viagens`, `/malas`, `/recebimentos`) abrem a página correta sem item ativo no menu.
+- As páginas internas herdam o tema, mas não foram redesenhadas; ajustes de layout delas ficam para as próximas etapas.
+
+### 20.3 Próximos passos
+
+Redesenho por área na ordem de navegação (Compras, Logística, Estoque, Produtos, Vendas e Financeiro, Relatórios), cada uma com autorização própria; read models de série histórica e visão consolidada exigem decisão de backend antes da UI. A reconstrução visual não está concluída.
