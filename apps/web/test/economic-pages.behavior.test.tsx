@@ -485,3 +485,49 @@ describe("atualização em segundo plano e nota com base pendente", () => {
     expect([reopened.notaModo, reopened.notaPercentual]).toEqual(["BASE_PENDENTE", "5"]);
   });
 });
+
+describe("gravação dos parâmetros com outros operadores", () => {
+  const mockSettings = (state: { current: object }) =>
+    vi.spyOn(api, "get").mockImplementation(async (url) => {
+      if (url === "/economic-settings") return { data: state.current };
+      if (url === "/economic-settings/exchange-rate") return { data: { cotacao: quote } };
+      throw new Error(`GET inesperado: ${url}`);
+    });
+
+  it("durante a gravação os campos ficam travados; depois voltam a aceitar edição", async () => {
+    const user = userEvent.setup();
+    mockSettings({ current: { vigente, versoes: [], referenciasPO } });
+    let respond!: () => void;
+    vi.spyOn(api, "post").mockReturnValue(new Promise((resolve) => (respond = () => resolve({ data: {} }))));
+    renderWithProviders(<EconomicSettingsPage />, { permissions: ["FINANCEIRO_VISUALIZAR", "FINANCEIRO_REGISTRAR"] });
+    await user.click(await screen.findByRole("button", { name: "Gravar nova versão" }));
+    await waitFor(() => expect((screen.getByLabelText("Observações") as HTMLInputElement).disabled).toBe(true));
+    expect((screen.getByLabelText(/Acréscimo cambial/) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Remover taxa 1" }) as HTMLButtonElement).disabled).toBe(true);
+    respond();
+    await waitFor(() => expect((screen.getByLabelText("Observações") as HTMLInputElement).disabled).toBe(false));
+  });
+
+  it("mesmo conteúdo gravado sobre outra versão de base usa chave nova (vira versão nova)", async () => {
+    const user = userEvent.setup();
+    const state = { current: { vigente, versoes: [], referenciasPO } as object };
+    mockSettings(state);
+    const post = vi.spyOn(api, "post").mockResolvedValue({ data: {} });
+    const { queryClient } = renderWithProviders(<EconomicSettingsPage />, { permissions: ["FINANCEIRO_VISUALIZAR", "FINANCEIRO_REGISTRAR"] });
+    const save = await screen.findByRole("button", { name: "Gravar nova versão" });
+    await user.click(save);
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    // Outro operador gravou uma versão com os mesmos valores; o formulário passa a ter outra base.
+    state.current = { vigente: { ...vigente, id: "param-3", versao: 3 }, versoes: [], referenciasPO };
+    await queryClient.invalidateQueries();
+    await waitFor(() => expect((save as HTMLButtonElement).disabled).toBe(false));
+    await user.click(save);
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+    const [first, second] = post.mock.calls.map(([, body, config]) => ({
+      body: JSON.stringify(body),
+      key: (config as { headers: Record<string, string> }).headers["Idempotency-Key"]
+    }));
+    expect(second!.body).toBe(first!.body);
+    expect(second!.key).not.toBe(first!.key);
+  });
+});

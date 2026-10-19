@@ -280,7 +280,11 @@ function SettingsForm({ data, store, canWrite }: { data: SettingsResponse; store
             descricao: textOrNull(taxa.descricao)
           }))
       };
-      return api.post("/economic-settings", body, { headers: { ...authHeader(), "x-store-id": store, "Idempotency-Key": saveKey(body) } });
+      // A chave inclui a versão de base: regravar o mesmo conteúdo depois de outra versão cria versão nova,
+      // enquanto a repetição da mesma tentativa (resposta perdida) reaproveita a chave.
+      return api.post("/economic-settings", body, {
+        headers: { ...authHeader(), "x-store-id": store, "Idempotency-Key": saveKey({ base: baseId, body }) }
+      });
     },
     onSuccess: () => {
       // Gravado: a versão que voltar do servidor substitui o formulário.
@@ -289,7 +293,8 @@ function SettingsForm({ data, store, canWrite }: { data: SettingsResponse; store
       return client.invalidateQueries({ queryKey: economicQueryKeys.settings(store) });
     }
   });
-  const disabled = !canWrite;
+  // Campos travados enquanto a gravação está em andamento: nada digitado agora se perde no retorno.
+  const disabled = !canWrite || save.isPending;
   return (
     <Box
       component="form"
@@ -373,7 +378,7 @@ function SettingsForm({ data, store, canWrite }: { data: SettingsResponse; store
                   <TextField size="small" label="Descrição" value={taxa.descricao} disabled={disabled}
                     onChange={(event) => setTaxa(index, { descricao: event.target.value })} />
                   {canWrite && (
-                    <IconButton aria-label={`Remover taxa ${index + 1}`} onClick={() => set("taxas", form.taxas.filter((_, i) => i !== index))}>
+                    <IconButton aria-label={`Remover taxa ${index + 1}`} disabled={disabled} onClick={() => set("taxas", form.taxas.filter((_, i) => i !== index))}>
                       ×
                     </IconButton>
                   )}
@@ -385,6 +390,7 @@ function SettingsForm({ data, store, canWrite }: { data: SettingsResponse; store
               <Box>
                 <Button
                   size="small"
+                  disabled={disabled}
                   onClick={() => set("taxas", [...form.taxas, { canal: "", modalidade: "A_VISTA", parcelas: "", percentual: "", descricao: "" }])}
                 >
                   Adicionar taxa
