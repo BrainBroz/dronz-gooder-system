@@ -83,6 +83,19 @@ function initialForm(data: SettingsResponse): FormState {
   };
 }
 
+/**
+ * Chave de idempotência ligada ao conteúdo: repetir o mesmo envio (resposta perdida) recupera o
+ * resultado gravado; editar e reenviar usa chave nova em vez de cair em conflito.
+ */
+function useContentKey() {
+  const ref = useRef<{ content: string; key: string } | null>(null);
+  return (content: unknown) => {
+    const text = JSON.stringify(content);
+    if (ref.current?.content !== text) ref.current = { content: text, key: crypto.randomUUID() };
+    return ref.current.key;
+  };
+}
+
 const orNull = (value: string) => (value.trim() === "" ? null : value.trim().replace(",", "."));
 
 function Section({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
@@ -127,25 +140,20 @@ function ExchangeSection({ store, canWrite, acrescimoPadrao }: { store: string; 
     }
   });
   const [manual, setManual] = useState({ referencia: "", acrescimo: acrescimoPadrao ?? "", fonte: "", cotadoEm: "" });
-  const manualKey = useRef<string | null>(null);
+  const manualKey = useContentKey();
   const register = useMutation({
     mutationFn: async () => {
-      manualKey.current ??= crypto.randomUUID();
-      return api.post(
-        "/finance/exchange-rates",
-        {
-          moedaOrigem: "USD",
-          moedaDestino: "BRL",
-          valorMercado: Number(manual.referencia.replace(",", ".")),
-          margem: Number(manual.acrescimo.replace(",", ".")),
-          fonte: manual.fonte,
-          cotadoEm: new Date(manual.cotadoEm).toISOString()
-        },
-        { headers: { ...headers, "Idempotency-Key": manualKey.current } }
-      );
+      const body = {
+        moedaOrigem: "USD",
+        moedaDestino: "BRL",
+        valorMercado: Number(manual.referencia.replace(",", ".")),
+        margem: Number(manual.acrescimo.replace(",", ".")),
+        fonte: manual.fonte,
+        cotadoEm: new Date(manual.cotadoEm).toISOString()
+      };
+      return api.post("/finance/exchange-rates", body, { headers: { ...headers, "Idempotency-Key": manualKey(body) } });
     },
     onSuccess: () => {
-      manualKey.current = null;
       setManual((current) => ({ ...current, referencia: "", fonte: "", cotadoEm: "" }));
       return client.invalidateQueries({ queryKey: economicQueryKeys.exchangeRate(store) });
     }
@@ -229,18 +237,15 @@ function SettingsForm({ data, store, canWrite }: { data: SettingsResponse; store
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((current) => ({ ...current, [key]: value }));
   const setTaxa = (index: number, patch: Partial<TaxaForm>) =>
     setForm((current) => ({ ...current, taxas: current.taxas.map((taxa, i) => (i === index ? { ...taxa, ...patch } : taxa)) }));
-  // Uma chave por tentativa de gravação: cliques repetidos não criam versões duplicadas.
-  const saveKey = useRef<string | null>(null);
+  // Cliques repetidos com o mesmo conteúdo não criam versões duplicadas.
+  const saveKey = useContentKey();
   const save = useMutation({
     mutationFn: async () => {
-      saveKey.current ??= crypto.randomUUID();
       const frete = orNull(form.freteValorPorKg);
-      return api.post(
-        "/economic-settings",
-        {
-          acrescimoCambialBrl: orNull(form.acrescimoCambialBrl) ?? "0",
+      const body = {
+          acrescimoCambialBrl: orNull(form.acrescimoCambialBrl) ?? "",
           frete: frete === null ? null : { valorPorKg: frete, moeda: form.freteMoeda },
-          markupAlertaPercentual: orNull(form.markupAlertaPercentual) ?? "0",
+          markupAlertaPercentual: orNull(form.markupAlertaPercentual) ?? "",
           notaFiscalPercentual: orNull(form.notaFiscalPercentual),
           notaFiscalBase: form.notaFiscalBase || null,
           iofPercentual: orNull(form.iofPercentual),
@@ -252,12 +257,10 @@ function SettingsForm({ data, store, canWrite }: { data: SettingsResponse; store
             percentual: orNull(taxa.percentual) ?? "",
             descricao: orNull(taxa.descricao)
           }))
-        },
-        { headers: { ...authHeader(), "x-store-id": store, "Idempotency-Key": saveKey.current } }
-      );
+      };
+      return api.post("/economic-settings", body, { headers: { ...authHeader(), "x-store-id": store, "Idempotency-Key": saveKey(body) } });
     },
     onSuccess: () => {
-      saveKey.current = null;
       return client.invalidateQueries({ queryKey: economicQueryKeys.settings(store) });
     }
   });

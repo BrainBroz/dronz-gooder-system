@@ -6,7 +6,7 @@ Estado: implementado na branch `claude/economic-settings-simulator` (a partir de
 
 - **Configurações econômicas** (`/configuracoes`; API `/economic-settings`): parâmetros de estimativa por loja, versionados. Cada gravação cria uma versão nova (`ParametroEconomico.versao`); as anteriores ficam intactas. Gravação auditada (`SAVE_ECONOMIC_SETTINGS`) e idempotente (`Idempotency-Key`).
 - **Câmbio**: reutiliza `CotacaoCambio` (referência `valorMercado`, acréscimo `margem`, operacional `valor = referência + acréscimo`). A tela mostra moedas, referência, acréscimo, operacional, fonte, instante e condição (vigente, antiga após 7 dias, indisponível). Registro manual pelo endpoint existente `/finance/exchange-rates` e captura PTAX sob demanda (seção 4).
-- **Simulador de compra** (`/compras/simulador`; API `/purchase-simulations`): projeção por produto do catálogo da loja (busca por nome, com código, categoria e peso para distinguir variantes) ou item ainda sem cadastro; cálculo no backend a cada alteração; salvar e reabrir simulações com a entrada resolvida e o resultado como snapshot. Simular não cria compra, pagamento, venda, estoque nem movimento logístico (coberto por teste).
+- **Simulador de compra** (`/compras/simulador`; API `/purchase-simulations`): projeção por produto do catálogo da loja (busca por nome, com código, categoria e peso para distinguir variantes) ou item ainda sem cadastro; cálculo no backend a cada alteração; salvar e reabrir simulações com a entrada resolvida e o resultado como snapshot (lista paginada, `page`/`limit` até 100). Simular não cria compra, pagamento, venda, estoque nem movimento logístico (coberto por teste).
 - **Fórmula protegida**: `calcSimulacao` corresponde a `calcularSimulacao` (`modules/simulation/simulation.service.ts`, simulação de viagem). Não foi alterada nem reutilizada: a projeção de compra é a função nova `projectPurchase` (`modules/purchase-simulation/purchase-projection.ts`). `calcPurchaseItem` do Bolt não foi copiado.
 
 ## 2. Permissões (reutilizadas, sem papéis novos)
@@ -27,6 +27,7 @@ Resultado em BRL. Decimal no backend, precisão total no cálculo; arredondament
 
 ```text
 câmbio_operacional = referência + acréscimo            (USD→BRL, acréscimo somado uma única vez)
+                     (acréscimo não informado → pendência; zero só quando informado)
 conv(v, moeda)     = v                  se BRL
                    = v × câmbio_operacional  se USD    (sem cotação: valor não calculável, nunca zero)
 

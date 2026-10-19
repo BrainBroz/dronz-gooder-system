@@ -354,7 +354,7 @@ describe("Simulador de compra", () => {
     expect(loaded.body.entrada.cambio).toEqual({ referencia: "5", acrescimo: "0.2" });
     expect(loaded.body.resultado.porUnidade.custo).toBe("546.00");
     const listed = await request(app).get("/purchase-simulations").set(headers);
-    expect(listed.body.map((item: { id: string }) => item.id)).toContain(saved.body.id);
+    expect(listed.body.items.map((item: { id: string }) => item.id)).toContain(saved.body.id);
     expect(await prisma.auditLog.count({ where: { action: "SAVE_PURCHASE_SIMULATION", entityId: saved.body.id } })).toBe(1);
   });
 
@@ -430,7 +430,7 @@ describe("Simulador de compra", () => {
     const other = await request(app).get(`/purchase-simulations/${saved.body.id}`).set({ ...headers, "x-store-id": gooder.id });
     expect(other.status).toBe(404);
     const otherList = await request(app).get("/purchase-simulations").set({ ...headers, "x-store-id": gooder.id });
-    expect(otherList.body).toEqual([]);
+    expect(otherList.body).toMatchObject({ items: [], total: 0 });
   });
 
   it("taxa de marketplace ainda não informada volta como pendência, com o custo calculado", async () => {
@@ -477,5 +477,48 @@ describe("Simulador de compra", () => {
     expect(r.body.entrada.produto).toEqual({ id: null, nome: "Item novo", codigo: null });
     expect(r.body.entrada.cambioOrigem).toEqual({ origem: "INFORMADA", fonte: "Cotação do dia" });
     expect(r.body.resultado.porUnidade.compra).toBe("520.00");
+  });
+
+  it("lista paginada: simulações antigas continuam acessíveis depois de muitas gravações", async () => {
+    const { dronz } = await stores();
+    const { app, headers } = await admin();
+    const adminUser = await prisma.usuario.findUniqueOrThrow({ where: { email: "admin@example.com" } });
+    const base = Date.UTC(2026, 9, 1);
+    await prisma.simulacaoCompra.createMany({
+      data: Array.from({ length: 51 }, (_, index) => ({
+        lojaId: dronz.id,
+        nome: `Simulação ${index + 1}`,
+        produtoNome: "Item",
+        entrada: {},
+        resultado: { total: {} },
+        criadoPorId: adminUser.id,
+        createdAt: new Date(base + index * 60_000)
+      }))
+    });
+    const first = await request(app).get("/purchase-simulations").query({ page: 1, limit: 50 }).set(headers);
+    expect(first.body).toMatchObject({ total: 51, page: 1, limit: 50 });
+    expect(first.body.items).toHaveLength(50);
+    expect(first.body.items[0].nome).toBe("Simulação 51");
+    const second = await request(app).get("/purchase-simulations").query({ page: 2, limit: 50 }).set(headers);
+    expect(second.body.items.map((item: { nome: string }) => item.nome)).toEqual(["Simulação 1"]);
+    expect((await request(app).get("/purchase-simulations").query({ limit: 101 }).set(headers)).status).toBe(400);
+  });
+
+  it("acréscimo vazio em cotação informada é pendência; zero só quando informado", async () => {
+    const { app, headers } = await admin();
+    const informed = (acrescimo: string | null) =>
+      request(app)
+        .post("/purchase-simulations/calculate")
+        .set(headers)
+        .send(simulation("x", "x", { produtoId: null, produtoNome: "Item", cambio: { origem: "INFORMADA", referencia: "5", acrescimo, fonte: null } }));
+    const pending = await informed(null);
+    expect(pending.status).toBe(200);
+    expect(pending.body.resultado.status).toBe("INCOMPLETO");
+    expect(pending.body.resultado.pendencias.map((p: { campo: string }) => p.campo)).toContain("cambio.acrescimo");
+    expect(pending.body.resultado.porUnidade.compra).toBeNull();
+    expect(pending.body.resultado.cambio).toBeNull();
+    const zero = await informed("0");
+    expect(zero.body.resultado.porUnidade.compra).toBe("500.00");
+    expect(zero.body.resultado.cambio.operacional).toBe("5.000000");
   });
 });

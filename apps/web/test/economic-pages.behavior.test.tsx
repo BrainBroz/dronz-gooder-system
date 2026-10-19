@@ -144,7 +144,7 @@ describe("Simulador de compra", () => {
       if (url === "/economic-settings") return { data: { vigente, versoes: [], referenciasPO } };
       if (url === "/economic-settings/exchange-rate") return { data: { cotacao: quote } };
       if (url === "/products") return { data: { items: [mac, { ...mac, id: "prod-mac-2", nome: "MacBook Air 13 M1 8GB 256GB", codigo: 22 }] } };
-      if (url === "/purchase-simulations") return { data: [] };
+      if (url === "/purchase-simulations") return { data: { items: [], total: 0, page: 1, limit: 10 } };
       throw new Error(`GET inesperado: ${url}`);
     });
     const post = vi.spyOn(api, "post").mockImplementation(async (url) => {
@@ -299,7 +299,7 @@ describe("payload do simulador", () => {
     vi.spyOn(api, "get").mockImplementation(async (url) => {
       if (url === "/economic-settings") return { data: current };
       if (url === "/economic-settings/exchange-rate") return { data: { cotacao: quote } };
-      if (url === "/purchase-simulations") return { data: [] };
+      if (url === "/purchase-simulations") return { data: { items: [], total: 0, page: 1, limit: 10 } };
       if (url === "/products") return { data: { items: [mac] } };
       throw new Error(`GET inesperado: ${url}`);
     });
@@ -323,5 +323,62 @@ describe("payload do simulador", () => {
     const payload = buildPayload(form, quote as never) as { venda: { marketplace: unknown } } | null;
     expect(payload).not.toBeNull();
     expect(payload!.venda.marketplace).toEqual({ canal: "MERCADO_LIVRE", modalidade: "A_VISTA", parcelas: null, percentual: null });
+  });
+
+  it("acréscimo vazio vai como pendência; zero digitado vai como zero", () => {
+    const form = { ...ready({ vigente, versoes: [], referenciasPO }), cambioOrigem: "INFORMADA" as const, referencia: "5" };
+    const empty = buildPayload({ ...form, acrescimo: "" }, quote as never) as { cambio: object };
+    expect(empty.cambio).toMatchObject({ origem: "INFORMADA", referencia: "5", acrescimo: null });
+    const zero = buildPayload({ ...form, acrescimo: "0" }, quote as never) as { cambio: object };
+    expect(zero.cambio).toMatchObject({ acrescimo: "0" });
+  });
+});
+
+describe("idempotência nas Configurações e paginação das simulações", () => {
+  it("resposta perdida: reenviar o mesmo conteúdo reutiliza a chave; editar gera chave nova", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(api, "get").mockImplementation(async (url) => {
+      if (url === "/economic-settings") return { data: { vigente, versoes: [], referenciasPO } };
+      if (url === "/economic-settings/exchange-rate") return { data: { cotacao: quote } };
+      throw new Error(`GET inesperado: ${url}`);
+    });
+    const post = vi.spyOn(api, "post").mockRejectedValue(new Error("resposta perdida"));
+    renderWithProviders(<EconomicSettingsPage />, { permissions: ["FINANCEIRO_VISUALIZAR", "FINANCEIRO_REGISTRAR"] });
+    const save = await screen.findByRole("button", { name: "Gravar nova versão" });
+    await user.click(save);
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect((save as HTMLButtonElement).disabled).toBe(false));
+    await user.click(save);
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect((save as HTMLButtonElement).disabled).toBe(false));
+    await user.type(screen.getByLabelText("Observações"), "x");
+    await user.click(save);
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(3));
+    const keys = post.mock.calls.map(([, , config]) => (config as { headers: Record<string, string> }).headers["Idempotency-Key"]);
+    expect(keys[1]).toBe(keys[0]);
+    expect(keys[2]).not.toBe(keys[0]);
+  });
+
+  it("lista de simulações salvas navega entre páginas", async () => {
+    const user = userEvent.setup();
+    const saved = (page: number) => ({
+      items: [{ id: `sim-${page}`, nome: `Simulação página ${page}`, produtoNome: "Mac", produtoCodigo: 1, createdAt: "2026-10-19T12:00:00.000Z", resultado, criadoPor: { name: "Ana" } }],
+      total: 12,
+      page,
+      limit: 10
+    });
+    const get = vi.spyOn(api, "get").mockImplementation(async (url, config) => {
+      if (url === "/economic-settings") return { data: { vigente, versoes: [], referenciasPO } };
+      if (url === "/economic-settings/exchange-rate") return { data: { cotacao: quote } };
+      if (url === "/purchase-simulations") return { data: saved((config as { params: { page: number } }).params.page) };
+      throw new Error(`GET inesperado: ${url}`);
+    });
+    renderWithProviders(<PurchaseSimulatorPage />, { permissions: ["SIMULACAO_VISUALIZAR"] });
+    expect(await screen.findByText("Simulação página 1")).toBeTruthy();
+    expect(screen.getByText("Página 1 de 2 · 12 simulações")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Próxima" }));
+    expect(await screen.findByText("Simulação página 2")).toBeTruthy();
+    const pages = get.mock.calls.filter(([url]) => url === "/purchase-simulations").map(([, config]) => (config as { params: { page: number } }).params.page);
+    expect(pages).toEqual([1, 2]);
   });
 });

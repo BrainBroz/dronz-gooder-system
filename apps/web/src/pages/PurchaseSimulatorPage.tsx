@@ -87,7 +87,7 @@ type SavedEntrada = {
   quantidade: number;
   compra: { precoUnitario: string | null; moeda: Moeda };
   pesoUnitarioKg: string | null;
-  cambio: { referencia: string; acrescimo: string } | null;
+  cambio: { referencia: string; acrescimo: string | null } | null;
   cambioOrigem: { origem: string; fonte?: string | null; cotadoEm?: string };
   frete: { valorPorKg: string; moeda: Moeda } | null;
   encargosCompra: { descricao: string; tipo: EncargoCompraForm["tipo"]; valor: string; moeda?: Moeda }[];
@@ -157,8 +157,9 @@ export function buildPayload(form: SimForm, quote: CotacaoVigente | null) {
   if (form.cambioOrigem === "COTACAO_REGISTRADA" && quote) cambio = { origem: "COTACAO_REGISTRADA", cotacaoCambioId: quote.id };
   if (form.cambioOrigem === "INFORMADA" && form.referencia.trim() !== "") {
     const referencia = required(form.referencia);
-    const acrescimo = required(form.acrescimo || "0");
-    if (!referencia || !acrescimo || Number(referencia) <= 0) return null;
+    // Vazio vai como pendência para o backend; zero só quando digitado.
+    const acrescimo = form.acrescimo.trim() === "" ? null : required(form.acrescimo);
+    if (!referencia || acrescimo === undefined || Number(referencia) <= 0) return null;
     cambio = { origem: "INFORMADA", referencia, acrescimo, fonte: "Informada na simulação" };
   }
 
@@ -700,46 +701,61 @@ function EncargoList<T extends { descricao: string; tipo: string; valor: string;
   );
 }
 
+const SAVED_PAGE_SIZE = 10;
+
 function SavedList({ store, onOpen }: { store: string; onOpen: (id: string) => void }) {
-  const saved = useQuery<SavedSimulation[]>({
-    queryKey: economicQueryKeys.simulations(store),
-    queryFn: async () => (await api.get("/purchase-simulations", { headers: { ...authHeader(), "x-store-id": store } })).data
+  const [page, setPage] = useState(1);
+  const saved = useQuery<{ items: SavedSimulation[]; total: number; page: number; limit: number }>({
+    queryKey: [...economicQueryKeys.simulations(store), page],
+    placeholderData: keepPreviousData,
+    queryFn: async () =>
+      (await api.get("/purchase-simulations", { headers: { ...authHeader(), "x-store-id": store }, params: { page, limit: SAVED_PAGE_SIZE } })).data
   });
+  const pages = saved.data ? Math.max(1, Math.ceil(saved.data.total / SAVED_PAGE_SIZE)) : 1;
   return (
     <Panel title="Simulações salvas">
       {saved.isLoading && <Typography variant="body2" role="status">Carregando…</Typography>}
       {saved.isError && <Typography variant="body2" role="alert">Não foi possível carregar as simulações salvas.</Typography>}
-      {saved.data?.length === 0 && <Typography variant="body2" color="text.secondary">Nenhuma simulação salva nesta loja.</Typography>}
-      {!!saved.data?.length && (
-        <Box sx={{ overflowX: "auto" }}>
-          <Table size="small" aria-label="Simulações salvas">
-            <TableHead>
-              <TableRow>
-                <TableCell>Simulação</TableCell>
-                <TableCell align="right">Custo total</TableCell>
-                <TableCell align="right">Lucro projetado</TableCell>
-                <TableCell>Salva em</TableCell>
-                <TableCell />
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {saved.data.map((item) => (
-                <TableRow key={item.id}>
-                  <TableCell>
-                    {item.nome}
-                    <Typography sx={{ fontSize: "0.6875rem", color: visualTokens.textMuted }}>{item.produtoNome}</Typography>
-                  </TableCell>
-                  <TableCell align="right" sx={{ fontFamily: fontMono }}>{brl(item.resultado.total.custo)}</TableCell>
-                  <TableCell align="right" sx={{ fontFamily: fontMono }}>
-                    {item.resultado.status === "INCOMPLETO" && item.resultado.total.lucro === null ? "Incompleto" : brl(item.resultado.total.lucro)}
-                  </TableCell>
-                  <TableCell>{new Date(item.createdAt).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}</TableCell>
-                  <TableCell><Button size="small" onClick={() => onOpen(item.id)}>Abrir</Button></TableCell>
+      {saved.data?.total === 0 && <Typography variant="body2" color="text.secondary">Nenhuma simulação salva nesta loja.</Typography>}
+      {!!saved.data?.items.length && (
+        <>
+          <Box sx={{ overflowX: "auto" }}>
+            <Table size="small" aria-label="Simulações salvas">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Simulação</TableCell>
+                  <TableCell align="right">Custo total</TableCell>
+                  <TableCell align="right">Lucro projetado</TableCell>
+                  <TableCell>Salva em</TableCell>
+                  <TableCell />
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </Box>
+              </TableHead>
+              <TableBody>
+                {saved.data.items.map((item) => (
+                  <TableRow key={item.id}>
+                    <TableCell>
+                      {item.nome}
+                      <Typography sx={{ fontSize: "0.6875rem", color: visualTokens.textMuted }}>{item.produtoNome}</Typography>
+                    </TableCell>
+                    <TableCell align="right" sx={{ fontFamily: fontMono }}>{brl(item.resultado.total.custo)}</TableCell>
+                    <TableCell align="right" sx={{ fontFamily: fontMono }}>
+                      {item.resultado.status === "INCOMPLETO" && item.resultado.total.lucro === null ? "Incompleto" : brl(item.resultado.total.lucro)}
+                    </TableCell>
+                    <TableCell>{new Date(item.createdAt).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}</TableCell>
+                    <TableCell><Button size="small" onClick={() => onOpen(item.id)}>Abrir</Button></TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Box>
+          {pages > 1 && (
+            <Stack direction="row" gap={1} alignItems="center" justifyContent="flex-end" mt={1}>
+              <Button size="small" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>Anterior</Button>
+              <Typography variant="body2" color="text.secondary">Página {page} de {pages} · {saved.data.total} simulações</Typography>
+              <Button size="small" disabled={page >= pages} onClick={() => setPage((value) => value + 1)}>Próxima</Button>
+            </Stack>
+          )}
+        </>
       )}
     </Panel>
   );

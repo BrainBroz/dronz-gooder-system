@@ -34,7 +34,7 @@ const inputSchema = z
         .object({
           origem: z.literal("INFORMADA"),
           referencia: decimal(1000).refine((value) => Number(value) > 0, "positive"),
-          acrescimo: decimal(100),
+          acrescimo: decimal(100).nullable(),
           fonte: z.string().trim().max(200).nullable().default(null)
         })
         .strict(),
@@ -111,7 +111,12 @@ purchaseSimulationRouter.post(
 purchaseSimulationRouter.get(
   "/",
   requirePermission("SIMULACAO_VISUALIZAR", "SIMULACAO_GERENCIAR"),
-  run((req) => service.list(req.storeId!))
+  run((req) => {
+    const query = z
+      .object({ page: z.coerce.number().int().min(1).default(1), limit: z.coerce.number().int().min(1).max(100).default(20) })
+      .parse(req.query);
+    return service.list(req.storeId!, query.page, query.limit);
+  })
 );
 purchaseSimulationRouter.get(
   "/:id",

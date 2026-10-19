@@ -162,4 +162,12 @@ describe("projeção de compra", () => {
     expect(r.porUnidade.lucro).toBeNull();
     expect(r.indicadores.markupPercentual).toBe("59.52");
   });
+
+  it("acréscimo não informado não vira zero: só a pendência do acréscimo é apontada", () => {
+    const r = projectPurchase({ ...base(), cambio: { referencia: "5", acrescimo: null } });
+    expect(r.status).toBe("INCOMPLETO");
+    expect(r.pendencias.map((p) => p.campo)).toEqual(["cambio.acrescimo"]);
+    expect(r.porUnidade.compra).toBeNull();
+    expect(r.cambio).toBeNull();
+  });
 });

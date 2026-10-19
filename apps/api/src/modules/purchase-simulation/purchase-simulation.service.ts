@@ -15,7 +15,7 @@ export type SimulationInput = {
   pesoUnitarioKg: string | null;
   cambio:
     | { origem: "COTACAO_REGISTRADA"; cotacaoCambioId: string }
-    | { origem: "INFORMADA"; referencia: string; acrescimo: string; fonte: string | null }
+    | { origem: "INFORMADA"; referencia: string; acrescimo: string | null; fonte: string | null }
     | { origem: "SEM_COTACAO" };
   frete: { valorPorKg: string; moeda: Moeda } | null;
   encargosCompra: EncargoCompra[];
@@ -125,21 +125,30 @@ export async function save(lojaId: string, userId: string, input: SimulationInpu
   });
 }
 
-export const list = (lojaId: string) =>
-  prisma.simulacaoCompra.findMany({
-    where: { lojaId },
-    orderBy: { createdAt: "desc" },
-    take: 50,
-    select: {
-      id: true,
-      nome: true,
-      produtoNome: true,
-      produtoCodigo: true,
-      createdAt: true,
-      resultado: true,
-      criadoPor: { select: { name: true } }
-    }
-  });
+const listSelect = {
+  id: true,
+  nome: true,
+  produtoNome: true,
+  produtoCodigo: true,
+  createdAt: true,
+  resultado: true,
+  criadoPor: { select: { name: true } }
+} as const;
+
+export async function list(lojaId: string, page: number, limit: number) {
+  const [items, total] = await Promise.all([
+    prisma.simulacaoCompra.findMany({
+      where: { lojaId },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      skip: (page - 1) * limit,
+      take: limit,
+      select: listSelect
+    }),
+    prisma.simulacaoCompra.count({ where: { lojaId } })
+  ]);
+  return { items, total, page, limit };
+}
+
 
 export async function get(lojaId: string, id: string) {
   const simulation = await prisma.simulacaoCompra.findFirst({

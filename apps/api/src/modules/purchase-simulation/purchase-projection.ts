@@ -44,8 +44,8 @@ export type ProjecaoEntrada = {
   quantidade: number;
   compra: { precoUnitario: string | null; moeda: Moeda };
   pesoUnitarioKg: string | null;
-  /** Cotação USD→BRL; nula quando não há cotação disponível. */
-  cambio: { referencia: string; acrescimo: string } | null;
+  /** Cotação USD→BRL; nula quando não há cotação. Acréscimo nulo = ainda não informado (zero precisa ser explícito). */
+  cambio: { referencia: string; acrescimo: string | null } | null;
   frete: { valorPorKg: string; moeda: Moeda } | null;
   encargosCompra: EncargoCompra[];
   venda: {
@@ -111,7 +111,11 @@ export function projectPurchase(input: ProjecaoEntrada): ProjecaoResultado {
   const qtd = new D(input.quantidade);
   const hundred = new D(100);
 
-  const operacional = input.cambio ? new D(input.cambio.referencia).plus(input.cambio.acrescimo) : null;
+  const acrescimoPendente = input.cambio !== null && input.cambio.acrescimo === null;
+  if (acrescimoPendente)
+    pendencias.push({ campo: "cambio.acrescimo", motivo: "Acréscimo cambial não informado (informe 0 se não houver)." });
+  const operacional =
+    input.cambio && input.cambio.acrescimo !== null ? new D(input.cambio.referencia).plus(input.cambio.acrescimo) : null;
   let cambioPendente = false;
   // Converte para BRL; USD sem cotação deixa o valor não calculável (ausência não vira zero).
   const toBrl = (value: Dec, moeda: Moeda): Dec | null => {
@@ -185,7 +189,7 @@ export function projectPurchase(input: ProjecaoEntrada): ProjecaoResultado {
   const receitaLiquida = vendaBruta && descontos && vendaBruta.minus(descontos);
   const lucro = receitaLiquida && custo && receitaLiquida.minus(custo);
 
-  if (cambioPendente) pendencias.push({ campo: "cambio", motivo: "Sem cotação USD→BRL para converter valores em dólar." });
+  if (cambioPendente && !acrescimoPendente) pendencias.push({ campo: "cambio", motivo: "Sem cotação USD→BRL para converter valores em dólar." });
 
   const unit: Record<keyof Valores, Dec | null> = {
     compra,
@@ -219,7 +223,7 @@ export function projectPurchase(input: ProjecaoEntrada): ProjecaoResultado {
     quantidade: input.quantidade,
     pesoTotalKg: input.pesoUnitarioKg === null ? null : new D(input.pesoUnitarioKg).times(qtd).toDecimalPlaces(3, D.ROUND_HALF_UP).toFixed(3),
     cambio:
-      input.cambio && operacional
+      input.cambio && input.cambio.acrescimo !== null && operacional
         ? { par: "USD/BRL", referencia: rate(new D(input.cambio.referencia)), acrescimo: rate(new D(input.cambio.acrescimo)), operacional: rate(operacional) }
         : null,
     porUnidade,
