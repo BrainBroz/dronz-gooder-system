@@ -1905,3 +1905,94 @@ describe("revisão local do Codex (2658b1a): achado corrigido", () => {
     ).toBe(2);
   });
 });
+
+describe("revisão local do Codex (332f28c): achado corrigido", () => {
+  it("P2: com recebimento antigo e destino dividido, a posição do pedido não encerra enquanto houver saldo recebível", async () => {
+    const ctx = await packages();
+    const { closurePendencies, transition } =
+      await import("../src/modules/positions/positions.service");
+    const { pendingAt, receivableSummary, expectationSelect } =
+      await import("../src/modules/positions/expectations");
+    const { confirmMiami } =
+      await import("../src/modules/logistics/logistics.service");
+    const orderDest = await prisma.posicaoOperacional.create({
+      data: {
+        localId: ctx.base.localId,
+        codigo: `AUD-SPLIT-${randomUUID()}`,
+        nome: "Destino do pedido",
+        tipo: "TEMPORARIA",
+        status: "ATIVA",
+        inicioEm: new Date(Date.now() - 86_400_000),
+        fimEm: new Date(Date.now() + 86_400_000)
+      }
+    });
+    cleanups.push(async () => {
+      await prisma.recebimentoMiami.deleteMany({
+        where: { pedidoCompraItemId: ctx.data.item.id }
+      });
+      await prisma.pedidoCompra.update({
+        where: { id: ctx.data.order.id },
+        data: { destinoPosicaoId: ctx.base.id }
+      });
+      await prisma.posicaoOperacional.delete({ where: { id: orderDest.id } });
+    });
+    await prisma.pedidoCompra.update({
+      where: { id: ctx.data.order.id },
+      data: { destinoPosicaoId: orderDest.id }
+    });
+    expect(
+      (
+        await ctx.put(ctx.a.id, "destination", {
+          posicaoId: ctx.hotel.id,
+          motivo: "Hotel"
+        })
+      ).status
+    ).toBe(200);
+    expect((await ctx.content(ctx.a.id, 1)).status).toBe(200);
+    // Recebimento antigo no destino do pedido, atribuição desconhecida.
+    await prisma.recebimentoMiami.create({
+      data: {
+        lojaId: ctx.store.id,
+        pedidoCompraItemId: ctx.data.item.id,
+        quantidadeRecebida: 1,
+        recebidoEm: new Date(),
+        confirmadoPorId: ctx.data.admin.id,
+        posicaoId: orderDest.id
+      }
+    });
+    await prisma.pedidoCompraItem.update({
+      where: { id: ctx.data.item.id },
+      data: { quantidadeRecebidaMiami: 1 }
+    });
+    await prisma.pedidoCompra.update({
+      where: { id: ctx.data.order.id },
+      data: { status: "PARTIALLY_RECEIVED_MIAMI" }
+    });
+    const item = await prisma.pedidoCompraItem.findUniqueOrThrow({
+      where: { id: ctx.data.item.id },
+      select: expectationSelect
+    });
+    // Pendência coerente com o saldo recebível fora de pacote.
+    expect(receivableSummary(item).saldoSemPacote).toBe(1);
+    expect(pendingAt(item, orderDest.id)).toBe(1);
+    expect(
+      (await closurePendencies(prisma, orderDest.id)).map((p) => p.code)
+    ).toEqual(["ITEMS_NOT_RECEIVED"]);
+    await expect(
+      transition(ctx.admin, orderDest.id, "ENCERRAR")
+    ).rejects.toMatchObject({ code: "items_not_received" });
+    // Recebida a unidade (fora de pacote), nada mais falta em lugar nenhum.
+    await confirmMiami(
+      ctx.store.id,
+      ctx.admin,
+      {
+        pedidoCompraItemId: ctx.data.item.id,
+        quantidadeRecebida: 1,
+        recebidoEm: new Date()
+      },
+      randomUUID()
+    );
+    expect(await closurePendencies(prisma, orderDest.id)).toEqual([]);
+    expect(await closurePendencies(prisma, ctx.hotel.id)).toEqual([]);
+  });
+});

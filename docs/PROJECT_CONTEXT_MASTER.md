@@ -332,8 +332,8 @@ Continuam abertas e bloqueiam somente seus batches: vigência de cotação (`E-2
   - Lote de devolução: aponta para a baixa original (`MovimentacaoEstoque.baixaOrigemId`) e herda o custo congelado dela.
   - Relatório `costs`: filtra pela competência do pedido (`dataCompra`), não pela data do lançamento. `competencia=AAAA-MM` aplica o mês de America/Sao_Paulo com fim exclusivo; os outros relatórios recusam o parâmetro.
   - Regra comum de quantidades por posição: `positions/expectations.ts`.
-    - Recebimento antigo sem pacote abate o esperado da posição onde foi registrado.
-    - O pendente nunca passa do que falta receber do item; nenhum vínculo histórico é inventado.
+    - O pendente na posição é o saldo recebível de cada caminho que termina nela (pacotes destinados e, no destino do pedido, o fora de pacote), limitado ao que falta receber do item.
+    - Recebimento antigo (atribuição desconhecida) pesa só nesse limite; nenhum vínculo histórico é inventado. No caso ambíguo, as posições candidatas seguem pendentes até a unidade chegar.
   - Conteúdo de pacote que diminui devolve o saldo ao destino do pedido, e esse destino também é reivindicado (posição encerrada recusa).
   - Editar conteúdo ou destino de pacote faz UPDATE nas linhas dos itens (ordem fixa). Um recebimento Serializable concorrente falha por serialização e, na nova tentativa, usa o conteúdo e o destino atuais.
   - Voltar o destino de um pacote ao padrão reivindica o destino do pedido de cada item presente no pacote, das duas lojas.
