@@ -75,6 +75,13 @@ PTAX é taxa de referência calculada pelo Banco Central; não é o dólar comer
 - **Taxa à vista de 12%** e **acréscimo de R$ 0,20**: referências do PO, aplicadas só depois de gravadas por um usuário.
 - **Frete por kg**: valor e moeda ainda não informados pelo PO.
 
+## 5.1 Pendências registradas da revisão local
+
+O ciclo de revisão local por Codex foi encerrado por decisão do PO no commit `334479a`; os achados abaixo, de severidade média (P2) e restritos à tela de Configurações, ficam para a próxima entrega:
+
+1. **Repetição após resposta perdida e atualização em segundo plano**: a chave de idempotência da gravação inclui a versão de base (para que regravar um conteúdo antigo depois de outro operador crie versão nova). Se a gravação for concluída, a resposta se perder e a tela receber a versão nova antes da repetição, a repetição usa outra chave e cria uma versão duplicada. Correção sugerida: manter a chave da tentativa em aberto até seu desfecho, independentemente da versão de base; teste combinando resposta perdida e atualização.
+2. **Registro manual de cotação durante o envio**: os campos continuam editáveis enquanto o registro está em andamento e são limpos ao concluir, descartando o que tiver sido digitado nesse intervalo. Correção sugerida: travar os campos durante o envio (como já ocorre nos parâmetros) ou limpar só se ainda coincidirem com o enviado; teste com resposta lenta.
+
 ## 6. Estimado e realizado
 
 O simulador produz apenas `natureza: "ESTIMATIVA"`. A venda realizada (futura importação) deve preservar os valores finais da fonte. Valor recebido do Mercado Livre/ERP que já chega líquido das taxas do canal **não** pode sofrer novo desconto da taxa projetada; a nota fiscal não é aplicada sobre o líquido por conveniência. Projeção e realizado ficam em contratos e telas separados.
