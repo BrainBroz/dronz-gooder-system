@@ -223,6 +223,13 @@ export function buildPayload(form: SimForm, quote: CotacaoVigente | null) {
   };
 }
 
+/** Alterna entre catálogo e item sem cadastro limpando pelo mesmo caminho da troca de produto. */
+export const toggleItemLivre = (current: SimForm): SimForm => ({
+  ...withProduct(current, null),
+  itemLivre: !current.itemLivre,
+  produtoNome: ""
+});
+
 const productPrice = (produto: Produto | null) => (produto && Number(produto.precoVenda) > 0 ? produto.precoVenda : "");
 
 /**
@@ -498,7 +505,7 @@ function SimulatorForm({
             )}
             {canSearch ? (
               <Box>
-                <Button size="small" onClick={() => setForm((current) => ({ ...current, itemLivre: !current.itemLivre, produto: null, produtoNome: "" }))}>
+                <Button size="small" onClick={() => setForm(toggleItemLivre)}>
                   {form.itemLivre ? "Escolher produto do catálogo" : "Item ainda sem cadastro"}
                 </Button>
               </Box>

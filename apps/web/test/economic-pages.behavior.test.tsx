@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../src/api/client";
 import { EconomicSettingsPage } from "../src/pages/EconomicSettingsPage";
-import { PurchaseSimulatorPage, buildPayload, initialForm, withProduct, type Produto } from "../src/pages/PurchaseSimulatorPage";
+import { PurchaseSimulatorPage, buildPayload, initialForm, toggleItemLivre, withProduct, type Produto } from "../src/pages/PurchaseSimulatorPage";
 import { renderWithProviders, testStores } from "./render";
 
 beforeEach(() => vi.restoreAllMocks());
@@ -268,6 +268,15 @@ describe("troca de produto no simulador", () => {
     expect([withB.peso, withB.precoVenda]).toEqual(["2.0", "3000"]);
     const cleared = withProduct(withB, null);
     expect([cleared.peso, cleared.precoVenda]).toEqual(["", ""]);
+  });
+
+  it("passar por 'item sem cadastro' e voltar não deixa o novo produto herdar valores do anterior", () => {
+    const withA = withProduct(initialForm(settingsData, null), a);
+    const back = toggleItemLivre(toggleItemLivre(withA));
+    expect(back.itemLivre).toBe(false);
+    expect([back.produto, back.peso, back.precoVenda]).toEqual([null, "", ""]);
+    const withB = withProduct(back, b);
+    expect([withB.peso, withB.precoVenda]).toEqual(["2.0", "3000"]);
   });
 
   it("o que o operador digitou é preservado", () => {
