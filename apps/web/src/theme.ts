@@ -11,7 +11,8 @@ export const visualTokens = {
   borderStrong: "rgba(255, 255, 255, 0.12)",
   text: "#E2E8F0",
   textSecondary: "#94A3B8",
-  textMuted: "#64748B",
+  // Mais claro que o "muted" do Bolt (#64748B): mantém contraste AA (≥ 4,5:1) sobre fundo, cards e menus.
+  textMuted: "#8794AA",
   blue: "#3B82F6",
   blueSoft: "#60A5FA",
   green: "#22C55E",

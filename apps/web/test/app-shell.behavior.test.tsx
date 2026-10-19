@@ -47,6 +47,17 @@ describe("navegação agrupada", () => {
     expect(screen.getByRole("button", { name: "Logística" }).getAttribute("aria-expanded")).toBe("true");
   });
 
+  it.each(["/compras/revisao", "/compras/painel-mensal"])(
+    "em %s só o submenu específico fica ativo, não a Fila de compras",
+    async (route) => {
+      const user = userEvent.setup();
+      renderWithProviders(<Shell>Conteúdo</Shell>, { route, permissions: ["SYSTEM_ADMIN"] });
+      await user.click(screen.getByRole("button", { name: "Abrir menu" }));
+      const current = screen.getAllByRole("link").filter((link) => link.getAttribute("aria-current") === "page");
+      expect(current.map((link) => link.getAttribute("href"))).toEqual([route]);
+    }
+  );
+
   it("troca a loja ativa pelos botões; \"Todos\" fica indisponível sem visão consolidada", async () => {
     const user = userEvent.setup();
     renderWithProviders(<Shell>Conteúdo</Shell>);

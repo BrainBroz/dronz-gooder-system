@@ -54,6 +54,10 @@ function NavGroup({
   onExpandSidebar: () => void;
 }) {
   const { pathname } = useLocation();
+  // Só o filho mais específico fica ativo: em /compras/revisao, "Fila de compras" (/compras) não acende junto.
+  const activeChildPath = group.children
+    ?.filter((child) => isActive(pathname, child.path))
+    .sort((a, b) => b.path.length - a.path.length)[0]?.path;
   const groupActive = group.path
     ? isActive(pathname, group.path)
     : !!group.children?.some((child) => isActive(pathname, child.path));
@@ -132,7 +136,7 @@ function NavGroup({
           sx={{ listStyle: "none", m: 0, mt: 0.25, p: 0, pl: 2.25, gap: 0.25 }}
         >
           {group.children?.map((child) => {
-            const active = isActive(pathname, child.path);
+            const active = child.path === activeChildPath;
             return (
               <li key={child.path}>
                 <ButtonBase
