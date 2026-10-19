@@ -35,7 +35,7 @@ frete_u            = conv(frete_por_kg × peso_u, moeda_do_frete)   (a moeda do 
 encargos_compra_u  = Σ { % × compra_u | conv(valor_u) | conv(valor_total) ÷ qtd }
 custo_u            = compra_u + frete_u + encargos_compra_u
 
-taxa_marketplace_u = venda_bruta_u × taxa%            (zero só se "sem taxa de canal" for escolhido)
+taxa_marketplace_u = venda_bruta_u × taxa%            (zero só se "sem taxa de canal" for escolhido; taxa não informada → pendência)
 nota_u             = venda_bruta_u × nota%            (base: preço de venda bruto)
                    | base_informada_u × nota%         (base informada)
                    | valor informado
@@ -59,7 +59,7 @@ O defeito do protótipo (tela em R$/kg, cálculo em US$/kg) não se repete: o fr
 
 Investigada e comprovada em 19/10/2026: API pública de dados abertos do Banco Central, serviço PTAX (Olinda), sem cadastro, credencial ou cobrança. Fornece compra e venda e boletins de abertura, intermediários e fechamento, só em dias úteis (o fechamento sai por volta das 13h de Brasília).
 
-Implementado: captura **sob demanda** da PTAX de **venda** do boletim de **fechamento** mais recente dos últimos 10 dias, gravada como `CotacaoCambio` com fonte `BCB PTAX venda - boletim de fechamento`, instante do boletim e o acréscimo vigente da loja. O mesmo boletim não é registrado duas vezes. Falha da fonte ou ausência de fechamento não grava nada.
+Implementado: captura **sob demanda** da PTAX de **venda** do boletim de **fechamento** mais recente dos últimos 10 dias, gravada como `CotacaoCambio` com fonte `BCB PTAX venda - boletim de fechamento`, instante do boletim e o acréscimo vigente da loja. O mesmo boletim não é registrado duas vezes. Com `Idempotency-Key`, uma repetição devolve o registro já gravado antes de consultar a fonte (mesmo com o Banco Central fora do ar); a mesma chave com outro conteúdo é conflito. Falha da fonte ou ausência de fechamento não grava nada.
 
 PTAX é taxa de referência calculada pelo Banco Central; não é o dólar comercial nem a taxa cobrada por cartão ou remessa. A cotação estimada não comprova a taxa efetivamente paga, e uma compra histórica não deve receber a cotação de hoje.
 

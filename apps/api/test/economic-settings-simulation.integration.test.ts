@@ -251,6 +251,27 @@ describe("Configurações econômicas", () => {
     expect(current.body.cotacao).toMatchObject({ referencia: "5.056400", acrescimo: "0.200000", operacional: "5.256400" });
   });
 
+  it("repetir a captura com a mesma chave devolve o registro gravado sem nova consulta à fonte", async () => {
+    const { app, headers } = await admin();
+    await request(app).post("/economic-settings").set(headers).send(settings());
+    const fetchPeriod = vi
+      .spyOn(settingsService.ptaxSource, "fetchPeriod")
+      .mockResolvedValueOnce([{ cotacaoVenda: 5.0564, dataHoraCotacao: "2026-10-19 13:05:47.20983", tipoBoletim: "Fechamento" }]);
+    const keyed = { ...headers, "Idempotency-Key": randomUUID() };
+    const first = await request(app).post("/economic-settings/exchange-rate/ptax").set(keyed).send({});
+    expect(first.status).toBe(201);
+    // A resposta se perdeu e a fonte caiu: a repetição ainda recupera o mesmo registro.
+    fetchPeriod.mockRejectedValue(new Error("offline"));
+    const again = await request(app).post("/economic-settings/exchange-rate/ptax").set(keyed).send({});
+    expect(again.status).toBe(201);
+    expect(again.body.cotacao.id).toBe(first.body.cotacao.id);
+    expect(fetchPeriod).toHaveBeenCalledTimes(1);
+    const conflict = await request(app).post("/economic-settings/exchange-rate/ptax").set(keyed).send({ acrescimoCambialBrl: "0.3" });
+    expect(conflict.status).toBe(409);
+    expect(fetchPeriod).toHaveBeenCalledTimes(1);
+    expect(await prisma.cotacaoCambio.count({ where: { fonte: settingsService.PTAX_FONTE } })).toBe(1);
+  });
+
   it("sem acréscimo configurado ou com fonte indisponível, não inventa cotação", async () => {
     const { app, headers } = await admin();
     const fetchPeriod = vi.spyOn(settingsService.ptaxSource, "fetchPeriod");
@@ -410,6 +431,34 @@ describe("Simulador de compra", () => {
     expect(other.status).toBe(404);
     const otherList = await request(app).get("/purchase-simulations").set({ ...headers, "x-store-id": gooder.id });
     expect(otherList.body).toEqual([]);
+  });
+
+  it("taxa de marketplace ainda não informada volta como pendência, com o custo calculado", async () => {
+    const { dronz } = await stores();
+    const { app, headers } = await admin();
+    const mac = await product(dronz.id, "MacBook");
+    const q = await quote(dronz.id);
+    const r = await request(app)
+      .post("/purchase-simulations/calculate")
+      .set(headers)
+      .send(
+        simulation(mac.id, q.id, {
+          venda: { ...simulation(mac.id, q.id).venda, marketplace: { canal: "MERCADO_LIVRE", modalidade: "PARCELADO", parcelas: null, percentual: null } }
+        })
+      );
+    expect(r.status).toBe(200);
+    expect(r.body.resultado.status).toBe("INCOMPLETO");
+    expect(r.body.resultado.porUnidade.custo).toBe("546.00");
+    expect(r.body.resultado.porUnidade.lucro).toBeNull();
+    const informedWithoutPlan = await request(app)
+      .post("/purchase-simulations/calculate")
+      .set(headers)
+      .send(
+        simulation(mac.id, q.id, {
+          venda: { ...simulation(mac.id, q.id).venda, marketplace: { canal: "MERCADO_LIVRE", modalidade: "PARCELADO", parcelas: null, percentual: "16" } }
+        })
+      );
+    expect(informedWithoutPlan.status).toBe(400);
   });
 
   it("produto livre (ainda sem cadastro) e cotação informada também são simuláveis", async () => {

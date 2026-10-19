@@ -34,6 +34,7 @@ import {
   type Modalidade,
   type Moeda,
   type ProjecaoResultado,
+  type TaxaMarketplace,
   type SettingsResponse
 } from "../api/economic";
 
@@ -56,8 +57,14 @@ export type SimForm = {
   freteMoeda: Moeda | "";
   encargosCompra: EncargoCompraForm[];
   precoVenda: string;
-  /** "nenhuma", "manual" ou o índice da taxa configurada. */
-  taxaEscolha: string;
+  taxaEscolha: "nenhuma" | "manual" | "configurada";
+  /**
+   * Cópia da taxa configurada escolhida, com a identidade dela: uma nova versão de parâmetros
+   * carregada durante a edição não troca o plano escolhido pelo operador.
+   */
+  taxaConfigurada: TaxaMarketplace | null;
+  /** Versão de parâmetros e limite de markup fixados quando o formulário foi aberto. */
+  parametro: { id: string | null; markupAlertaPercentual: string };
   taxaManual: { canal: Canal; modalidade: Modalidade; parcelas: string; percentual: string };
   notaModo: NotaModo;
   notaPercentual: string;
@@ -86,11 +93,12 @@ type SavedEntrada = {
   encargosCompra: { descricao: string; tipo: EncargoCompraForm["tipo"]; valor: string; moeda?: Moeda }[];
   venda: {
     precoUnitarioBrl: string | null;
-    marketplace: { canal: Canal; modalidade: Modalidade; parcelas: number | null; percentual: string } | null;
+    marketplace: { canal: Canal; modalidade: Modalidade; parcelas: number | null; percentual: string | null } | null;
     notaFiscal: { modo: NotaModo; percentual?: string; baseUnitariaBrl?: string; valorUnitarioBrl?: string };
     outrosEncargos: EncargoVendaForm[];
   };
   markupAlertaPercentual: string;
+  parametroEconomicoId: string | null;
   produto: { id: string | null; nome: string; codigo: number | null };
 };
 
@@ -117,7 +125,10 @@ export function initialForm(settings: SettingsResponse, quote: CotacaoVigente | 
     freteMoeda: v?.freteMoeda ?? "",
     encargosCompra: v?.iofPercentual ? [{ descricao: "IOF", tipo: "PERCENTUAL_COMPRA", valor: v.iofPercentual, moeda: "BRL" }] : [],
     precoVenda: "",
-    taxaEscolha: v?.taxasMarketplace.length ? "0" : "manual",
+    taxaEscolha: v?.taxasMarketplace.length ? "configurada" : "manual",
+    taxaConfigurada: v?.taxasMarketplace[0] ?? null,
+    // Sem parâmetro gravado, vale o markup mínimo do contrato (25%).
+    parametro: { id: v?.id ?? null, markupAlertaPercentual: v?.markupAlertaPercentual ?? "25" },
     taxaManual: { canal: "MERCADO_LIVRE", modalidade: "A_VISTA", parcelas: "", percentual: "" },
     notaModo,
     notaPercentual: v?.notaFiscalPercentual ?? "",
@@ -129,7 +140,7 @@ export function initialForm(settings: SettingsResponse, quote: CotacaoVigente | 
 }
 
 /** Monta o corpo da requisição; null quando falta o mínimo ou há número inválido (o backend faz a validação final). */
-function buildPayload(form: SimForm, settings: SettingsResponse, quote: CotacaoVigente | null) {
+export function buildPayload(form: SimForm, quote: CotacaoVigente | null) {
   const optional = (value: string) => (value.trim() === "" ? null : valid(value) ? num(value) : undefined);
   const required = (value: string) => (valid(value) ? num(value) : undefined);
   const hasItem = form.itemLivre ? form.produtoNome.trim() !== "" : form.produto !== null;
@@ -153,13 +164,15 @@ function buildPayload(form: SimForm, settings: SettingsResponse, quote: CotacaoV
 
   let marketplace: object | null = null;
   if (form.taxaEscolha === "manual") {
+    const { canal, modalidade } = form.taxaManual;
     const percentual = required(form.taxaManual.percentual);
-    if (!percentual) return null;
-    const parcelas = form.taxaManual.modalidade === "A_VISTA" ? null : Number(form.taxaManual.parcelas);
-    if (parcelas !== null && (!Number.isInteger(parcelas) || parcelas < 1)) return null;
-    marketplace = { canal: form.taxaManual.canal, modalidade: form.taxaManual.modalidade, parcelas, percentual };
-  } else if (form.taxaEscolha !== "nenhuma") {
-    const taxa = settings.vigente?.taxasMarketplace[Number(form.taxaEscolha)];
+    const parcelas = modalidade === "A_VISTA" ? null : Number(form.taxaManual.parcelas);
+    const parcelasOk = parcelas === null || (Number.isInteger(parcelas) && parcelas >= 1);
+    // Taxa ainda incompleta vai como pendência: o backend calcula o resto e aponta a falta.
+    marketplace =
+      percentual && parcelasOk ? { canal, modalidade, parcelas, percentual } : { canal, modalidade, parcelas: null, percentual: null };
+  } else if (form.taxaEscolha === "configurada") {
+    const taxa = form.taxaConfigurada;
     if (!taxa) return null;
     marketplace = { canal: taxa.canal, modalidade: taxa.modalidade, parcelas: taxa.parcelas, percentual: taxa.percentual };
   }
@@ -204,9 +217,8 @@ function buildPayload(form: SimForm, settings: SettingsResponse, quote: CotacaoV
     frete: freteValor === null || !form.freteMoeda ? null : { valorPorKg: freteValor, moeda: form.freteMoeda },
     encargosCompra,
     venda: { precoUnitarioBrl: precoVenda, marketplace, notaFiscal, outrosEncargos },
-    // Sem parâmetro gravado, vale o markup mínimo do contrato (25%).
-    markupAlertaPercentual: settings.vigente?.markupAlertaPercentual ?? "25",
-    parametroEconomicoId: settings.vigente?.id ?? null
+    markupAlertaPercentual: form.parametro.markupAlertaPercentual,
+    parametroEconomicoId: form.parametro.id
   };
 }
 
@@ -249,13 +261,14 @@ function formFromSaved(entrada: SavedEntrada, current: SimForm): SimForm {
     precoVenda: entrada.venda.precoUnitarioBrl ?? "",
     taxaEscolha: marketplace ? "manual" : "nenhuma",
     taxaManual: marketplace
-      ? { canal: marketplace.canal, modalidade: marketplace.modalidade, parcelas: marketplace.parcelas ? String(marketplace.parcelas) : "", percentual: marketplace.percentual }
+      ? { canal: marketplace.canal, modalidade: marketplace.modalidade, parcelas: marketplace.parcelas ? String(marketplace.parcelas) : "", percentual: marketplace.percentual ?? "" }
       : current.taxaManual,
     notaModo: nota.modo,
     notaPercentual: nota.percentual ?? "",
     notaBase: nota.baseUnitariaBrl ?? "",
     notaValor: nota.valorUnitarioBrl ?? "",
     outrosEncargos: entrada.venda.outrosEncargos,
+    parametro: { id: entrada.parametroEconomicoId, markupAlertaPercentual: entrada.markupAlertaPercentual },
     nome: ""
   };
 }
@@ -437,7 +450,7 @@ function SimulatorForm({
     return loaded ? formFromSaved(loaded, base) : { ...base, itemLivre: !canSearch };
   });
   const set = <K extends keyof SimForm>(key: K, value: SimForm[K]) => setForm((current) => ({ ...current, [key]: value }));
-  const payload = useMemo(() => buildPayload(form, settings, quote), [form, settings, quote]);
+  const payload = useMemo(() => buildPayload(form, quote), [form, quote]);
   const payloadText = payload ? JSON.stringify(payload) : "";
   const [debounced, setDebounced] = useState(payloadText);
   useEffect(() => {
@@ -461,6 +474,11 @@ function SimulatorForm({
     onSuccess: onSaved
   });
   const v = settings.vigente;
+  // Opções da versão vigente mais a taxa já escolhida, mesmo que tenha saído da versão nova.
+  const taxaOptions = [
+    ...(v?.taxasMarketplace ?? []),
+    ...(form.taxaConfigurada && !v?.taxasMarketplace.some((taxa) => taxa.id === form.taxaConfigurada!.id) ? [form.taxaConfigurada] : [])
+  ];
   const stale = payloadText !== debounced || calculation.isFetching;
 
   return (
@@ -544,10 +562,26 @@ function SimulatorForm({
             <Box sx={grid({ xs: "1fr", sm: "1fr 1.4fr" })}>
               <TextField size="small" label="Preço unitário de venda (R$)" value={form.precoVenda} inputMode="decimal" error={form.precoVenda !== "" && !valid(form.precoVenda)}
                 onChange={(event) => set("precoVenda", event.target.value)} />
-              <TextField size="small" select label="Taxa do marketplace" value={form.taxaEscolha} onChange={(event) => set("taxaEscolha", event.target.value)}>
-                {v?.taxasMarketplace.map((taxa, index) => (
-                  <MenuItem key={index} value={String(index)}>
+              <TextField
+                size="small"
+                select
+                label="Taxa do marketplace"
+                value={form.taxaEscolha === "configurada" && form.taxaConfigurada ? `cfg:${form.taxaConfigurada.id}` : form.taxaEscolha}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (!value.startsWith("cfg:")) return setForm((current) => ({ ...current, taxaEscolha: value as SimForm["taxaEscolha"] }));
+                  const id = value.slice(4);
+                  setForm((current) => ({
+                    ...current,
+                    taxaEscolha: "configurada",
+                    taxaConfigurada: taxaOptions.find((taxa) => taxa.id === id) ?? current.taxaConfigurada
+                  }));
+                }}
+              >
+                {taxaOptions.map((taxa) => (
+                  <MenuItem key={taxa.id} value={`cfg:${taxa.id}`}>
                     {canalLabel[taxa.canal]} · {modalidadeLabel(taxa.modalidade, taxa.parcelas)} · {percent(taxa.percentual)}
+                    {v?.taxasMarketplace.some((current) => current.id === taxa.id) ? "" : " (versão anterior)"}
                   </MenuItem>
                 ))}
                 <MenuItem value="manual">Informar taxa nesta simulação</MenuItem>

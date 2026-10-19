@@ -62,10 +62,14 @@ const inputSchema = z
             canal: z.enum(["MERCADO_LIVRE", "SHOPEE", "SITE_PROPRIO", "OUTRO"]),
             modalidade: z.enum(["A_VISTA", "PARCELADO"]),
             parcelas: z.number().int().min(1).max(24).nullable(),
-            percentual: decimal(100)
+            percentual: decimal(100).nullable()
           })
           .strict()
-          .refine((value) => (value.modalidade === "A_VISTA" ? value.parcelas === null : value.parcelas !== null), "parcelas")
+          // Taxa pendente (percentual nulo) ainda não tem plano definido; informada, exige parcelas coerentes.
+          .refine(
+            (value) => value.percentual === null || (value.modalidade === "A_VISTA" ? value.parcelas === null : value.parcelas !== null),
+            "parcelas"
+          )
           .nullable(),
         notaFiscal: z.discriminatedUnion("modo", [
           z.object({ modo: z.literal("PERCENTUAL_VENDA_BRUTA"), percentual: decimal(100) }).strict(),

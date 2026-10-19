@@ -1,7 +1,7 @@
 import { Prisma, type CanalVenda, type ModalidadeTaxaMarketplace, type NotaFiscalBase } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { AppError } from "../../lib/app-error";
-import { audit, idempotentMutation } from "../operations/operations.persistence";
+import { audit, findIdempotentReplay, idempotentMutation } from "../operations/operations.persistence";
 
 const ORIGIN = "API_ECONOMIC_SETTINGS";
 const QUOTE_WARNING_DAYS = 7;
@@ -176,7 +176,14 @@ export const PTAX_FONTE = "BCB PTAX venda - boletim de fechamento";
 // dataHoraCotacao vem no horário de Brasília (sem horário de verão desde 2019): "2026-10-19 13:05:47.20983".
 const parseBcbTime = (value: string) => new Date(`${value.replace(" ", "T").slice(0, 23)}-03:00`);
 
+type PtaxCapture = { cotacao: Awaited<ReturnType<typeof prisma.cotacaoCambio.create>>; jaRegistrada: boolean };
+
 export async function capturePtax(lojaId: string, userId: string, acrescimoInformado: string | null, key?: string) {
+  // A idempotência vale para o pedido como enviado: uma repetição devolve o que já foi gravado,
+  // sem depender de a fonte externa responder igual (ou responder) de novo.
+  const request = { acrescimoCambialBrl: acrescimoInformado };
+  const replay = await findIdempotentReplay<PtaxCapture>({ lojaId, operation: "CAPTURE_PTAX", entityId: "USD:BRL", key, payload: request });
+  if (replay) return replay;
   const acrescimo = acrescimoInformado ?? (await currentSettings(lojaId))?.acrescimoCambialBrl.toString() ?? null;
   if (acrescimo === null) throw new AppError(422, "acrescimo_cambial_nao_configurado");
   const now = new Date();
@@ -199,8 +206,8 @@ export async function capturePtax(lojaId: string, userId: string, acrescimoInfor
     operation: "CAPTURE_PTAX",
     entityId: "USD:BRL",
     key,
-    payload: { acrescimo, cotadoEm: cotadoEm.toISOString() },
-    execute: async (tx, correlationId) => {
+    payload: request,
+    execute: async (tx, correlationId): Promise<PtaxCapture> => {
       // O mesmo boletim não é registrado duas vezes.
       const existente = await tx.cotacaoCambio.findFirst({
         where: { lojaId, moedaOrigem: "USD", moedaDestino: "BRL", fonte: PTAX_FONTE, cotadoEm }

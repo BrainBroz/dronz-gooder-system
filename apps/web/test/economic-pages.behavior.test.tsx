@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../src/api/client";
 import { EconomicSettingsPage } from "../src/pages/EconomicSettingsPage";
-import { PurchaseSimulatorPage, initialForm, withProduct, type Produto } from "../src/pages/PurchaseSimulatorPage";
+import { PurchaseSimulatorPage, buildPayload, initialForm, withProduct, type Produto } from "../src/pages/PurchaseSimulatorPage";
 import { renderWithProviders, testStores } from "./render";
 
 beforeEach(() => vi.restoreAllMocks());
@@ -31,7 +31,7 @@ const vigente = {
   observacoes: null,
   createdAt: "2026-10-19T12:00:00.000Z",
   criadoPor: { id: "u", name: "Ana" },
-  taxasMarketplace: [{ canal: "MERCADO_LIVRE", modalidade: "PARCELADO", parcelas: 2, percentual: "16", descricao: null }]
+  taxasMarketplace: [{ id: "taxa-parcelado", canal: "MERCADO_LIVRE", modalidade: "PARCELADO", parcelas: 2, percentual: "16", descricao: null }]
 };
 const quote = {
   id: "quote-1",
@@ -279,5 +279,49 @@ describe("troca de produto no simulador", () => {
   it("produto sem preço de venda no cadastro não preenche preço", () => {
     const zero = withProduct(initialForm(settingsData, null), { ...a, precoVenda: "0" });
     expect(zero.precoVenda).toBe("");
+  });
+});
+
+describe("payload do simulador", () => {
+  const ready = (settings: object) => ({ ...withProduct(initialForm(settings as never, quote as never), { id: "a", nome: "A", codigo: 1, peso: "0.5", precoVenda: "900" }), precoCompra: "100" });
+
+  it("o envio usa a taxa e a versão de parâmetros fixadas no formulário", () => {
+    const form = ready({ vigente, versoes: [], referenciasPO });
+    const before = buildPayload(form, quote as never) as { venda: { marketplace: unknown }; parametroEconomicoId: string; markupAlertaPercentual: string };
+    expect(before.venda.marketplace).toEqual({ canal: "MERCADO_LIVRE", modalidade: "PARCELADO", parcelas: 2, percentual: "16" });
+    expect(before.parametroEconomicoId).toBe("param-1");
+    expect(before.markupAlertaPercentual).toBe("25");
+  });
+
+  it("a lista de opções guarda a taxa escolhida mesmo se a versão nova não a tiver", async () => {
+    const user = userEvent.setup();
+    let current = { vigente, versoes: [], referenciasPO };
+    vi.spyOn(api, "get").mockImplementation(async (url) => {
+      if (url === "/economic-settings") return { data: current };
+      if (url === "/economic-settings/exchange-rate") return { data: { cotacao: quote } };
+      if (url === "/purchase-simulations") return { data: [] };
+      if (url === "/products") return { data: { items: [mac] } };
+      throw new Error(`GET inesperado: ${url}`);
+    });
+    vi.spyOn(api, "post").mockResolvedValue({ data: { resultado } });
+    const { queryClient } = renderWithProviders(<PurchaseSimulatorPage />, { permissions: ["SIMULACAO_VISUALIZAR", "CATALOGO_VISUALIZAR"] });
+    const select = await screen.findByRole("combobox", { name: "Taxa do marketplace" });
+    expect(select.textContent).toContain("Parcelado em 2x");
+    current = {
+      ...current,
+      vigente: { ...vigente, id: "param-2", taxasMarketplace: [{ id: "taxa-avista", canal: "MERCADO_LIVRE", modalidade: "A_VISTA", parcelas: null, percentual: "12", descricao: null }] }
+    } as never;
+    await queryClient.invalidateQueries();
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Taxa do marketplace" }).textContent).toContain("Parcelado em 2x"));
+    await user.click(screen.getByRole("combobox", { name: "Taxa do marketplace" }));
+    expect(await screen.findByRole("option", { name: /Parcelado em 2x · 16,00% \(versão anterior\)/ })).toBeTruthy();
+    expect(screen.getByRole("option", { name: /À vista · 12,00%/ })).toBeTruthy();
+  });
+
+  it("taxa manual vazia não bloqueia o cálculo: segue como pendência", () => {
+    const form = { ...ready({ vigente, versoes: [], referenciasPO }), taxaEscolha: "manual" as const };
+    const payload = buildPayload(form, quote as never) as { venda: { marketplace: unknown } } | null;
+    expect(payload).not.toBeNull();
+    expect(payload!.venda.marketplace).toEqual({ canal: "MERCADO_LIVRE", modalidade: "A_VISTA", parcelas: null, percentual: null });
   });
 });

@@ -40,6 +40,34 @@ export function setAuditFailureForTests(
   auditFailureForTests = predicate;
 }
 
+/**
+ * Resposta já gravada para esta chave, conferida contra o conteúdo original do pedido (null se não há).
+ * Permite repetir com segurança uma operação que depende de algo externo antes da transação.
+ */
+export async function findIdempotentReplay<T>(input: {
+  lojaId: string;
+  operation: string;
+  entityId: string;
+  key?: string;
+  payload: unknown;
+}): Promise<T | null> {
+  if (!input.key) return null;
+  const existing = await prisma.idempotencyRecord.findUnique({
+    where: {
+      lojaId_operation_entityId_idempotencyKey: {
+        lojaId: input.lojaId,
+        operation: input.operation,
+        entityId: input.entityId,
+        idempotencyKey: input.key
+      }
+    }
+  });
+  if (!existing) return null;
+  if (existing.requestHash !== requestHash(input.payload))
+    throw new AppError(409, "idempotency_conflict");
+  return existing.responseData as T;
+}
+
 export async function idempotentMutation<T>(input: {
   lojaId: string;
   operation: string;

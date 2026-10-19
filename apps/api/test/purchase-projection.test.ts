@@ -148,4 +148,18 @@ describe("projeção de compra", () => {
     expect(r.porUnidade.taxaMarketplace).toBe("0.00");
     expect(r.porUnidade.descontosVenda).toBe("55.00");
   });
+
+  it("taxa do marketplace não informada é pendência: custo continua calculado, lucro não", () => {
+    const r = projectPurchase({
+      ...base(),
+      venda: { ...base().venda, marketplace: { canal: "MERCADO_LIVRE", modalidade: "PARCELADO", parcelas: null, percentual: null } }
+    });
+    expect(r.status).toBe("INCOMPLETO");
+    expect(r.pendencias).toContainEqual({ campo: "venda.marketplace", motivo: "Taxa do marketplace não informada." });
+    expect(r.porUnidade.custo).toBe("564.20");
+    expect(r.porUnidade.taxaMarketplace).toBeNull();
+    expect(r.porUnidade.receitaLiquida).toBeNull();
+    expect(r.porUnidade.lucro).toBeNull();
+    expect(r.indicadores.markupPercentual).toBe("59.52");
+  });
 });

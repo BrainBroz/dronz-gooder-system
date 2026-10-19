@@ -50,8 +50,8 @@ export type ProjecaoEntrada = {
   encargosCompra: EncargoCompra[];
   venda: {
     precoUnitarioBrl: string | null;
-    /** Nulo = venda sem taxa de canal, escolhido explicitamente. */
-    marketplace: { canal: string; modalidade: "A_VISTA" | "PARCELADO"; parcelas: number | null; percentual: string } | null;
+    /** Nulo = venda sem taxa de canal, escolhido explicitamente; percentual nulo = taxa ainda não informada. */
+    marketplace: { canal: string; modalidade: "A_VISTA" | "PARCELADO"; parcelas: number | null; percentual: string | null } | null;
     notaFiscal: NotaFiscalEntrada;
     outrosEncargos: EncargoVenda[];
   };
@@ -152,7 +152,12 @@ export function projectPurchase(input: ProjecaoEntrada): ProjecaoResultado {
   const vendaBruta = precoVendaDefinido ? precoVenda : null;
 
   const marketplace = input.venda.marketplace;
-  const taxaMarketplace = marketplace === null ? new D(0) : vendaBruta && vendaBruta.times(marketplace.percentual).dividedBy(hundred);
+  let taxaMarketplace: Dec | null;
+  if (marketplace === null) taxaMarketplace = new D(0);
+  else if (marketplace.percentual === null) {
+    taxaMarketplace = null;
+    pendencias.push({ campo: "venda.marketplace", motivo: "Taxa do marketplace não informada." });
+  } else taxaMarketplace = vendaBruta && vendaBruta.times(marketplace.percentual).dividedBy(hundred);
 
   const nf = input.venda.notaFiscal;
   let notaFiscal: Dec | null = null;
