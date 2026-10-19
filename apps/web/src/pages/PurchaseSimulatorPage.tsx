@@ -63,8 +63,11 @@ export type SimForm = {
    * carregada durante a edição não troca o plano escolhido pelo operador.
    */
   taxaConfigurada: TaxaMarketplace | null;
-  /** Versão de parâmetros e limite de markup fixados quando o formulário foi aberto. */
-  parametro: { id: string | null; markupAlertaPercentual: string };
+  /**
+   * Versão de parâmetros fixada quando o formulário foi aberto, com limite de markup e taxas dela: as opções
+   * de taxa vêm só desta versão, então a taxa enviada sempre pertence ao parametroEconomicoId informado.
+   */
+  parametro: { id: string | null; markupAlertaPercentual: string; taxas: TaxaMarketplace[] };
   taxaManual: { canal: Canal; modalidade: Modalidade; parcelas: string; percentual: string };
   notaModo: NotaModo;
   notaPercentual: string;
@@ -128,7 +131,7 @@ export function initialForm(settings: SettingsResponse, quote: CotacaoVigente | 
     taxaEscolha: v?.taxasMarketplace.length ? "configurada" : "manual",
     taxaConfigurada: v?.taxasMarketplace[0] ?? null,
     // Sem parâmetro gravado, vale o markup mínimo do contrato (25%).
-    parametro: { id: v?.id ?? null, markupAlertaPercentual: v?.markupAlertaPercentual ?? "25" },
+    parametro: { id: v?.id ?? null, markupAlertaPercentual: v?.markupAlertaPercentual ?? "25", taxas: v?.taxasMarketplace ?? [] },
     taxaManual: { canal: "MERCADO_LIVRE", modalidade: "A_VISTA", parcelas: "", percentual: "" },
     notaModo,
     notaPercentual: v?.notaFiscalPercentual ?? "",
@@ -190,9 +193,13 @@ export function buildPayload(form: SimForm, quote: CotacaoVigente | null) {
     const percentual = required(form.notaPercentual);
     if (!percentual) return null;
     if (form.notaModo === "PERCENTUAL_BASE_INFORMADA") {
-      const base = required(form.notaBase);
-      if (!base) return null;
-      notaFiscal = { modo: form.notaModo, percentual, baseUnitariaBrl: base };
+      // Base ainda não digitada: a nota vai como pendente e o restante da projeção é calculado.
+      if (form.notaBase.trim() === "") notaFiscal = { modo: "BASE_PENDENTE", percentual };
+      else {
+        const base = required(form.notaBase);
+        if (!base) return null;
+        notaFiscal = { modo: form.notaModo, percentual, baseUnitariaBrl: base };
+      }
     } else notaFiscal = { modo: form.notaModo, percentual };
   }
 
@@ -287,7 +294,12 @@ export function formFromSaved(entrada: SavedEntrada, current: SimForm): SimForm 
     notaBase: nota.baseUnitariaBrl ?? "",
     notaValor: nota.valorUnitarioBrl ?? "",
     outrosEncargos: entrada.venda.outrosEncargos,
-    parametro: { id: entrada.parametroEconomicoId, markupAlertaPercentual: entrada.markupAlertaPercentual },
+    // As taxas da versão só são conhecidas se for a mesma versão aberta agora; senão, só taxa informada.
+    parametro: {
+      id: entrada.parametroEconomicoId,
+      markupAlertaPercentual: entrada.markupAlertaPercentual,
+      taxas: current.parametro.id === entrada.parametroEconomicoId ? current.parametro.taxas : []
+    },
     nome: ""
   };
 }
@@ -492,12 +504,8 @@ function SimulatorForm({
     },
     onSuccess: onSaved
   });
-  const v = settings.vigente;
-  // Opções da versão vigente mais a taxa já escolhida, mesmo que tenha saído da versão nova.
-  const taxaOptions = [
-    ...(v?.taxasMarketplace ?? []),
-    ...(form.taxaConfigurada && !v?.taxasMarketplace.some((taxa) => taxa.id === form.taxaConfigurada!.id) ? [form.taxaConfigurada] : [])
-  ];
+  // Opções só da versão fixada no formulário (ver SimForm.parametro).
+  const taxaOptions = form.parametro.taxas;
   const stale = payloadText !== debounced || calculation.isFetching;
 
   return (
@@ -600,7 +608,6 @@ function SimulatorForm({
                 {taxaOptions.map((taxa) => (
                   <MenuItem key={taxa.id} value={`cfg:${taxa.id}`}>
                     {canalLabel[taxa.canal]} · {modalidadeLabel(taxa.modalidade, taxa.parcelas)} · {percent(taxa.percentual)}
-                    {v?.taxasMarketplace.some((current) => current.id === taxa.id) ? "" : " (versão anterior)"}
                   </MenuItem>
                 ))}
                 <MenuItem value="manual">Informar taxa nesta simulação</MenuItem>

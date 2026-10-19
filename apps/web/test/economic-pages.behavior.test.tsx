@@ -322,7 +322,7 @@ describe("payload do simulador", () => {
     expect(before.markupAlertaPercentual).toBe("25");
   });
 
-  it("a lista de opções guarda a taxa escolhida mesmo se a versão nova não a tiver", async () => {
+  it("versão nova durante a edição: as taxas oferecidas e enviadas continuam sendo da versão fixada", async () => {
     const user = userEvent.setup();
     let current = { vigente, versoes: [], referenciasPO };
     vi.spyOn(api, "get").mockImplementation(async (url) => {
@@ -332,19 +332,39 @@ describe("payload do simulador", () => {
       if (url === "/products") return { data: { items: [mac] } };
       throw new Error(`GET inesperado: ${url}`);
     });
-    vi.spyOn(api, "post").mockResolvedValue({ data: { resultado } });
+    const post = vi.spyOn(api, "post").mockResolvedValue({ data: { resultado } });
     const { queryClient } = renderWithProviders(<PurchaseSimulatorPage />, { permissions: ["SIMULACAO_VISUALIZAR", "CATALOGO_VISUALIZAR"] });
-    const select = await screen.findByRole("combobox", { name: "Taxa do marketplace" });
-    expect(select.textContent).toContain("Parcelado em 2x");
+    expect((await screen.findByRole("combobox", { name: "Taxa do marketplace" })).textContent).toContain("Parcelado em 2x");
     current = {
       ...current,
       vigente: { ...vigente, id: "param-2", taxasMarketplace: [{ id: "taxa-avista", canal: "MERCADO_LIVRE", modalidade: "A_VISTA", parcelas: null, percentual: "12", descricao: null }] }
     } as never;
     await queryClient.invalidateQueries();
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Taxa do marketplace" }).textContent).toContain("Parcelado em 2x"));
     await user.click(screen.getByRole("combobox", { name: "Taxa do marketplace" }));
-    expect(await screen.findByRole("option", { name: /Parcelado em 2x · 16,00% \(versão anterior\)/ })).toBeTruthy();
-    expect(screen.getByRole("option", { name: /À vista · 12,00%/ })).toBeTruthy();
+    expect(await screen.findByRole("option", { name: /Parcelado em 2x · 16,00%/ })).toBeTruthy();
+    // A taxa da versão 2 não é oferecida a um formulário fixado na versão 1.
+    expect(screen.queryByRole("option", { name: /À vista · 12,00%/ })).toBeNull();
+    await user.keyboard("{Escape}");
+    await user.type(screen.getByRole("combobox", { name: "Produto" }), "Mac");
+    await user.click(await screen.findByText("MacBook Air 13 M1 16GB 512GB"));
+    await waitFor(() => expect(post.mock.calls.some(([url]) => url === "/purchase-simulations/calculate")).toBe(true), { timeout: 2000 });
+    const body = post.mock.calls.filter(([url]) => url === "/purchase-simulations/calculate").at(-1)![1] as Record<string, unknown>;
+    expect(body).toMatchObject({
+      parametroEconomicoId: "param-1",
+      venda: { marketplace: { canal: "MERCADO_LIVRE", modalidade: "PARCELADO", parcelas: 2, percentual: "16" } }
+    });
+  });
+
+  it("base fiscal informada ainda vazia não bloqueia o cálculo: a nota segue como pendente", () => {
+    const comBaseInformada = { vigente: { ...vigente, notaFiscalBase: "BASE_INFORMADA" }, versoes: [], referenciasPO };
+    const form = ready(comBaseInformada);
+    expect([form.notaModo, form.notaBase]).toEqual(["PERCENTUAL_BASE_INFORMADA", ""]);
+    const pending = buildPayload(form, quote as never) as { venda: { notaFiscal: object } } | null;
+    expect(pending).not.toBeNull();
+    expect(pending!.venda.notaFiscal).toEqual({ modo: "BASE_PENDENTE", percentual: "5" });
+    const informed = buildPayload({ ...form, notaBase: "500" }, quote as never) as { venda: { notaFiscal: object } };
+    expect(informed.venda.notaFiscal).toEqual({ modo: "PERCENTUAL_BASE_INFORMADA", percentual: "5", baseUnitariaBrl: "500" });
+    expect(buildPayload({ ...form, notaBase: "abc" }, quote as never)).toBeNull();
   });
 
   it("taxa manual vazia não bloqueia o cálculo: segue como pendência", () => {
