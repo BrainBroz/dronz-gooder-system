@@ -25,6 +25,11 @@ const SIDEBAR_COLLAPSED = 60;
 const isActive = (pathname: string, path: string) =>
   path === "/" ? pathname === "/" : pathname === path || pathname.startsWith(`${path}/`);
 
+// ButtonBase remove o contorno nativo; todo controle clicável precisa deste anel de foco para teclado.
+const focusRing = {
+  "&.Mui-focusVisible, &:focus-visible": { outline: `2px solid ${visualTokens.blueSoft}`, outlineOffset: 2 }
+};
+
 const itemSx = (active: boolean) => ({
   width: "100%",
   justifyContent: "flex-start",
@@ -39,7 +44,7 @@ const itemSx = (active: boolean) => ({
   border: `1px solid ${active ? "rgba(59, 130, 246, 0.2)" : "transparent"}`,
   textDecoration: "none",
   "&:hover": { bgcolor: active ? "rgba(59, 130, 246, 0.16)" : visualTokens.bg3, color: visualTokens.text },
-  "&.Mui-focusVisible, &:focus-visible": { outline: `2px solid ${visualTokens.blue}`, outlineOffset: 1 }
+  ...focusRing
 });
 
 function NavGroup({
@@ -261,7 +266,8 @@ function StoreSwitcher() {
               color: active ? color : visualTokens.textSecondary,
               bgcolor: active ? `${color}26` : "transparent",
               border: `1px solid ${active ? `${color}4D` : "transparent"}`,
-              "&:hover": { color }
+              "&:hover": { color },
+              ...focusRing
             }}
           >
             <Box component="span" sx={{ width: 6, height: 6, borderRadius: "50%", bgcolor: color, mr: 0.75 }} />
@@ -298,7 +304,7 @@ function UserMenu() {
         aria-label="Menu do usuário"
         aria-haspopup="menu"
         aria-expanded={!!anchor}
-        sx={{ gap: 1, borderRadius: "8px", px: 0.75, py: 0.5, "&:hover": { bgcolor: visualTokens.bg3 } }}
+        sx={{ gap: 1, borderRadius: "8px", px: 0.75, py: 0.5, "&:hover": { bgcolor: visualTokens.bg3 }, ...focusRing }}
       >
         <Box
           sx={{ width: 28, height: 28, borderRadius: "50%", bgcolor: "rgba(59, 130, 246, 0.2)", color: visualTokens.blueSoft, display: "grid", placeItems: "center", fontSize: "0.75rem", fontWeight: 700 }}

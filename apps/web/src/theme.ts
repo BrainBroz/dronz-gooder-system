@@ -15,6 +15,10 @@ export const visualTokens = {
   textMuted: "#8794AA",
   blue: "#3B82F6",
   blueSoft: "#60A5FA",
+  // Fundo dos botões preenchidos: branco sobre #3B82F6 fica em 3,68:1; sobre #2563EB, 5,17:1.
+  // O #3B82F6 continua como cor de texto/links, onde #2563EB perderia contraste no fundo escuro.
+  blueSolid: "#2563EB",
+  blueSolidHover: "#1D4ED8",
   green: "#22C55E",
   amber: "#F59E0B",
   red: "#EF4444",
@@ -89,7 +93,12 @@ export const appTheme = createTheme({
     MuiButton: {
       styleOverrides: {
         root: { borderRadius: 8 },
-        contained: { boxShadow: "none", "&:hover": { boxShadow: "none" } }
+        contained: { boxShadow: "none", "&:hover": { boxShadow: "none" } },
+        containedPrimary: {
+          backgroundColor: visualTokens.blueSolid,
+          color: "#FFFFFF",
+          "&:hover": { backgroundColor: visualTokens.blueSolidHover }
+        }
       }
     },
     MuiOutlinedInput: {

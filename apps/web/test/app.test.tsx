@@ -52,6 +52,11 @@ describe("web app", () => {
     for (const text of [visualTokens.text, visualTokens.textSecondary, visualTokens.textMuted])
       for (const background of [visualTokens.bg, visualTokens.bg2, visualTokens.bg3])
         expect(contrast(text, background)).toBeGreaterThanOrEqual(4.5);
+    // Rótulo branco dos botões preenchidos e texto azul de botões/links sobre fundo e cards.
+    expect(contrast("#FFFFFF", visualTokens.blueSolid)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast("#FFFFFF", visualTokens.blueSolidHover)).toBeGreaterThanOrEqual(4.5);
+    for (const background of [visualTokens.bg, visualTokens.bg2])
+      expect(contrast(appTheme.palette.primary.main, background)).toBeGreaterThanOrEqual(4.5);
   });
 
   it("redireciona a raiz para o fluxo autenticado", () => {

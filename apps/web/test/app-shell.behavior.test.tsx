@@ -58,6 +58,21 @@ describe("navegação agrupada", () => {
     }
   );
 
+  it("controles do cabeçalho são alcançáveis pelo teclado", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Shell>Conteúdo</Shell>);
+    const targets = [
+      screen.getByRole("button", { name: "Dronz" }),
+      screen.getByRole("button", { name: "Gooder" }),
+      screen.getByRole("button", { name: "Menu do usuário" })
+    ];
+    for (const target of targets) {
+      for (let i = 0; i < 10 && document.activeElement !== target; i++) await user.tab();
+      // jsdom não implementa :focus-visible; o contorno em si é conferido no navegador.
+      expect(document.activeElement).toBe(target);
+    }
+  });
+
   it("troca a loja ativa pelos botões; \"Todos\" fica indisponível sem visão consolidada", async () => {
     const user = userEvent.setup();
     renderWithProviders(<Shell>Conteúdo</Shell>);
