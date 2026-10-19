@@ -437,3 +437,11 @@ Falha de carregamento aparece como erro do bloco, nunca como vazio ou zero. Data
 ### 20.3 Próximos passos
 
 Redesenho por área na ordem de navegação (Compras, Logística, Estoque, Produtos, Vendas e Financeiro, Relatórios), cada uma com autorização própria; read models de série histórica e visão consolidada exigem decisão de backend antes da UI. A reconstrução visual não está concluída.
+
+### 20.4 Aceite visual e redirecionamento operacional — 2026-10-19
+
+O PO aprovou o visual da Etapa 1 (`e4e243b`), mas identificou que as jornadas internas ainda não atendem à experiência esperada do Bolt. A fila técnica de importação não é a área principal de análise das compras, e os placeholders de uma fase futura não substituem uma ficha econômica útil.
+
+O complemento [DECISOES_PRODUTO_2026-10-19.md](DECISOES_PRODUTO_2026-10-19.md) é a fonte das novas decisões: compras por competência mensal; projeção separada do realizado; venda recebida já líquida das taxas do canal; importação controlada de vendas passadas e de catálogo com variantes/aliases revisados; configurações, câmbio e simuladores; telas dedicadas de operação física e visão gerencial por loja/escopo autorizado. Sua sequência D1–D6 detalha os próximos passos e prevalece sobre a ordem genérica da seção 20.3 para estas entregas.
+
+Essas frentes incluem capacidades ainda ausentes de backend; portanto, não são executáveis integralmente sob o limite "somente frontend" da Etapa 1. Cada implementação deve delimitar sua extensão contratual, preservar os controles existentes e separar homologação com arquivos reais de dados demonstrativos. Este registro não implementa importadores, integrações, novos cálculos nem alterações no banco.
