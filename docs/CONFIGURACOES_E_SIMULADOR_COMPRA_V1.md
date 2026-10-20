@@ -71,7 +71,7 @@ A cotação estimada não comprova a taxa efetivamente paga, e uma compra histó
 ## 5. Parâmetros que dependem de confirmação
 
 - **Referências do PO (20/10/2026)**, pré-preenchidas e aplicadas só depois de gravadas por um usuário: acréscimo R$ 0,20; nota fiscal 5% sobre a venda bruta; taxa de 16% no parcelado (Mercado Livre); frete US$ 90/kg, editável; alerta de markup 30% (o mínimo do contrato continua 25%). A taxa à vista de 12% ficou fora da simulação de compra por ora. Percentuais de taxa e nota servem só à projeção; o resultado real vem da venda registrada.
-- **Número de parcelas do plano de 16%**: ainda não informado; a taxa exige escolher 2, 12 ou outra quantidade.
+- **Taxa de 16%**: é só o percentual cobrado pela plataforma, sem número de parcelas (decisão do PO em 20/10/2026). No simulador ela é abatida do valor de venda bruto, junto da nota fiscal de 5% (ambas sobre a venda bruta, não uma sobre a outra). "Parcelado" sem parcelas é aceito; à vista continua sem parcelas.
 - A viagem (mala) tem outra lógica de cálculo e fica fora deste simulador.
 
 

@@ -62,7 +62,8 @@ export async function getSettings(lojaId: string) {
 export function validateSettings(input: SettingsInput) {
   const seen = new Set<string>();
   for (const taxa of input.taxasMarketplace) {
-    if (taxa.modalidade === "A_VISTA" ? taxa.parcelas !== null : taxa.parcelas === null)
+    // Parcelado sem número de parcelas é a taxa padrão da plataforma; à vista nunca tem parcelas.
+    if (taxa.modalidade === "A_VISTA" && taxa.parcelas !== null)
       throw new AppError(422, "parcelas_invalidas_para_modalidade");
     const identity = `${taxa.canal}:${taxa.modalidade}:${taxa.parcelas ?? 0}`;
     if (seen.has(identity)) throw new AppError(422, "taxa_marketplace_duplicada");

@@ -285,7 +285,7 @@ function SettingsForm({ data, store, canWrite }: { data: SettingsResponse; store
           taxasMarketplace: form.taxas.map((taxa) => ({
             canal: taxa.canal,
             modalidade: taxa.modalidade,
-            parcelas: taxa.modalidade === "A_VISTA" ? null : Number(taxa.parcelas),
+            parcelas: taxa.modalidade === "A_VISTA" || taxa.parcelas.trim() === "" ? null : Number(taxa.parcelas),
             percentual: orNull(taxa.percentual) ?? "",
             descricao: textOrNull(taxa.descricao)
           }))
@@ -381,8 +381,8 @@ function SettingsForm({ data, store, canWrite }: { data: SettingsResponse; store
                     <MenuItem value="A_VISTA">À vista</MenuItem>
                     <MenuItem value="PARCELADO">Parcelado</MenuItem>
                   </TextField>
-                  <TextField size="small" label="Parcelas" value={taxa.parcelas} disabled={disabled || taxa.modalidade === "A_VISTA"}
-                    required={taxa.modalidade === "PARCELADO"} inputMode="numeric"
+                  <TextField size="small" label="Parcelas (opcional)" value={taxa.parcelas} disabled={disabled || taxa.modalidade === "A_VISTA"}
+                    inputMode="numeric"
                     onChange={(event) => setTaxa(index, { parcelas: event.target.value })} />
                   <TextField size="small" label="Taxa (%)" value={taxa.percentual} required disabled={disabled}
                     onChange={(event) => setTaxa(index, { percentual: event.target.value })} />

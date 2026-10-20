@@ -83,8 +83,7 @@ describe("Configurações econômicas", () => {
     expect((screen.getByLabelText(/Acréscimo cambial/) as HTMLInputElement).value).toBe("0.20");
     expect((screen.getByLabelText(/Frete por kg/) as HTMLInputElement).value).toBe("90");
 
-    // Remove a taxa de referência (o número de parcelas ainda não foi escolhido) e grava.
-    await user.click(screen.getByRole("button", { name: "Remover taxa 1" }));
+    // A taxa de 16% vem sem número de parcelas e grava assim.
     await user.click(screen.getByRole("button", { name: "Gravar nova versão" }));
     // Sem cotação, a tela também pede sozinha o dólar do dia; aqui interessa só a gravação dos parâmetros.
     await waitFor(() => expect(post.mock.calls.some(([target]) => target === "/economic-settings")).toBe(true));
@@ -96,7 +95,7 @@ describe("Configurações econômicas", () => {
       notaFiscalPercentual: "5",
       notaFiscalBase: "VENDA_BRUTA",
       frete: { valorPorKg: "90", moeda: "USD" },
-      taxasMarketplace: []
+      taxasMarketplace: [{ canal: "MERCADO_LIVRE", modalidade: "PARCELADO", parcelas: null, percentual: "16" }]
     });
     expect(config.headers["Idempotency-Key"]).toBeTruthy();
     expect(config.headers["x-store-id"]).toBe(testStores[0]!.id);

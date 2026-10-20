@@ -476,7 +476,29 @@ describe("Simulador de compra", () => {
           venda: { ...simulation(mac.id, q.id).venda, marketplace: { canal: "MERCADO_LIVRE", modalidade: "PARCELADO", parcelas: null, percentual: "16" } }
         })
       );
-    expect(informedWithoutPlan.status).toBe(400);
+    // Parcelado sem número de parcelas é só a taxa da plataforma: abate 16% da venda (900 → 144), além da nota (45).
+    expect(informedWithoutPlan.status).toBe(200);
+    expect(informedWithoutPlan.body.resultado.porUnidade).toMatchObject({ custo: "546.00", lucro: "165.00" });
+    const aVistaComParcelas = await request(app)
+      .post("/purchase-simulations/calculate")
+      .set(headers)
+      .send(
+        simulation(mac.id, q.id, {
+          venda: { ...simulation(mac.id, q.id).venda, marketplace: { canal: "MERCADO_LIVRE", modalidade: "A_VISTA", parcelas: 2, percentual: "12" } }
+        })
+      );
+    expect(aVistaComParcelas.status).toBe(400);
+  });
+
+  it("grava a taxa parcelada de 16% sem número de parcelas; à vista com parcelas é recusada", async () => {
+    const { app, headers } = await admin();
+    const taxa = { canal: "MERCADO_LIVRE", modalidade: "PARCELADO", parcelas: null, percentual: "16", descricao: null };
+    const ok = await request(app).post("/economic-settings").set(headers).send({ ...settings("10"), taxasMarketplace: [taxa] });
+    expect(ok.status).toBe(201);
+    expect(ok.body.taxasMarketplace).toMatchObject([{ canal: "MERCADO_LIVRE", modalidade: "PARCELADO", parcelas: null, percentual: "16" }]);
+    const ruim = await request(app).post("/economic-settings").set(headers).send({ ...settings("10"), taxasMarketplace: [{ ...taxa, modalidade: "A_VISTA", parcelas: 2 }] });
+    expect(ruim.status).toBe(422);
+    expect(ruim.body.error).toBe("parcelas_invalidas_para_modalidade");
   });
 
   it("produto livre (ainda sem cadastro) e cotação informada também são simuláveis", async () => {
