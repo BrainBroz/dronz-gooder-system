@@ -157,6 +157,7 @@ Implementado e coberto por testes:
 - vendas com baixa por lote/custo em snapshot e indicadores derivados com controle financeiro.
 - reconstrução visual Etapa 1 (referência Bolt aprovada): shell com navegação agrupada por permissão, seletor de loja e dashboard sobre read models reais (`docs/UX_OPERATIONAL_FOUNDATION_V1.md`, seção 20); demais telas ainda sem redesenho.
 - configurações econômicas versionadas por loja, captura sob demanda da PTAX de venda (fechamento) do Banco Central e simulador de compra com busca de produto, composição de custos e venda, snapshot e sem efeitos operacionais (`docs/CONFIGURACOES_E_SIMULADOR_COMPRA_V1.md`); modalidade cambial definitiva, base da nota fiscal, plano parcelado e frete por kg aguardam confirmação do PO.
+- importação do catálogo (OP-06): botão "Importar produtos" em Produtos lê Excel (.xlsx, via `exceljs` no navegador) ou CSV, mostra a conferência (`POST /products/import?dryRun=true`) e cadastra só nome e categoria na loja ativa; linhas só com título viram categoria; produtos entram inativos, sem preço e com markup 30%; quem já existe (mesmo slug) é pulado. Excel gravado por ferramentas com XML fora do padrão pode não abrir: salvar de novo no Excel ou exportar CSV.
 
 Não implementado:
 

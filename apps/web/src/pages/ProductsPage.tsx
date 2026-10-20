@@ -14,6 +14,7 @@ import { catalogQueryKeys } from "../queryKeys";
 import type { Product } from "../types/catalog";
 import { useCategories, useProducts } from "../hooks/useCatalog";
 import { formatSalePrice } from "../utils/formatting";
+import { ProductImportDialog } from "../components/ProductImportDialog";
 
 const productSchema = z.object({
   codigo: z.coerce.number().int().min(1, "Código obrigatório"),
@@ -227,11 +228,20 @@ export function ProductsPage() {
   const error =
     categoriesError || productsError ? "Falha ao carregar dados" : null;
   const activeStoreId = useAuthStore((s) => s.activeStoreId);
+  const canManage = useAuthStore((s) => s.permissions.some((code) => code === "SYSTEM_ADMIN" || code === "CATALOGO_GERENCIAR"));
+  const [importing, setImporting] = React.useState(false);
 
   return (
     <PageContainer>
       <Stack gap={{ xs: 2.5, md: 3.5 }}>
         <PageHeader title="Produtos" />
+        {canManage && (
+          <Box>
+            <Button variant="outlined" onClick={() => setImporting(true)}>Importar produtos</Button>
+            {/* key: reabrir começa sem arquivo nem resultado da importação anterior */}
+            {importing && <ProductImportDialog key={activeStoreId} open onClose={() => setImporting(false)} />}
+          </Box>
+        )}
         {loading && <Typography>Carregando...</Typography>}
         {error && <Typography color="error.main">{error}</Typography>}
         <Stack direction="row" gap={2} flexWrap="wrap">

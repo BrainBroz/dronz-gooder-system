@@ -139,4 +139,47 @@ describe("catalog integration", () => {
     const invalidPage = await request(app).get("/products?page=0").set("Authorization", `Bearer ${accessToken}`).set("x-store-id", dronz.id);
     expect(invalidPage.status).toBe(400);
   });
+
+  it("importa produtos candidatos por loja, com simulação prévia, sem duplicar e sem tocar em outra loja", async () => {
+    const { app, response } = await login();
+    const auth = { Authorization: `Bearer ${response.body.accessToken}` };
+    const dronz = response.body.stores.find((store: { slug: string }) => store.slug === "dronz");
+    const gooder = response.body.stores.find((store: { slug: string }) => store.slug === "gooder");
+    const itens = [
+      { nome: "Test Armazenamento X", categoria: "Test Eletrônicos" },
+      { nome: "Test Câmera Ação", categoria: "Test Eletrônicos" },
+      { nome: "Test Suplemento Y", categoria: "Test Suplementos" },
+      { nome: "test armazenamento x", categoria: "Test Eletrônicos" },
+      { nome: "Test Sem Título", categoria: null }
+    ];
+    const post = (store: string, query = "") => request(app).post(`/products/import${query}`).set(auth).set("x-store-id", store);
+
+    const dry = await post(dronz.id, "?dryRun=true").send({ itens });
+    expect(dry.body).toEqual({ novos: 4, jaExistentes: 0, repetidosNoArquivo: 1, categoriasNovas: 3 });
+    expect(await prisma.produto.count({ where: { slug: { startsWith: "test-" } } })).toBe(0);
+
+    const done = await post(dronz.id).send({ itens });
+    expect(done.status).toBe(200);
+    expect(done.body).toEqual(dry.body);
+    const saved = await prisma.produto.findMany({ where: { lojaId: dronz.id, slug: { startsWith: "test-" } }, include: { categoria: true }, orderBy: { slug: "asc" } });
+    expect(saved.map((p) => [p.slug, p.categoria.nome])).toEqual([
+      ["test-armazenamento-x", "Test Eletrônicos"],
+      ["test-camera-acao", "Test Eletrônicos"],
+      ["test-sem-titulo", "Sem categoria"],
+      ["test-suplemento-y", "Test Suplementos"]
+    ]);
+    expect(saved.every((p) => !p.ativo && p.precoVenda.toString() === "0" && p.markup.toString() === "30")).toBe(true);
+    expect(new Set(saved.map((p) => p.codigo)).size).toBe(4);
+
+    const again = await post(dronz.id).send({ itens });
+    expect(again.body).toEqual({ novos: 0, jaExistentes: 4, repetidosNoArquivo: 1, categoriasNovas: 0 });
+
+    const other = await post(gooder.id).send({ itens: [itens[0]] });
+    expect(other.body).toMatchObject({ novos: 1, jaExistentes: 0 });
+    expect(await prisma.produto.count({ where: { lojaId: dronz.id, slug: { startsWith: "test-" } } })).toBe(4);
+
+    expect((await post(dronz.id).send({ itens: [] })).status).toBe(400);
+    await prisma.produto.deleteMany({ where: { slug: { startsWith: "test-" } } });
+    await prisma.categoria.deleteMany({ where: { slug: "sem-categoria" } });
+  });
 });

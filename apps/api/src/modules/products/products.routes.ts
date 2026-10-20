@@ -22,6 +22,7 @@ productsRouter.use(
 productsRouter.get("/", controller.list);
 productsRouter.get("/:id", controller.get);
 productsRouter.post("/", controller.create);
+productsRouter.post("/import", controller.importar);
 productsRouter.patch("/:id", controller.update);
 productsRouter.patch("/:id/status", controller.toggle);
 productsRouter.delete("/:id", controller.remove);
