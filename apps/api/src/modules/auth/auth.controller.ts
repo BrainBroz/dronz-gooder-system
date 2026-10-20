@@ -23,7 +23,8 @@ export async function refresh(req: Request, res: Response, next: NextFunction) {
     res.setHeader("Set-Cookie", authCookie(session.refreshToken, session.expiresAt));
     res.json({ accessToken: session.accessToken });
   } catch (error) {
-    res.setHeader("Set-Cookie", clearAuthCookie());
+    // Renovação concorrente: o cookie atual já foi substituído pela outra resposta; limpá-lo derrubaria a sessão nova.
+    if (!(error instanceof AppError && error.code === "refresh_concorrente")) res.setHeader("Set-Cookie", clearAuthCookie());
     next(error instanceof AppError ? error : new AppError(401, "invalid_refresh_token"));
   }
 }

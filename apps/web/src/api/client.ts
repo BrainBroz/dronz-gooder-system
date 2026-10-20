@@ -22,7 +22,7 @@ type RetriableConfig = InternalAxiosRequestConfig & { _retried?: boolean };
 const AUTH_PATHS = ["/auth/login", "/auth/refresh", "/auth/logout"];
 let refreshPromise: Promise<string | null> | null = null;
 
-async function refreshAccessToken(): Promise<string | null> {
+async function refreshAccessToken(retryConcurrent = true): Promise<string | null> {
   try {
     const response = await axios.post<{ accessToken: string }>(
       `${API_URL}/auth/refresh`,
@@ -32,7 +32,16 @@ async function refreshAccessToken(): Promise<string | null> {
     const accessToken = response.data.accessToken;
     useAuthStore.setState({ accessToken });
     return accessToken;
-  } catch {
+  } catch (error) {
+    // Outra aba acabou de renovar com o mesmo cookie: o navegador já recebeu o cookie novo; tenta uma vez.
+    const concurrent =
+      error instanceof AxiosError &&
+      error.response?.status === 409 &&
+      (error.response.data as { error?: string } | undefined)?.error === "refresh_concorrente";
+    if (concurrent && retryConcurrent) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return refreshAccessToken(false);
+    }
     return null;
   }
 }

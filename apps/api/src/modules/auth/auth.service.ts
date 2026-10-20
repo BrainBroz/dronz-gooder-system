@@ -1,12 +1,15 @@
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { env } from "../../lib/env";
 import { AppError } from "../../lib/app-error";
 
 type SessionPayload = { sub: string; tokenType: "access" | "refresh"; jti: string };
 const refreshDurationMs = 1000 * 60 * 60 * 24 * 30;
+// Token substituído há menos que isso por outra renovação: corrida entre abas, não reuso.
+export const CONCURRENT_REFRESH_WINDOW_MS = 10_000;
 
 function signAccessToken(userId: string) {
   const payload: SessionPayload = { sub: userId, tokenType: "access", jti: crypto.randomUUID() };
@@ -36,13 +39,13 @@ export async function getAuthenticatedUser(userId: string) {
   };
 }
 
-async function createSession(userId: string) {
+async function createSession(userId: string, db: Prisma.TransactionClient = prisma) {
   const identity = await getAuthenticatedUser(userId);
   const accessToken = signAccessToken(userId);
   const refreshToken = signRefreshToken(userId);
   const expiresAt = new Date(Date.now() + refreshDurationMs);
-  await prisma.refreshToken.create({ data: { tokenHash: hashToken(refreshToken), usuarioId: userId, expiresAt } });
-  return { accessToken, refreshToken, expiresAt, ...identity };
+  const stored = await db.refreshToken.create({ data: { tokenHash: hashToken(refreshToken), usuarioId: userId, expiresAt } });
+  return { accessToken, refreshToken, expiresAt, refreshTokenId: stored.id, ...identity };
 }
 
 export async function login(email: string, password: string) {
@@ -61,15 +64,43 @@ export async function refresh(rawToken: string) {
     throw new AppError(401, "invalid_refresh_token");
   }
   if (!decoded.sub || decoded.tokenType !== "refresh") throw new AppError(401, "invalid_refresh_token");
+  const userId = decoded.sub;
   const stored = await prisma.refreshToken.findUnique({ where: { tokenHash: hashToken(rawToken) } });
-  if (!stored || stored.usuarioId !== decoded.sub || stored.revokedAt || stored.expiresAt.getTime() < Date.now()) throw new AppError(401, "invalid_refresh_token");
+  if (!stored || stored.usuarioId !== userId || stored.expiresAt.getTime() < Date.now()) throw new AppError(401, "invalid_refresh_token");
+  if (stored.revokedAt) throw await rejectConsumed(stored);
   try {
-    await getAuthenticatedUser(decoded.sub);
+    await getAuthenticatedUser(userId);
   } catch {
     throw new AppError(401, "invalid_refresh_token");
   }
-  await prisma.refreshToken.update({ where: { id: stored.id }, data: { revokedAt: new Date() } });
-  return createSession(decoded.sub);
+  // Consumo atômico: só quem revoga o token cria a sessão sucessora, na mesma transação.
+  const session = await prisma.$transaction(async (tx) => {
+    const consumed = await tx.refreshToken.updateMany({
+      where: { id: stored.id, revokedAt: null, expiresAt: { gt: new Date() } },
+      data: { revokedAt: new Date() }
+    });
+    if (consumed.count !== 1) return null;
+    const created = await createSession(userId, tx);
+    await tx.refreshToken.update({ where: { id: stored.id }, data: { replacedById: created.refreshTokenId } });
+    return created;
+  });
+  if (!session) throw await rejectConsumed(await prisma.refreshToken.findUniqueOrThrow({ where: { id: stored.id } }));
+  return session;
+}
+
+/**
+ * Token já consumido. Rotacionado há pouco por outra renovação (duas abas): 409, sem sessão nova; o cliente
+ * repete com o cookie que já recebeu. Fora da janela ou revogado por logout: reuso, 401 e auditoria.
+ */
+async function rejectConsumed(token: { id: string; usuarioId: string; revokedAt: Date | null; replacedById: string | null }) {
+  const recentRotation =
+    token.replacedById !== null && token.revokedAt !== null && Date.now() - token.revokedAt.getTime() < CONCURRENT_REFRESH_WINDOW_MS;
+  if (recentRotation) return new AppError(409, "refresh_concorrente");
+  if (token.replacedById !== null)
+    await prisma.auditLog.create({
+      data: { usuarioId: token.usuarioId, action: "refresh_token_reuse", entity: "RefreshToken", entityId: token.id }
+    });
+  return new AppError(401, "invalid_refresh_token");
 }
 
 export async function logout(rawToken?: string) {
