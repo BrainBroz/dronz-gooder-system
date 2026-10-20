@@ -16,7 +16,7 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { appTheme } from "./theme";
-import { api, queryClient } from "./api/client";
+import { api, queryClient, refreshAccessTokenOnce } from "./api/client";
 import { useAuthStore } from "./stores/auth";
 import { extractErrorMessage } from "./utils/errors";
 import { AppShell } from "./components/layout/AppShell";
@@ -119,12 +119,13 @@ const loginSchema = z.object({
 
 export async function loadSession() {
   try {
-    const refreshed = await api.post("/auth/refresh");
+    const accessToken = await refreshAccessTokenOnce();
+    if (!accessToken) throw new Error("sessão ausente");
     const response = await api.get("/auth/me", {
-      headers: { Authorization: `Bearer ${refreshed.data.accessToken}` }
+      headers: { Authorization: `Bearer ${accessToken}` }
     });
     useAuthStore.getState().setSession({
-      accessToken: refreshed.data.accessToken,
+      accessToken,
       user: response.data.user,
       stores: response.data.lojas.map(
         (s: { id: string; slug: string; nome: string }) => ({
