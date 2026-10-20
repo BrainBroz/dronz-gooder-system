@@ -18,7 +18,7 @@ beforeEach(() => {
 });
 
 describe("renovação recusada por outra aba (409 refresh_concorrente)", () => {
-  it("tenta uma vez de novo e recupera a sessão com o cookie já atualizado", async () => {
+  it("tenta de novo e recupera a sessão com o cookie já atualizado", async () => {
     const post = vi
       .spyOn(axios, "post")
       .mockRejectedValueOnce(rejection(409, "refresh_concorrente"))
@@ -28,11 +28,11 @@ describe("renovação recusada por outra aba (409 refresh_concorrente)", () => {
     expect(useAuthStore.getState().accessToken).toBe("da-outra-aba");
   });
 
-  it("não insiste além de uma nova tentativa", async () => {
+  it("não insiste além de três novas tentativas", async () => {
     const post = vi.spyOn(axios, "post").mockRejectedValue(rejection(409, "refresh_concorrente"));
     await expect(refreshAccessTokenOnce()).resolves.toBeNull();
-    expect(post).toHaveBeenCalledTimes(2);
-  });
+    expect(post).toHaveBeenCalledTimes(4);
+  }, 10_000);
 
   it("401 (reuso, logout, expirado) não é repetido", async () => {
     const post = vi.spyOn(axios, "post").mockRejectedValue(rejection(401, "invalid_refresh_token"));

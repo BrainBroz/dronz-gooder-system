@@ -96,7 +96,15 @@ describe("renovação de sessão entre abas", () => {
     expect(server.state.statuses).toEqual([200, 200]);
   });
 
-  it("sem Web Locks, duas abas ainda se recuperam pelo retry único do 409", async () => {
+  it("sem Web Locks e com cookie atrasado além da primeira espera, as tentativas limitadas ainda recuperam a sessão", async () => {
+    server.reset(600);
+    const [a, b] = [await openTab(), await openTab()];
+    const tokens = await Promise.all([a.refreshAccessTokenOnce(), b.refreshAccessTokenOnce()]);
+    expect(tokens.every((token) => token !== null)).toBe(true);
+    expect(server.state.statuses.filter((status) => status === 409).length).toBeGreaterThanOrEqual(1);
+  }, 10_000);
+
+  it("sem Web Locks, duas abas ainda se recuperam pelas novas tentativas do 409", async () => {
     server.reset(20);
     const [a, b] = [await openTab(), await openTab()];
     const tokens = await Promise.all([a.refreshAccessTokenOnce(), b.refreshAccessTokenOnce()]);

@@ -39,8 +39,13 @@ export async function getAuthenticatedUser(userId: string) {
   };
 }
 
-async function createSession(userId: string, db: Prisma.TransactionClient = prisma) {
-  const identity = await getAuthenticatedUser(userId);
+// Dentro da transação de rotação, a identidade chega já carregada: nenhuma consulta pede outra conexão.
+async function createSession(
+  userId: string,
+  db: Prisma.TransactionClient = prisma,
+  knownIdentity?: Awaited<ReturnType<typeof getAuthenticatedUser>>
+) {
+  const identity = knownIdentity ?? (await getAuthenticatedUser(userId));
   const accessToken = signAccessToken(userId);
   const refreshToken = signRefreshToken(userId);
   const expiresAt = new Date(Date.now() + refreshDurationMs);
@@ -68,8 +73,9 @@ export async function refresh(rawToken: string) {
   const stored = await prisma.refreshToken.findUnique({ where: { tokenHash: hashToken(rawToken) } });
   if (!stored || stored.usuarioId !== userId || stored.expiresAt.getTime() < Date.now()) throw new AppError(401, "invalid_refresh_token");
   if (stored.revokedAt) throw await rejectConsumed(stored);
+  let identity: Awaited<ReturnType<typeof getAuthenticatedUser>>;
   try {
-    await getAuthenticatedUser(userId);
+    identity = await getAuthenticatedUser(userId);
   } catch {
     throw new AppError(401, "invalid_refresh_token");
   }
@@ -80,7 +86,7 @@ export async function refresh(rawToken: string) {
       data: { revokedAt: new Date() }
     });
     if (consumed.count !== 1) return null;
-    const created = await createSession(userId, tx);
+    const created = await createSession(userId, tx, identity);
     await tx.refreshToken.update({ where: { id: stored.id }, data: { replacedById: created.refreshTokenId } });
     return created;
   });
