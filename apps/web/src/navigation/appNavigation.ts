@@ -32,6 +32,7 @@ export const appNavigation: readonly AppNavGroup[] = [
       { label: "Fila de compras", path: "/compras", permissions: ["COMPRAS_IMPORTADAS_VISUALIZAR"] },
       { label: "Revisão de compras", path: "/compras/revisao", permissions: ["BUYER_INGESTION_VISUALIZAR"] },
       { label: "Pedidos operacionais", path: "/pedidos", permissions: ["PEDIDOS_COMPRA_VISUALIZAR"] },
+      { label: "Controle de compras", path: "/compras/controle", permissions: ["COMPRAS_IMPORTADAS_VISUALIZAR"] },
       { label: "Painel mensal", path: "/compras/painel-mensal", permissions: ["COMPRAS_IMPORTADAS_VISUALIZAR"] },
       { label: "Simulador de compra", path: "/compras/simulador", permissions: ["SIMULACAO_VISUALIZAR", "SIMULACAO_GERENCIAR"] }
     ]

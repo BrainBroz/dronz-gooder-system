@@ -56,6 +56,11 @@ const ProductBasePage = React.lazy(() =>
     default: module.ProductBasePage
   }))
 );
+const PurchaseControlPage = React.lazy(() =>
+  import("./pages/PurchaseControlPage").then((module) => ({
+    default: module.PurchaseControlPage
+  }))
+);
 const LogisticsPage = React.lazy(() =>
   import("./pages/LogisticsPage").then((module) => ({
     default: module.LogisticsPage
@@ -400,6 +405,16 @@ export function AppRoutes() {
                 <AuthGate>
                   <Shell>
                     <SalesPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/compras/controle"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <PurchaseControlPage />
                   </Shell>
                 </AuthGate>
               }
