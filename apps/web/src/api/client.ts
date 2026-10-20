@@ -22,18 +22,38 @@ type RetriableConfig = InternalAxiosRequestConfig & { _retried?: boolean };
 const AUTH_PATHS = ["/auth/login", "/auth/refresh", "/auth/logout"];
 let refreshPromise: Promise<string | null> | null = null;
 
-async function refreshAccessToken(): Promise<string | null> {
+// Esperas antes de repetir um 409 concorrente: cobre cookie novo atrasado sem insistir indefinidamente.
+const CONCURRENT_RETRY_DELAYS_MS = [300, 600, 1200];
+
+// Prazo de cada renovação: uma requisição pendurada não pode segurar a trava entre abas indefinidamente.
+const REFRESH_TIMEOUT_MS = 10_000;
+
+async function refreshAccessToken(attempt = 0): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS);
   try {
     const response = await axios.post<{ accessToken: string }>(
       `${API_URL}/auth/refresh`,
       undefined,
-      { withCredentials: true }
+      { withCredentials: true, signal: controller.signal }
     );
     const accessToken = response.data.accessToken;
     useAuthStore.setState({ accessToken });
     return accessToken;
-  } catch {
+  } catch (error) {
+    clearTimeout(timer);
+    // Outra aba acabou de renovar com o mesmo cookie: espera o cookie novo chegar e tenta de novo, com limite.
+    const concurrent =
+      error instanceof AxiosError &&
+      error.response?.status === 409 &&
+      (error.response.data as { error?: string } | undefined)?.error === "refresh_concorrente";
+    if (concurrent && attempt < CONCURRENT_RETRY_DELAYS_MS.length) {
+      await new Promise((resolve) => setTimeout(resolve, CONCURRENT_RETRY_DELAYS_MS[attempt]));
+      return refreshAccessToken(attempt + 1);
+    }
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -43,10 +63,21 @@ async function refreshAccessToken(): Promise<string | null> {
  * expirada) fariam a segunda receber 401 e limpar a sessão. Todas compartilham o mesmo POST.
  */
 export function refreshAccessTokenOnce(): Promise<string | null> {
-  refreshPromise ??= refreshAccessToken().finally(() => {
+  refreshPromise ??= withRefreshLock(() => refreshAccessToken()).finally(() => {
     refreshPromise = null;
   });
   return refreshPromise;
+}
+
+/**
+ * Serializa as renovações entre abas do mesmo navegador (que compartilham o cookie): a próxima só sai depois
+ * que a anterior terminou e o navegador já gravou o cookie novo. Sem Web Locks, segue sem trava e o retry
+ * único do 409 continua como fallback.
+ */
+function withRefreshLock(task: () => Promise<string | null>): Promise<string | null> {
+  const locks = typeof navigator === "undefined" ? undefined : navigator.locks;
+  // LockManager.request tipa o retorno como Promise<Promise<…>>; o then só achata o tipo (em execução já é plano).
+  return locks ? locks.request("dronz-auth-refresh", task).then((value) => value) : task();
 }
 
 api.interceptors.response.use(undefined, async (error: AxiosError) => {
