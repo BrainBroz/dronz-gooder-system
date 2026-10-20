@@ -4,14 +4,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // recebe 409 refresh_concorrente; qualquer outro, 401. O navegador só grava o cookie novo quando a
 // resposta chega (deliveryMs depois do commit), como num cookie atrasado.
 const server = vi.hoisted(() => {
-  const state = { jar: "t0", valid: "t0", replaced: null as string | null, seq: 0, deliveryMs: 0, active: 0, maxActive: 0, statuses: [] as number[] };
+  const state = { jar: "t0", valid: "t0", replaced: null as string | null, seq: 0, deliveryMs: 0, active: 0, maxActive: 0, statuses: [] as number[], hangNext: false, calls: 0 };
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
   return {
     state,
     reset(deliveryMs: number) {
-      Object.assign(state, { jar: "t0", valid: "t0", replaced: null, seq: 0, deliveryMs, active: 0, maxActive: 0, statuses: [] });
+      Object.assign(state, { jar: "t0", valid: "t0", replaced: null, seq: 0, deliveryMs, active: 0, maxActive: 0, statuses: [], hangNext: false, calls: 0 });
     },
-    async refresh(reject: (status: number) => never) {
+    async refresh(reject: (status: number) => never, signal?: AbortSignal, cancel?: () => never) {
+      state.calls++;
+      if (state.hangNext) {
+        // Conexão pendurada: só termina quando o cliente cancela.
+        state.hangNext = false;
+        await new Promise((resolve) => signal?.addEventListener("abort", resolve));
+        return cancel!();
+      }
       state.active++;
       state.maxActive = Math.max(state.maxActive, state.active);
       try {
@@ -47,8 +54,13 @@ vi.mock("axios", async (importOriginal) => {
       config: { headers: new actual.AxiosHeaders() }
     });
   };
+  const cancel = (): never => {
+    throw new actual.CanceledError();
+  };
   const post = (url: string, ...rest: unknown[]) =>
-    url.includes("/auth/refresh") ? server.refresh(reject) : (actual.default.post as (...a: unknown[]) => unknown)(url, ...rest);
+    url.includes("/auth/refresh")
+      ? server.refresh(reject, (rest[1] as { signal?: AbortSignal } | undefined)?.signal, cancel)
+      : (actual.default.post as (...a: unknown[]) => unknown)(url, ...rest);
   return { ...actual, default: { ...actual.default, post } };
 });
 
@@ -94,6 +106,25 @@ describe("renovação de sessão entre abas", () => {
     const tokens = await Promise.all([a.refreshAccessTokenOnce(), b.refreshAccessTokenOnce()]);
     expect(tokens.every((token) => token !== null)).toBe(true);
     expect(server.state.statuses).toEqual([200, 200]);
+  });
+
+  it("renovação pendurada é cancelada no prazo e libera a trava para as outras abas", async () => {
+    vi.useFakeTimers();
+    server.reset(0);
+    server.state.hangNext = true;
+    installLocks();
+    const [a, b] = [await openTab(), await openTab()];
+    const first = a.refreshAccessTokenOnce();
+    const second = b.refreshAccessTokenOnce();
+    await vi.advanceTimersByTimeAsync(9_000);
+    // Antes do prazo, a outra aba segue esperando a trava.
+    expect(server.state.calls).toBe(1);
+    await vi.advanceTimersByTimeAsync(1_100);
+    await expect(first).resolves.toBeNull();
+    await vi.advanceTimersByTimeAsync(50);
+    await expect(second).resolves.toBe("acesso-t1");
+    expect(server.state.calls).toBe(2);
+    vi.useRealTimers();
   });
 
   it("sem Web Locks e com cookie atrasado além da primeira espera, as tentativas limitadas ainda recuperam a sessão", async () => {

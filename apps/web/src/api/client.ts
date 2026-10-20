@@ -25,17 +25,23 @@ let refreshPromise: Promise<string | null> | null = null;
 // Esperas antes de repetir um 409 concorrente: cobre cookie novo atrasado sem insistir indefinidamente.
 const CONCURRENT_RETRY_DELAYS_MS = [300, 600, 1200];
 
+// Prazo de cada renovação: uma requisição pendurada não pode segurar a trava entre abas indefinidamente.
+const REFRESH_TIMEOUT_MS = 10_000;
+
 async function refreshAccessToken(attempt = 0): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS);
   try {
     const response = await axios.post<{ accessToken: string }>(
       `${API_URL}/auth/refresh`,
       undefined,
-      { withCredentials: true }
+      { withCredentials: true, signal: controller.signal }
     );
     const accessToken = response.data.accessToken;
     useAuthStore.setState({ accessToken });
     return accessToken;
   } catch (error) {
+    clearTimeout(timer);
     // Outra aba acabou de renovar com o mesmo cookie: espera o cookie novo chegar e tenta de novo, com limite.
     const concurrent =
       error instanceof AxiosError &&
@@ -46,6 +52,8 @@ async function refreshAccessToken(attempt = 0): Promise<string | null> {
       return refreshAccessToken(attempt + 1);
     }
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
