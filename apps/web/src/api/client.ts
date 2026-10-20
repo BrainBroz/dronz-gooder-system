@@ -37,6 +37,18 @@ async function refreshAccessToken(): Promise<string | null> {
   }
 }
 
+/**
+ * Uma única renovação em andamento por vez. O refresh token é rotacionado a cada uso; duas renovações
+ * simultâneas com o mesmo cookie (efeito duplo do StrictMode, troca de rota durante uma requisição
+ * expirada) fariam a segunda receber 401 e limpar a sessão. Todas compartilham o mesmo POST.
+ */
+export function refreshAccessTokenOnce(): Promise<string | null> {
+  refreshPromise ??= refreshAccessToken().finally(() => {
+    refreshPromise = null;
+  });
+  return refreshPromise;
+}
+
 api.interceptors.response.use(undefined, async (error: AxiosError) => {
   const config = error.config as RetriableConfig | undefined;
   const isExpiredSession =
@@ -47,10 +59,7 @@ api.interceptors.response.use(undefined, async (error: AxiosError) => {
     !AUTH_PATHS.some((path) => (config.url ?? "").includes(path));
   if (!isExpiredSession) return Promise.reject(error);
   config._retried = true;
-  refreshPromise ??= refreshAccessToken().finally(() => {
-    refreshPromise = null;
-  });
-  const accessToken = await refreshPromise;
+  const accessToken = await refreshAccessTokenOnce();
   if (!accessToken) {
     useAuthStore.getState().clear();
     queryClient.clear();

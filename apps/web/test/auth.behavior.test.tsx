@@ -1,4 +1,5 @@
 import React from "react";
+import axios from "axios";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -115,7 +116,8 @@ describe("sessão web", () => {
     });
     const setSession = vi.fn(useAuthStore.getState().setSession);
     useAuthStore.setState({ setSession });
-    vi.mocked(api.post).mockResolvedValueOnce({ data: { accessToken: "renovado" } });
+    // A renovação compartilhada (mesma do interceptor) usa o axios base.
+    vi.spyOn(axios, "post").mockResolvedValueOnce({ data: { accessToken: "renovado" } });
     vi.mocked(api.get).mockResolvedValueOnce({
       data: { user: testUser, lojas: testStores }
     });
@@ -140,7 +142,7 @@ describe("sessão web", () => {
   });
 
   it("AuthGate restaura uma vez, não exibe conteúdo antes e redireciona sem sessão", async () => {
-    vi.mocked(api.post).mockRejectedValueOnce(new Error("sem cookie"));
+    const refresh = vi.spyOn(axios, "post").mockRejectedValueOnce(new Error("sem cookie"));
     renderWithProviders(
       <Routes>
         <Route path="/operacao" element={<AuthGate>Protegido</AuthGate>} />
@@ -151,6 +153,6 @@ describe("sessão web", () => {
     expect(screen.getByText("Carregando...")).toBeTruthy();
     expect(screen.queryByText("Protegido")).toBeNull();
     await screen.findByText("Login requerido");
-    expect(vi.mocked(api.post)).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 });
