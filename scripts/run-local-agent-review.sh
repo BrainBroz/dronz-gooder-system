@@ -105,7 +105,9 @@ timeout_fired_file="$(mktemp)"
 set +e
 # `exec` replaces the subshell with the Codex process so codex_pid IS the
 # Codex PID; kill -TERM then targets Codex directly, not just the subshell.
-(cd "$tmp_worktree" && exec codex -a never exec -s read-only "$codex_prompt") \
+# O modelo vai por -c para não depender do model de ~/.codex/config.toml (pode ser recusado pela conta);
+# CODEX_REVIEW_MODEL troca o padrão. stdin fechado: sem isso o codex fica esperando entrada.
+(cd "$tmp_worktree" && exec codex -c model="${CODEX_REVIEW_MODEL:-gpt-6-astra}" -a never exec -s read-only "$codex_prompt" </dev/null) \
   >"$review_dir/codex.md" 2>"$review_dir/codex.stderr" &
 codex_pid=$!
 

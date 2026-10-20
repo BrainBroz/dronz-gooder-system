@@ -70,10 +70,10 @@ economicSettingsRouter.get(
   run(async (req) => ({ cotacao: await service.currentQuote(req.storeId!) }))
 );
 economicSettingsRouter.post(
-  "/exchange-rate/ptax",
+  "/exchange-rate/dolar",
   requirePermission("FINANCEIRO_REGISTRAR"),
   run(async (req) => {
     const body = z.object({ acrescimoCambialBrl: decimal(100).optional() }).strict().parse(req.body ?? {});
-    return service.capturePtax(req.storeId!, req.identity!.user.id, body.acrescimoCambialBrl ?? null, key(req));
+    return service.captureDolar(req.storeId!, req.identity!.user.id, body.acrescimoCambialBrl ?? null, key(req));
   }, 201)
 );

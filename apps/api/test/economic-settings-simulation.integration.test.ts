@@ -29,7 +29,7 @@ async function cleanEconomicData() {
   await prisma.simulacaoCompra.deleteMany({});
   await prisma.taxaMarketplaceParametro.deleteMany({});
   await prisma.parametroEconomico.deleteMany({});
-  await prisma.cotacaoCambio.deleteMany({ where: { fonte: { in: [TEST_SOURCE, settingsService.PTAX_FONTE] } } });
+  await prisma.cotacaoCambio.deleteMany({ where: { fonte: { in: [TEST_SOURCE, settingsService.DOLAR_FONTE] } } });
 }
 
 afterEach(async () => {
@@ -159,7 +159,14 @@ describe("Configurações econômicas", () => {
     const empty = await request(app).get("/economic-settings").set(headers);
     expect(empty.status).toBe(200);
     expect(empty.body.vigente).toBeNull();
-    expect(empty.body.referenciasPO.acrescimoCambialBrl).toBe("0.20");
+    expect(empty.body.referenciasPO).toMatchObject({
+      acrescimoCambialBrl: "0.20",
+      notaFiscalPercentual: "5",
+      notaFiscalBase: "VENDA_BRUTA",
+      markupAlertaPercentual: "30",
+      frete: { valorPorKg: "90", moeda: "USD" },
+      taxas: [{ modalidade: "PARCELADO", percentual: "16" }]
+    });
 
     const v1 = await request(app).post("/economic-settings").set(headers).send(settings("10"));
     expect(v1.status).toBe(201);
@@ -227,25 +234,20 @@ describe("Configurações econômicas", () => {
     expect((await request(nobody.app).get("/economic-settings").set(nobody.headers)).status).toBe(403);
   });
 
-  it("captura PTAX de venda do boletim de fechamento, soma o acréscimo uma vez e não duplica", async () => {
+  it("captura o dólar comercial do dia, soma o acréscimo uma vez e não duplica no mesmo dia", async () => {
     const { app, headers } = await admin();
     await request(app).post("/economic-settings").set(headers).send(settings());
-    vi.spyOn(settingsService.ptaxSource, "fetchPeriod").mockResolvedValue([
-      { cotacaoVenda: 5.0412, dataHoraCotacao: "2026-10-16 13:04:14.548156", tipoBoletim: "Fechamento" },
-      { cotacaoVenda: 5.0999, dataHoraCotacao: "2026-10-19 11:06:12.263447", tipoBoletim: "Intermediário" },
-      { cotacaoVenda: 5.0564, dataHoraCotacao: "2026-10-19 13:05:47.20983", tipoBoletim: "Fechamento" }
-    ]);
-    const first = await request(app).post("/economic-settings/exchange-rate/ptax").set(headers).send({});
+    vi.spyOn(settingsService.dolarSource, "fetchLatest").mockResolvedValue({ valor: 5.0564, cotadoEm: new Date() });
+    const first = await request(app).post("/economic-settings/exchange-rate/dolar").set(headers).send({});
     expect(first.status).toBe(201);
     expect(first.body.jaRegistrada).toBe(false);
     expect(first.body.cotacao.valorMercado).toBe("5.0564");
     expect(first.body.cotacao.margem).toBe("0.2");
     expect(first.body.cotacao.valor).toBe("5.2564");
-    expect(first.body.cotacao.fonte).toBe("BCB PTAX venda - boletim de fechamento");
-    expect(new Date(first.body.cotacao.cotadoEm).toISOString()).toBe("2026-10-19T16:05:47.209Z");
-    const again = await request(app).post("/economic-settings/exchange-rate/ptax").set(headers).send({});
+    expect(first.body.cotacao.fonte).toBe(settingsService.DOLAR_FONTE);
+    const again = await request(app).post("/economic-settings/exchange-rate/dolar").set(headers).send({});
     expect(again.body.jaRegistrada).toBe(true);
-    expect(await prisma.cotacaoCambio.count({ where: { fonte: settingsService.PTAX_FONTE } })).toBe(1);
+    expect(await prisma.cotacaoCambio.count({ where: { fonte: settingsService.DOLAR_FONTE } })).toBe(1);
 
     const current = await request(app).get("/economic-settings/exchange-rate").set(headers);
     expect(current.body.cotacao).toMatchObject({ referencia: "5.056400", acrescimo: "0.200000", operacional: "5.256400" });
@@ -254,38 +256,37 @@ describe("Configurações econômicas", () => {
   it("repetir a captura com a mesma chave devolve o registro gravado sem nova consulta à fonte", async () => {
     const { app, headers } = await admin();
     await request(app).post("/economic-settings").set(headers).send(settings());
-    const fetchPeriod = vi
-      .spyOn(settingsService.ptaxSource, "fetchPeriod")
-      .mockResolvedValueOnce([{ cotacaoVenda: 5.0564, dataHoraCotacao: "2026-10-19 13:05:47.20983", tipoBoletim: "Fechamento" }]);
+    const fetchLatest = vi.spyOn(settingsService.dolarSource, "fetchLatest").mockResolvedValueOnce({ valor: 5.0564, cotadoEm: new Date() });
     const keyed = { ...headers, "Idempotency-Key": randomUUID() };
-    const first = await request(app).post("/economic-settings/exchange-rate/ptax").set(keyed).send({});
+    const first = await request(app).post("/economic-settings/exchange-rate/dolar").set(keyed).send({});
     expect(first.status).toBe(201);
     // A resposta se perdeu e a fonte caiu: a repetição ainda recupera o mesmo registro.
-    fetchPeriod.mockRejectedValue(new Error("offline"));
-    const again = await request(app).post("/economic-settings/exchange-rate/ptax").set(keyed).send({});
+    fetchLatest.mockRejectedValue(new Error("offline"));
+    const again = await request(app).post("/economic-settings/exchange-rate/dolar").set(keyed).send({});
     expect(again.status).toBe(201);
     expect(again.body.cotacao.id).toBe(first.body.cotacao.id);
-    expect(fetchPeriod).toHaveBeenCalledTimes(1);
-    const conflict = await request(app).post("/economic-settings/exchange-rate/ptax").set(keyed).send({ acrescimoCambialBrl: "0.3" });
+    expect(fetchLatest).toHaveBeenCalledTimes(1);
+    const conflict = await request(app).post("/economic-settings/exchange-rate/dolar").set(keyed).send({ acrescimoCambialBrl: "0.3" });
     expect(conflict.status).toBe(409);
-    expect(fetchPeriod).toHaveBeenCalledTimes(1);
-    expect(await prisma.cotacaoCambio.count({ where: { fonte: settingsService.PTAX_FONTE } })).toBe(1);
+    expect(fetchLatest).toHaveBeenCalledTimes(1);
+    expect(await prisma.cotacaoCambio.count({ where: { fonte: settingsService.DOLAR_FONTE } })).toBe(1);
   });
 
-  it("sem acréscimo configurado ou com fonte indisponível, não inventa cotação", async () => {
+  it("sem acréscimo configurado, com fonte indisponível ou resposta inválida, não inventa cotação", async () => {
     const { app, headers } = await admin();
-    const fetchPeriod = vi.spyOn(settingsService.ptaxSource, "fetchPeriod");
-    expect((await request(app).post("/economic-settings/exchange-rate/ptax").set(headers).send({})).body.error).toBe(
+    const fetchLatest = vi.spyOn(settingsService.dolarSource, "fetchLatest");
+    expect((await request(app).post("/economic-settings/exchange-rate/dolar").set(headers).send({})).body.error).toBe(
       "acrescimo_cambial_nao_configurado"
     );
-    expect(fetchPeriod).not.toHaveBeenCalled();
-    fetchPeriod.mockRejectedValueOnce(new Error("offline"));
-    const down = await request(app).post("/economic-settings/exchange-rate/ptax").set(headers).send({ acrescimoCambialBrl: "0.2" });
+    expect(fetchLatest).not.toHaveBeenCalled();
+    fetchLatest.mockRejectedValueOnce(new Error("offline"));
+    const down = await request(app).post("/economic-settings/exchange-rate/dolar").set(headers).send({ acrescimoCambialBrl: "0.2" });
     expect(down.status).toBe(502);
-    fetchPeriod.mockResolvedValueOnce([{ cotacaoVenda: 5.1, dataHoraCotacao: "2026-10-19 11:00:00.0", tipoBoletim: "Abertura" }]);
-    const noClosing = await request(app).post("/economic-settings/exchange-rate/ptax").set(headers).send({ acrescimoCambialBrl: "0.2" });
-    expect(noClosing.body.error).toBe("ptax_sem_fechamento_recente");
-    expect(await prisma.cotacaoCambio.count({ where: { fonte: settingsService.PTAX_FONTE } })).toBe(0);
+    fetchLatest.mockRestore();
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({ chart: { result: [{ meta: {} }] } })));
+    const invalid = await request(app).post("/economic-settings/exchange-rate/dolar").set(headers).send({ acrescimoCambialBrl: "0.2" });
+    expect(invalid.body.error).toBe("dolar_resposta_invalida");
+    expect(await prisma.cotacaoCambio.count({ where: { fonte: settingsService.DOLAR_FONTE } })).toBe(0);
   });
 });
 
@@ -475,7 +476,29 @@ describe("Simulador de compra", () => {
           venda: { ...simulation(mac.id, q.id).venda, marketplace: { canal: "MERCADO_LIVRE", modalidade: "PARCELADO", parcelas: null, percentual: "16" } }
         })
       );
-    expect(informedWithoutPlan.status).toBe(400);
+    // Parcelado sem número de parcelas é só a taxa da plataforma: abate 16% da venda (900 → 144), além da nota (45).
+    expect(informedWithoutPlan.status).toBe(200);
+    expect(informedWithoutPlan.body.resultado.porUnidade).toMatchObject({ custo: "546.00", lucro: "165.00" });
+    const aVistaComParcelas = await request(app)
+      .post("/purchase-simulations/calculate")
+      .set(headers)
+      .send(
+        simulation(mac.id, q.id, {
+          venda: { ...simulation(mac.id, q.id).venda, marketplace: { canal: "MERCADO_LIVRE", modalidade: "A_VISTA", parcelas: 2, percentual: "12" } }
+        })
+      );
+    expect(aVistaComParcelas.status).toBe(400);
+  });
+
+  it("grava a taxa parcelada de 16% sem número de parcelas; à vista com parcelas é recusada", async () => {
+    const { app, headers } = await admin();
+    const taxa = { canal: "MERCADO_LIVRE", modalidade: "PARCELADO", parcelas: null, percentual: "16", descricao: null };
+    const ok = await request(app).post("/economic-settings").set(headers).send({ ...settings("10"), taxasMarketplace: [taxa] });
+    expect(ok.status).toBe(201);
+    expect(ok.body.taxasMarketplace).toMatchObject([{ canal: "MERCADO_LIVRE", modalidade: "PARCELADO", parcelas: null, percentual: "16" }]);
+    const ruim = await request(app).post("/economic-settings").set(headers).send({ ...settings("10"), taxasMarketplace: [{ ...taxa, modalidade: "A_VISTA", parcelas: 2 }] });
+    expect(ruim.status).toBe(422);
+    expect(ruim.body.error).toBe("parcelas_invalidas_para_modalidade");
   });
 
   it("produto livre (ainda sem cadastro) e cotação informada também são simuláveis", async () => {

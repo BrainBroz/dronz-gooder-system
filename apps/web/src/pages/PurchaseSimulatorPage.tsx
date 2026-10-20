@@ -22,6 +22,7 @@ import { authHeader, useAuthStore } from "../stores/auth";
 import { PageContainer } from "../components/ui/PageContainer";
 import { MutationStatus } from "../components/ui/MutationStatus";
 import { economicQueryKeys } from "../queryKeys";
+import { useDailyDollar } from "../api/dailyDollar";
 import { fontMono, visualTokens } from "../theme";
 import {
   brl,
@@ -170,7 +171,7 @@ export function buildPayload(form: SimForm, quote: CotacaoVigente | null) {
   if (form.taxaEscolha === "manual") {
     const { canal, modalidade } = form.taxaManual;
     const percentual = required(form.taxaManual.percentual);
-    const parcelas = modalidade === "A_VISTA" ? null : Number(form.taxaManual.parcelas);
+    const parcelas = modalidade === "A_VISTA" || form.taxaManual.parcelas.trim() === "" ? null : Number(form.taxaManual.parcelas);
     const parcelasOk = parcelas === null || (Number.isInteger(parcelas) && parcelas >= 1);
     // Taxa ainda incompleta vai como pendência: o backend calcula o resto e aponta a falta.
     marketplace =
@@ -624,7 +625,7 @@ function SimulatorForm({
                   <MenuItem value="A_VISTA">À vista</MenuItem>
                   <MenuItem value="PARCELADO">Parcelado</MenuItem>
                 </TextField>
-                <TextField size="small" label="Parcelas" value={form.taxaManual.parcelas} disabled={form.taxaManual.modalidade === "A_VISTA"}
+                <TextField size="small" label="Parcelas (opcional)" value={form.taxaManual.parcelas} disabled={form.taxaManual.modalidade === "A_VISTA"}
                   onChange={(event) => set("taxaManual", { ...form.taxaManual, parcelas: event.target.value })} />
                 <TextField size="small" label="Taxa (%)" value={form.taxaManual.percentual}
                   onChange={(event) => set("taxaManual", { ...form.taxaManual, percentual: event.target.value })} />
@@ -801,6 +802,7 @@ function SimulatorContent() {
     enabled: !!store,
     queryFn: async () => (await api.get("/economic-settings/exchange-rate", { headers })).data
   });
+  useDailyDollar(store, can("FINANCEIRO_REGISTRAR"), quote.data);
   const [opened, setOpened] = useState<SavedDetail | null>(null);
   const [formVersion, setFormVersion] = useState(0);
   const open = useMutation({
