@@ -156,7 +156,7 @@ Implementado e coberto por testes:
 - tracking manual, contas/faturas e conciliação financeira manual;
 - vendas com baixa por lote/custo em snapshot e indicadores derivados com controle financeiro.
 - reconstrução visual Etapa 1 (referência Bolt aprovada): shell com navegação agrupada por permissão, seletor de loja e dashboard sobre read models reais (`docs/UX_OPERATIONAL_FOUNDATION_V1.md`, seção 20); demais telas ainda sem redesenho.
-- configurações econômicas versionadas por loja, captura sob demanda da PTAX de venda (fechamento) do Banco Central e simulador de compra com busca de produto, composição de custos e venda, snapshot e sem efeitos operacionais (`docs/CONFIGURACOES_E_SIMULADOR_COMPRA_V1.md`); modalidade cambial definitiva, base da nota fiscal, plano parcelado e frete por kg aguardam confirmação do PO.
+- configurações econômicas versionadas por loja, captura automática diária do dólar comercial (Yahoo Finance) mais R$ 0,20 e simulador de compra com busca de produto, composição de custos e venda, snapshot e sem efeitos operacionais (`docs/CONFIGURACOES_E_SIMULADOR_COMPRA_V1.md`); o número de parcelas do plano de 16% aguarda confirmação do PO.
 
 Não implementado:
 

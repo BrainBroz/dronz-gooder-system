@@ -12,11 +12,10 @@ beforeEach(() => vi.restoreAllMocks());
 const referenciasPO = {
   acrescimoCambialBrl: "0.20",
   notaFiscalPercentual: "5",
-  markupAlertaPercentual: "25",
-  taxas: [
-    { modalidade: "A_VISTA", parcelas: null, percentual: "12" },
-    { modalidade: "PARCELADO", parcelas: null, percentual: "16", observacao: "Informada com 2 parcelas; uso frequente de 12. Confirme o plano." }
-  ]
+  notaFiscalBase: "VENDA_BRUTA",
+  markupAlertaPercentual: "30",
+  frete: { valorPorKg: "90", moeda: "USD" },
+  taxas: [{ canal: "MERCADO_LIVRE", modalidade: "PARCELADO", parcelas: null, percentual: "16" }]
 };
 const vigente = {
   id: "param-1",
@@ -40,8 +39,8 @@ const quote = {
   referencia: "5.000000",
   acrescimo: "0.200000",
   operacional: "5.200000",
-  fonte: "BCB PTAX venda - boletim de fechamento",
-  cotadoEm: "2026-10-19T16:05:47.000Z",
+  fonte: "Dólar comercial - Yahoo Finance (USD/BRL)",
+  cotadoEm: new Date().toISOString(),
   idadeDias: 0,
   condicao: "VIGENTE"
 };
@@ -82,25 +81,32 @@ describe("Configurações econômicas", () => {
     expect(await screen.findByText(/Ainda não há parâmetros gravados/)).toBeTruthy();
     expect(await screen.findByText("Indisponível: nenhuma cotação USD→BRL registrada nesta loja.")).toBeTruthy();
     expect((screen.getByLabelText(/Acréscimo cambial/) as HTMLInputElement).value).toBe("0.20");
-    expect(screen.getByText("Informada com 2 parcelas; uso frequente de 12. Confirme o plano.")).toBeTruthy();
+    expect((screen.getByLabelText(/Frete por kg/) as HTMLInputElement).value).toBe("90");
 
-    // Remove as taxas de referência (o canal ainda não foi escolhido) e grava.
-    await user.click(screen.getByRole("button", { name: "Remover taxa 2" }));
+    // Remove a taxa de referência (o número de parcelas ainda não foi escolhido) e grava.
     await user.click(screen.getByRole("button", { name: "Remover taxa 1" }));
     await user.click(screen.getByRole("button", { name: "Gravar nova versão" }));
-    await waitFor(() => expect(post).toHaveBeenCalled());
-    const [url, body, config] = post.mock.calls[0] as [string, Record<string, unknown>, { headers: Record<string, string> }];
+    // Sem cotação, a tela também pede sozinha o dólar do dia; aqui interessa só a gravação dos parâmetros.
+    await waitFor(() => expect(post.mock.calls.some(([target]) => target === "/economic-settings")).toBe(true));
+    const [url, body, config] = post.mock.calls.find(([target]) => target === "/economic-settings") as [string, Record<string, unknown>, { headers: Record<string, string> }];
     expect(url).toBe("/economic-settings");
-    expect(body).toMatchObject({ acrescimoCambialBrl: "0.20", markupAlertaPercentual: "25", notaFiscalPercentual: "5", notaFiscalBase: null, frete: null, taxasMarketplace: [] });
+    expect(body).toMatchObject({
+      acrescimoCambialBrl: "0.20",
+      markupAlertaPercentual: "30",
+      notaFiscalPercentual: "5",
+      notaFiscalBase: "VENDA_BRUTA",
+      frete: { valorPorKg: "90", moeda: "USD" },
+      taxasMarketplace: []
+    });
     expect(config.headers["Idempotency-Key"]).toBeTruthy();
     expect(config.headers["x-store-id"]).toBe(testStores[0]!.id);
   });
 
-  it("mostra a cotação com referência, acréscimo, operacional, fonte e condição; captura PTAX", async () => {
+  it("mostra a cotação com referência, acréscimo, operacional, fonte e condição; atualiza o dólar do dia", async () => {
     const user = userEvent.setup();
     vi.spyOn(api, "get").mockImplementation(async (url) => {
       if (url === "/economic-settings") return { data: { vigente, versoes: [{ id: "param-1", versao: 1, createdAt: vigente.createdAt, criadoPor: { name: "Ana" } }], referenciasPO } };
-      if (url === "/economic-settings/exchange-rate") return { data: { cotacao: { ...quote, condicao: "ANTIGA", idadeDias: 9 } } };
+      if (url === "/economic-settings/exchange-rate") return { data: { cotacao: { ...quote, condicao: "ANTIGA", idadeDias: 9, cotadoEm: "2026-10-19T16:05:47.000Z" } } };
       throw new Error(`GET inesperado: ${url}`);
     });
     const post = vi.spyOn(api, "post").mockResolvedValue({ data: { jaRegistrada: false } });
@@ -110,11 +116,32 @@ describe("Configurações econômicas", () => {
     expect(within(section).getByText("+ 0,2000")).toBeTruthy();
     expect(within(section).getByText("5,2000")).toBeTruthy();
     expect(within(section).getByText("Antiga (9 dias)")).toBeTruthy();
-    expect(within(section).getByText(/BCB PTAX venda - boletim de fechamento/)).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Buscar PTAX de fechamento (Banco Central)" }));
-    await waitFor(() => expect(post.mock.calls[0]![0]).toBe("/economic-settings/exchange-rate/ptax"));
-    expect(await screen.findByText("Cotação PTAX registrada.")).toBeTruthy();
+    expect(within(section).getByText(/Dólar comercial - Yahoo Finance/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Atualizar dólar comercial do dia" }));
+    await waitFor(() => expect(post.mock.calls[0]![0]).toBe("/economic-settings/exchange-rate/dolar"));
+    expect(await screen.findByText("Dólar comercial do dia registrado.")).toBeTruthy();
     expect(screen.getByText(/Versão 1 ·/)).toBeTruthy();
+  });
+
+  it("registra sozinha o dólar do dia quando a cotação é antiga, e não repete quando já é de hoje", async () => {
+    const mockGet = (cotacao: object) =>
+      vi.spyOn(api, "get").mockImplementation(async (url) => {
+        if (url === "/economic-settings") return { data: { vigente, versoes: [], referenciasPO } };
+        if (url === "/economic-settings/exchange-rate") return { data: { cotacao } };
+        throw new Error(`GET inesperado: ${url}`);
+      });
+    const post = vi.spyOn(api, "post").mockResolvedValue({ data: { jaRegistrada: false } });
+    mockGet({ ...quote, cotadoEm: "2026-10-19T16:05:47.000Z" });
+    const stale = renderWithProviders(<EconomicSettingsPage />, { permissions: ["FINANCEIRO_VISUALIZAR", "FINANCEIRO_REGISTRAR"] });
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    expect(post.mock.calls[0]![0]).toBe("/economic-settings/exchange-rate/dolar");
+    stale.unmount();
+
+    post.mockClear();
+    mockGet(quote);
+    renderWithProviders(<EconomicSettingsPage />, { permissions: ["FINANCEIRO_VISUALIZAR", "FINANCEIRO_REGISTRAR"] });
+    await screen.findByRole("region", { name: "Câmbio USD → BRL" });
+    expect(post).not.toHaveBeenCalled();
   });
 
   it("sem permissão de registro fica somente leitura", async () => {
@@ -126,7 +153,7 @@ describe("Configurações econômicas", () => {
     renderWithProviders(<EconomicSettingsPage />, { permissions: ["SIMULACAO_VISUALIZAR"] });
     expect(await screen.findByText(/Somente leitura/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Gravar nova versão" })).toBeNull();
-    expect(screen.queryByRole("button", { name: /Buscar PTAX/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Atualizar dólar/ })).toBeNull();
     expect((screen.getByLabelText(/Acréscimo cambial/) as HTMLInputElement).disabled).toBe(true);
   });
 

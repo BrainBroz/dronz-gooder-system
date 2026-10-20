@@ -22,6 +22,7 @@ import { authHeader, useAuthStore } from "../stores/auth";
 import { PageContainer } from "../components/ui/PageContainer";
 import { MutationStatus } from "../components/ui/MutationStatus";
 import { economicQueryKeys } from "../queryKeys";
+import { useDailyDollar } from "../api/dailyDollar";
 import { fontMono, visualTokens } from "../theme";
 import {
   brl,
@@ -801,6 +802,7 @@ function SimulatorContent() {
     enabled: !!store,
     queryFn: async () => (await api.get("/economic-settings/exchange-rate", { headers })).data
   });
+  useDailyDollar(store, can("FINANCEIRO_REGISTRAR"), quote.data);
   const [opened, setOpened] = useState<SavedDetail | null>(null);
   const [formVersion, setFormVersion] = useState(0);
   const open = useMutation({

@@ -16,6 +16,7 @@ import { authHeader, useAuthStore } from "../stores/auth";
 import { PageContainer } from "../components/ui/PageContainer";
 import { MutationStatus } from "../components/ui/MutationStatus";
 import { economicQueryKeys } from "../queryKeys";
+import { useDailyDollar } from "../api/dailyDollar";
 import { fontMono, visualTokens } from "../theme";
 import {
   canalLabel,
@@ -65,15 +66,15 @@ function initialForm(data: SettingsResponse): FormState {
   const ref = data.referenciasPO;
   return {
     acrescimoCambialBrl: ref.acrescimoCambialBrl,
-    freteValorPorKg: "",
-    freteMoeda: "",
+    freteValorPorKg: ref.frete.valorPorKg,
+    freteMoeda: ref.frete.moeda,
     markupAlertaPercentual: ref.markupAlertaPercentual,
     notaFiscalPercentual: ref.notaFiscalPercentual,
-    notaFiscalBase: "",
+    notaFiscalBase: ref.notaFiscalBase,
     iofPercentual: "",
     observacoes: "",
     taxas: ref.taxas.map((taxa) => ({
-      canal: "",
+      canal: taxa.canal,
       modalidade: taxa.modalidade,
       parcelas: taxa.parcelas === null ? "" : String(taxa.parcelas),
       percentual: taxa.percentual,
@@ -128,16 +129,16 @@ function ExchangeSection({ store, canWrite, acrescimoPadrao }: { store: string; 
     queryKey: economicQueryKeys.exchangeRate(store),
     queryFn: async () => (await api.get("/economic-settings/exchange-rate", { headers })).data
   });
-  const ptaxKey = useRef<string | null>(null);
-  const ptax = useMutation({
+  const dolarKey = useRef<string | null>(null);
+  const dolar = useMutation({
     mutationFn: async () => {
-      ptaxKey.current ??= crypto.randomUUID();
-      return (await api.post("/economic-settings/exchange-rate/ptax", {}, { headers: { ...headers, "Idempotency-Key": ptaxKey.current } })).data as {
+      dolarKey.current ??= crypto.randomUUID();
+      return (await api.post("/economic-settings/exchange-rate/dolar", {}, { headers: { ...headers, "Idempotency-Key": dolarKey.current } })).data as {
         jaRegistrada: boolean;
       };
     },
     onSuccess: () => {
-      ptaxKey.current = null;
+      dolarKey.current = null;
       return client.invalidateQueries({ queryKey: economicQueryKeys.exchangeRate(store) });
     }
   });
@@ -160,6 +161,7 @@ function ExchangeSection({ store, canWrite, acrescimoPadrao }: { store: string; 
       return client.invalidateQueries({ queryKey: economicQueryKeys.exchangeRate(store) });
     }
   });
+  useDailyDollar(store, canWrite, quote.data);
   const c = quote.data?.cotacao;
   return (
     <Section
@@ -194,18 +196,17 @@ function ExchangeSection({ store, canWrite, acrescimoPadrao }: { store: string; 
       {canWrite && (
         <Stack gap={1.5} mt={2}>
           <Stack direction={{ xs: "column", sm: "row" }} gap={1} alignItems={{ sm: "center" }}>
-            <Button variant="contained" onClick={() => ptax.mutate()} disabled={ptax.isPending}>
-              Buscar PTAX de fechamento (Banco Central)
+            <Button variant="contained" onClick={() => dolar.mutate()} disabled={dolar.isPending}>
+              Atualizar dólar comercial do dia
             </Button>
             <Typography variant="body2" color="text.secondary">
-              PTAX de venda do boletim de fechamento, publicada em dias úteis por volta das 13h. É a taxa de referência do Banco Central — não é o dólar
-              comercial nem a taxa cobrada pelo cartão ou pela remessa.
+              Busca o dólar comercial de hoje e soma o acréscimo. A tela já faz isso sozinha uma vez por dia; use o botão para tentar de novo.
             </Typography>
           </Stack>
           <MutationStatus
-            mutation={ptax}
-            loadingMessage="Consultando o Banco Central…"
-            successMessage={ptax.data?.jaRegistrada ? "Esse boletim já estava registrado." : "Cotação PTAX registrada."}
+            mutation={dolar}
+            loadingMessage="Consultando o dólar comercial…"
+            successMessage={dolar.data?.jaRegistrada ? "O dólar de hoje já estava registrado." : "Dólar comercial do dia registrado."}
           />
           <Typography component="h3" sx={{ fontSize: "0.8125rem", fontWeight: 600, mt: 1 }}>Registrar cotação manualmente</Typography>
           <Box

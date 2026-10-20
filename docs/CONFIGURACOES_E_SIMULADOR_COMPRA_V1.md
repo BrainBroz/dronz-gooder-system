@@ -5,7 +5,7 @@ Estado: implementado na branch `claude/economic-settings-simulator` (a partir de
 ## 1. Escopo implementado
 
 - **Configurações econômicas** (`/configuracoes`; API `/economic-settings`): parâmetros de estimativa por loja, versionados. Cada gravação cria uma versão nova (`ParametroEconomico.versao`); as anteriores ficam intactas. Gravação auditada (`SAVE_ECONOMIC_SETTINGS`) e idempotente (`Idempotency-Key`).
-- **Câmbio**: reutiliza `CotacaoCambio` (referência `valorMercado`, acréscimo `margem`, operacional `valor = referência + acréscimo`). A tela mostra moedas, referência, acréscimo, operacional, fonte, instante e condição (vigente, antiga após 7 dias, indisponível). Registro manual pelo endpoint existente `/finance/exchange-rates` e captura PTAX sob demanda (seção 4).
+- **Câmbio**: reutiliza `CotacaoCambio` (referência `valorMercado`, acréscimo `margem`, operacional `valor = referência + acréscimo`). A tela mostra moedas, referência, acréscimo, operacional, fonte, instante e condição (vigente, antiga após 7 dias, indisponível). Registro manual pelo endpoint existente `/finance/exchange-rates` e captura automática do dólar comercial do dia (seção 4).
 - **Simulador de compra** (`/compras/simulador`; API `/purchase-simulations`): projeção por produto do catálogo da loja (busca por nome, com código, categoria e peso para distinguir variantes) ou item ainda sem cadastro; cálculo no backend a cada alteração; salvar e reabrir simulações com a entrada resolvida e o resultado como snapshot (lista paginada, `page`/`limit` até 100). O formulário fixa a versão de parâmetros vigente ao abrir: limite de markup e taxas de marketplace oferecidas vêm só dessa versão, então a taxa enviada sempre pertence ao `parametroEconomicoId` gravado; uma versão nova vale para a próxima abertura. Com a nota em "% sobre uma base informada" e a base ainda vazia, a nota segue como pendente e o restante é calculado. Simular não cria compra, pagamento, venda, estoque nem movimento logístico (coberto por teste).
 - **Fórmula protegida**: `calcSimulacao` corresponde a `calcularSimulacao` (`modules/simulation/simulation.service.ts`, simulação de viagem). Não foi alterada nem reutilizada: a projeção de compra é a função nova `projectPurchase` (`modules/purchase-simulation/purchase-projection.ts`). `calcPurchaseItem` do Bolt não foi copiado.
 
@@ -14,14 +14,14 @@ Estado: implementado na branch `claude/economic-settings-simulator` (a partir de
 | Ação | Permissão |
 |---|---|
 | Ler parâmetros e cotação vigente | `FINANCEIRO_VISUALIZAR` ou `SIMULACAO_VISUALIZAR` |
-| Gravar parâmetros, capturar PTAX, registrar cotação | `FINANCEIRO_REGISTRAR` |
+| Gravar parâmetros, capturar o dólar do dia, registrar cotação | `FINANCEIRO_REGISTRAR` |
 | Calcular, listar e abrir simulações | `SIMULACAO_VISUALIZAR` ou `SIMULACAO_GERENCIAR` |
 | Salvar simulação | `SIMULACAO_GERENCIAR` |
 | Buscar produto | `CATALOGO_VISUALIZAR` (sem ela, a tela pede o nome do item) |
 
 Tudo é escopado por `x-store-id`: produto, cotação, versão de parâmetros e simulação de outra loja respondem 404.
 
-Idempotência: salvar simulação, gravar parâmetros e capturar PTAX aceitam `Idempotency-Key`. A repetição de um envio já gravado devolve o registro antes de consultar o estado atual (produto, cotação ou fonte externa). No `idempotentMutation` compartilhado, uma requisição idêntica que perde a corrida por conflito de serialização também recebe a resposta gravada, em vez de `409 concurrent_modification`; sem gravação concorrente idêntica, o 409 continua.
+Idempotência: salvar simulação, gravar parâmetros e capturar o dólar aceitam `Idempotency-Key`. A repetição de um envio já gravado devolve o registro antes de consultar o estado atual (produto, cotação ou fonte externa). No `idempotentMutation` compartilhado, uma requisição idêntica que perde a corrida por conflito de serialização também recebe a resposta gravada, em vez de `409 concurrent_modification`; sem gravação concorrente idêntica, o 409 continua.
 
 ## 3. Fórmulas e unidades
 
@@ -60,20 +60,20 @@ O defeito do protótipo (tela em R$/kg, cálculo em US$/kg) não se repete: o fr
 
 ## 4. Fonte do câmbio
 
-Investigada e comprovada em 19/10/2026: API pública de dados abertos do Banco Central, serviço PTAX (Olinda), sem cadastro, credencial ou cobrança. Fornece compra e venda e boletins de abertura, intermediários e fechamento, só em dias úteis (o fechamento sai por volta das 13h de Brasília).
+Decisão do PO em 20/10/2026: a referência é o **dólar comercial do dia**, mais R$ 0,20 (acréscimo), sempre. A PTAX do Banco Central foi a primeira fonte implementada (19/10) e foi substituída.
 
-Implementado: captura **sob demanda** da PTAX de **venda** do boletim de **fechamento** mais recente dos últimos 10 dias, gravada como `CotacaoCambio` com fonte `BCB PTAX venda - boletim de fechamento`, instante do boletim e o acréscimo vigente da loja. O mesmo boletim não é registrado duas vezes. Com `Idempotency-Key`, uma repetição devolve o registro já gravado antes de consultar a fonte (mesmo com o Banco Central fora do ar); a mesma chave com outro conteúdo é conflito. Falha da fonte ou ausência de fechamento não grava nada.
+Fonte atual: gráfico público do Yahoo Finance (`USDBRL=X`), sem cadastro nem credencial, que traz a cotação de mercado do dólar comercial, a mesma que os sites de câmbio mostram. Não há ponta de venda separada: o valor é o preço de mercado. É um endpoint **não oficial**; se mudar ou bloquear, a captura falha com `dolar_indisponivel` e o registro manual continua disponível. A AwesomeAPI foi testada e respondeu 429 sem chave.
 
-PTAX é taxa de referência calculada pelo Banco Central; não é o dólar comercial nem a taxa cobrada por cartão ou remessa. A cotação estimada não comprova a taxa efetivamente paga, e uma compra histórica não deve receber a cotação de hoje.
+Implementado: ao abrir Configurações econômicas ou o Simulador de compra, se a cotação vigente não for de hoje (horário de Brasília) e o usuário puder registrar (`FINANCEIRO_REGISTRAR`), a tela pede `POST /economic-settings/exchange-rate/dolar`. Uma cotação por dia por loja, gravada como `CotacaoCambio` com fonte `Dólar comercial - Yahoo Finance (USD/BRL)` e o acréscimo vigente. Com `Idempotency-Key`, uma repetição devolve o registro já gravado antes de consultar a fonte; a mesma chave com outro conteúdo é conflito. Falha da fonte não grava nada. O botão "Atualizar dólar comercial do dia" tenta de novo.
+
+A cotação estimada não comprova a taxa efetivamente paga, e uma compra histórica não deve receber a cotação de hoje. A ausência de acréscimo gravado bloqueia a captura (`acrescimo_cambial_nao_configurado`).
 
 ## 5. Parâmetros que dependem de confirmação
 
-- **Modalidade da referência cambial**: PTAX venda de fechamento foi a fonte implementada; confirmar se é a desejada, ou se a referência deve ser o dólar comercial (que exige outra fonte, ainda não escolhida).
-- **Captura automática agendada**: hoje a captura é manual (botão). Agendamento depende da confirmação acima.
-- **Base de incidência da nota fiscal de saída**: o PO informou 5%, sem a base. Enquanto não for definida, a configuração fica "a definir" e o simulador exige escolher a base ou informar o valor estimado.
-- **Plano parcelado**: referência de 16% informada com 2 parcelas e uso frequente de 12. A taxa é cadastrada por canal, modalidade e quantidade de parcelas; não há tabela oficial de tarifas no sistema.
-- **Taxa à vista de 12%** e **acréscimo de R$ 0,20**: referências do PO, aplicadas só depois de gravadas por um usuário.
-- **Frete por kg**: valor e moeda ainda não informados pelo PO.
+- **Referências do PO (20/10/2026)**, pré-preenchidas e aplicadas só depois de gravadas por um usuário: acréscimo R$ 0,20; nota fiscal 5% sobre a venda bruta; taxa de 16% no parcelado (Mercado Livre); frete US$ 90/kg, editável; alerta de markup 30% (o mínimo do contrato continua 25%). A taxa à vista de 12% ficou fora da simulação de compra por ora. Percentuais de taxa e nota servem só à projeção; o resultado real vem da venda registrada.
+- **Número de parcelas do plano de 16%**: ainda não informado; a taxa exige escolher 2, 12 ou outra quantidade.
+- A viagem (mala) tem outra lógica de cálculo e fica fora deste simulador.
+
 
 ## 5.1 Pendências da revisão local
 
