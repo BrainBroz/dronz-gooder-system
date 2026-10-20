@@ -52,10 +52,21 @@ async function refreshAccessToken(retryConcurrent = true): Promise<string | null
  * expirada) fariam a segunda receber 401 e limpar a sessão. Todas compartilham o mesmo POST.
  */
 export function refreshAccessTokenOnce(): Promise<string | null> {
-  refreshPromise ??= refreshAccessToken().finally(() => {
+  refreshPromise ??= withRefreshLock(() => refreshAccessToken()).finally(() => {
     refreshPromise = null;
   });
   return refreshPromise;
+}
+
+/**
+ * Serializa as renovações entre abas do mesmo navegador (que compartilham o cookie): a próxima só sai depois
+ * que a anterior terminou e o navegador já gravou o cookie novo. Sem Web Locks, segue sem trava e o retry
+ * único do 409 continua como fallback.
+ */
+function withRefreshLock(task: () => Promise<string | null>): Promise<string | null> {
+  const locks = typeof navigator === "undefined" ? undefined : navigator.locks;
+  // LockManager.request tipa o retorno como Promise<Promise<…>>; o then só achata o tipo (em execução já é plano).
+  return locks ? locks.request("dronz-auth-refresh", task).then((value) => value) : task();
 }
 
 api.interceptors.response.use(undefined, async (error: AxiosError) => {
