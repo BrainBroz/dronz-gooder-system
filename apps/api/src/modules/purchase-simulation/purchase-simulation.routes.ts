@@ -65,9 +65,9 @@ const inputSchema = z
             percentual: decimal(100).nullable()
           })
           .strict()
-          // Taxa pendente (percentual nulo) ainda não tem plano definido; informada, exige parcelas coerentes.
+          // Taxa pendente (percentual nulo) ainda não tem plano definido; informada, à vista não tem parcelas.
           .refine(
-            (value) => value.percentual === null || (value.modalidade === "A_VISTA" ? value.parcelas === null : value.parcelas !== null),
+            (value) => value.percentual === null || value.modalidade !== "A_VISTA" || value.parcelas === null,
             "parcelas"
           )
           .nullable(),

@@ -14,11 +14,11 @@ const D = Prisma.Decimal;
 export const REFERENCIAS_PO = {
   acrescimoCambialBrl: "0.20",
   notaFiscalPercentual: "5",
-  markupAlertaPercentual: "25",
-  taxas: [
-    { modalidade: "A_VISTA", parcelas: null, percentual: "12" },
-    { modalidade: "PARCELADO", parcelas: null, percentual: "16", observacao: "Informada com 2 parcelas; uso frequente de 12. Confirme o plano." }
-  ]
+  notaFiscalBase: "VENDA_BRUTA",
+  markupAlertaPercentual: "30",
+  frete: { valorPorKg: "90", moeda: "USD" },
+  // Só o parcelado entra por ora; a taxa à vista (12%) fica fora da simulação de compra.
+  taxas: [{ canal: "MERCADO_LIVRE", modalidade: "PARCELADO", parcelas: null, percentual: "16" }]
 } as const;
 
 export type SettingsInput = {
@@ -62,7 +62,8 @@ export async function getSettings(lojaId: string) {
 export function validateSettings(input: SettingsInput) {
   const seen = new Set<string>();
   for (const taxa of input.taxasMarketplace) {
-    if (taxa.modalidade === "A_VISTA" ? taxa.parcelas !== null : taxa.parcelas === null)
+    // Parcelado sem número de parcelas é a taxa padrão da plataforma; à vista nunca tem parcelas.
+    if (taxa.modalidade === "A_VISTA" && taxa.parcelas !== null)
       throw new AppError(422, "parcelas_invalidas_para_modalidade");
     const identity = `${taxa.canal}:${taxa.modalidade}:${taxa.parcelas ?? 0}`;
     if (seen.has(identity)) throw new AppError(422, "taxa_marketplace_duplicada");
@@ -153,67 +154,64 @@ export async function currentQuote(lojaId: string) {
 }
 
 /**
- * Fonte: API de dados abertos do Banco Central (Olinda, serviço PTAX), sem cadastro nem credencial.
- * Captura a PTAX de VENDA do boletim de FECHAMENTO (publicada em dias úteis, por volta das 13h).
- * PTAX é taxa de referência calculada pelo BCB; não é o dólar comercial nem a taxa paga numa operação.
+ * Fonte: gráfico público do Yahoo Finance (USDBRL=X), sem cadastro nem credencial. É a cotação de mercado do
+ * dólar comercial, a mesma que os sites de câmbio mostram; não há ponta de venda separada.
+ * Endpoint não oficial: se mudar ou bloquear, a captura falha com dolar_indisponivel e a cotação manual segue disponível.
  */
-export type PtaxBoletim = { cotacaoVenda: number; dataHoraCotacao: string; tipoBoletim: string };
-export const ptaxSource = {
-  async fetchPeriod(from: Date, to: Date): Promise<PtaxBoletim[]> {
-    const fmt = (date: Date) =>
-      `${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}-${date.getUTCFullYear()}`;
-    const url =
-      "https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/CotacaoMoedaPeriodo(moeda=@moeda,dataInicial=@dataInicial,dataFinalCotacao=@dataFinalCotacao)" +
-      `?@moeda='USD'&@dataInicial='${fmt(from)}'&@dataFinalCotacao='${fmt(to)}'&$format=json`;
-    const response = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-    if (!response.ok) throw new AppError(502, "ptax_indisponivel");
-    const body = (await response.json()) as { value?: PtaxBoletim[] };
-    return body.value ?? [];
+export type DolarComercial = { valor: number; cotadoEm: Date };
+export const dolarSource = {
+  async fetchLatest(): Promise<DolarComercial> {
+    const response = await fetch("https://query1.finance.yahoo.com/v8/finance/chart/USDBRL=X?interval=1d&range=1d", {
+      headers: { "User-Agent": "Mozilla/5.0" },
+      signal: AbortSignal.timeout(15_000)
+    });
+    if (!response.ok) throw new AppError(502, "dolar_indisponivel");
+    const body = (await response.json()) as { chart?: { result?: { meta?: { regularMarketPrice?: number; regularMarketTime?: number } }[] } };
+    const meta = body.chart?.result?.[0]?.meta;
+    const valor = Number(meta?.regularMarketPrice);
+    const cotadoEm = new Date(Number(meta?.regularMarketTime) * 1000);
+    if (!(valor > 0) || Number.isNaN(cotadoEm.getTime())) throw new AppError(502, "dolar_resposta_invalida");
+    return { valor, cotadoEm };
   }
 };
-export const PTAX_FONTE = "BCB PTAX venda - boletim de fechamento";
+export const DOLAR_FONTE = "Dólar comercial - Yahoo Finance (USD/BRL)";
 
-// dataHoraCotacao vem no horário de Brasília (sem horário de verão desde 2019): "2026-10-19 13:05:47.20983".
-const parseBcbTime = (value: string) => new Date(`${value.replace(" ", "T").slice(0, 23)}-03:00`);
+type DolarCapture = { cotacao: Awaited<ReturnType<typeof prisma.cotacaoCambio.create>>; jaRegistrada: boolean };
 
-type PtaxCapture = { cotacao: Awaited<ReturnType<typeof prisma.cotacaoCambio.create>>; jaRegistrada: boolean };
-
-export async function capturePtax(lojaId: string, userId: string, acrescimoInformado: string | null, key?: string) {
+/** Registra o dólar comercial do dia (uma cotação por dia, horário de Brasília) somando o acréscimo configurado. */
+export async function captureDolar(lojaId: string, userId: string, acrescimoInformado: string | null, key?: string) {
   // A idempotência vale para o pedido como enviado: uma repetição devolve o que já foi gravado,
   // sem depender de a fonte externa responder igual (ou responder) de novo.
   const request = { acrescimoCambialBrl: acrescimoInformado };
-  const replay = await findIdempotentReplay<PtaxCapture>({ lojaId, operation: "CAPTURE_PTAX", entityId: "USD:BRL", key, payload: request });
+  const replay = await findIdempotentReplay<DolarCapture>({ lojaId, operation: "CAPTURE_DOLAR", entityId: "USD:BRL", key, payload: request });
   if (replay) return replay;
   const acrescimo = acrescimoInformado ?? (await currentSettings(lojaId))?.acrescimoCambialBrl.toString() ?? null;
   if (acrescimo === null) throw new AppError(422, "acrescimo_cambial_nao_configurado");
-  const now = new Date();
-  let boletins: PtaxBoletim[];
+  let dolar: DolarComercial;
   try {
-    boletins = await ptaxSource.fetchPeriod(new Date(now.getTime() - 10 * 86_400_000), now);
+    dolar = await dolarSource.fetchLatest();
   } catch (error) {
     if (error instanceof AppError) throw error;
-    throw new AppError(502, "ptax_indisponivel");
+    throw new AppError(502, "dolar_indisponivel");
   }
-  const fechamento = boletins
-    .filter((boletim) => boletim.tipoBoletim === "Fechamento" && Number(boletim.cotacaoVenda) > 0)
-    .sort((a, b) => b.dataHoraCotacao.localeCompare(a.dataHoraCotacao))[0];
-  if (!fechamento) throw new AppError(502, "ptax_sem_fechamento_recente");
-  const cotadoEm = parseBcbTime(fechamento.dataHoraCotacao);
-  if (Number.isNaN(cotadoEm.getTime())) throw new AppError(502, "ptax_resposta_invalida");
+  const { cotadoEm } = dolar;
+  // Brasília é UTC-3 (sem horário de verão desde 2019): o dia começa às 03:00 UTC.
+  const brasilia = new Date(Date.now() - 3 * 3_600_000);
+  const inicioDoDia = new Date(Date.UTC(brasilia.getUTCFullYear(), brasilia.getUTCMonth(), brasilia.getUTCDate(), 3));
 
   return idempotentMutation({
     lojaId,
-    operation: "CAPTURE_PTAX",
+    operation: "CAPTURE_DOLAR",
     entityId: "USD:BRL",
     key,
     payload: request,
-    execute: async (tx, correlationId): Promise<PtaxCapture> => {
-      // O mesmo boletim não é registrado duas vezes.
+    execute: async (tx, correlationId): Promise<DolarCapture> => {
+      // Uma cotação por dia: a de hoje, se já registrada, é devolvida.
       const existente = await tx.cotacaoCambio.findFirst({
-        where: { lojaId, moedaOrigem: "USD", moedaDestino: "BRL", fonte: PTAX_FONTE, cotadoEm }
+        where: { lojaId, moedaOrigem: "USD", moedaDestino: "BRL", fonte: DOLAR_FONTE, cotadoEm: { gte: inicioDoDia } }
       });
       if (existente) return { cotacao: existente, jaRegistrada: true };
-      const valorMercado = new D(fechamento.cotacaoVenda).toDecimalPlaces(6, D.ROUND_HALF_UP);
+      const valorMercado = new D(dolar.valor).toDecimalPlaces(6, D.ROUND_HALF_UP);
       const margem = new D(acrescimo).toDecimalPlaces(6, D.ROUND_HALF_UP);
       const created = await tx.cotacaoCambio.create({
         data: {
@@ -225,14 +223,14 @@ export async function capturePtax(lojaId: string, userId: string, acrescimoInfor
           valorMercado,
           margem,
           valor: valorMercado.plus(margem),
-          fonte: PTAX_FONTE
+          fonte: DOLAR_FONTE
         }
       });
       await audit(tx, {
         usuarioId: userId,
         lojaId,
         permissionCode: "FINANCEIRO_REGISTRAR",
-        action: "CAPTURE_PTAX",
+        action: "CAPTURE_DOLAR",
         entity: "CotacaoCambio",
         entityId: created.id,
         correlationId,
