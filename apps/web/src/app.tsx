@@ -76,6 +76,11 @@ const LogisticsPage = React.lazy(() =>
     default: module.LogisticsPage
   }))
 );
+const StockStagePage = React.lazy(() =>
+  import("./pages/StockStagePage").then((module) => ({
+    default: module.StockStagePage
+  }))
+);
 const InventoryPage = React.lazy(() =>
   import("./pages/InventoryPage").then((module) => ({
     default: module.InventoryPage
@@ -385,6 +390,26 @@ export function AppRoutes() {
                 <AuthGate>
                   <Shell>
                     <LogisticsPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/estoque/miami"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <StockStagePage mode="MIAMI" />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/estoque/brasil"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <StockStagePage mode="BRASIL" />
                   </Shell>
                 </AuthGate>
               }

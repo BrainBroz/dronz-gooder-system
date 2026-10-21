@@ -19,6 +19,7 @@ import {
 import * as service from "./marketplace-integrations.service";
 import * as ebayOAuth from "./ebay-oauth.service";
 import * as purchasesFeed from "./purchases-feed.service";
+import * as purchaseStage from "./purchase-stage.service";
 import { refreshForUser } from "./marketplace-refresh";
 
 export const marketplaceIntegrationsRouter = Router();
@@ -74,6 +75,14 @@ marketplaceIntegrationsRouter.post(
   requirePermission("INTEGRACAO_MARKETPLACE_SINCRONIZAR"),
   wrap(async (request, response) => {
     response.json({ resultados: await refreshForUser(identity(request)) });
+  })
+);
+
+marketplaceIntegrationsRouter.put(
+  "/purchases/stage",
+  requirePermission("BUYER_INGESTION_VISUALIZAR"),
+  wrap(async (request, response) => {
+    response.json(await purchaseStage.setPurchaseStage(identity(request), purchaseStage.stageSchema.parse(request.body)));
   })
 );
 
