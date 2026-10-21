@@ -13,7 +13,7 @@ import { renderWithProviders, testStores } from "./render";
 
 const routesInApp = [
   "/", "/operacao", "/checkpoints", "/categorias", "/produtos", "/fornecedores", "/compras", "/pedidos",
-  "/logistica", "/estoque", "/financeiro", "/relatorios", "/vendas", "/compras/painel-mensal", "/integracoes",
+  "/logistica", "/estoque", "/financeiro", "/relatorios", "/vendas", "/compras/painel-mensal", "/compras/controle", "/integracoes",
   "/compras/revisao", "/compras/fila", "/posicoes", "/compras/simulador", "/configuracoes", "/estoque/miami", "/estoque/brasil"
 ];
 
