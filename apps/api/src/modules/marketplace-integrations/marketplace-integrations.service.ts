@@ -945,7 +945,8 @@ async function importNormalizedOrder(
   connection: ConnectionWithRelations,
   order: NormalizedMarketplaceOrder,
   correlationId: string,
-  idempotencyKey: string
+  idempotencyKey: string,
+  autoConfirm = false
 ) {
   const evidence = await recordMarketplaceEvidence({
     provider: connection.provider,
@@ -956,6 +957,21 @@ async function importNormalizedOrder(
     correlationId,
     idempotencyKey
   });
+  // Decisão do PO (21/10/2026): compra do eBay já entra confirmada. Pedido cancelado, divergente ou sem permissão
+  // de aprovar do usuário que sincroniza fica "a confirmar" e segue o fluxo normal de revisão.
+  const candidateId = "candidateId" in evidence ? evidence.candidateId : undefined;
+  if (autoConfirm && !order.cancelled && candidateId) {
+    const candidate = await prisma.buyerPurchaseCandidate.findUnique({
+      where: { id: candidateId },
+      select: { id: true, status: true, version: true, compraImportadaId: true }
+    });
+    if (candidate?.status === "AGUARDANDO_APROVACAO" && !candidate.compraImportadaId)
+      try {
+        await decideBuyerCandidate(identity, candidate.id, { decision: "APROVAR", expectedVersion: candidate.version }, `auto-confirmar-${candidate.id}-v${candidate.version}`);
+      } catch {
+        // continua a confirmar: a revisão manual cobre o que a confirmação automática não pôde fazer
+      }
+  }
   return { created: evidence.created };
 }
 
@@ -1029,7 +1045,8 @@ async function executePages(
         for (let attempt = 0; ; attempt += 1) {
           try {
             result = await importNormalizedOrder(
-              identity, connection, order, correlationId, idempotencyKey
+              identity, connection, order, correlationId, idempotencyKey,
+              adapter.autoConfirmPurchases === true
             );
             break;
           } catch (error) {

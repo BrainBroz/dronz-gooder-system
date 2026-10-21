@@ -47,7 +47,8 @@ describe("Compras (lista)", () => {
     expect(image).toBeTruthy();
     expect(screen.getAllByText("sem foto").length).toBe(2);
     const call = get.mock.calls.find(([url]) => url === "/integrations/marketplaces/purchases")![1] as { params: Record<string, unknown> };
-    expect(call.params).toMatchObject({ finalidade: "LOJA", status: "AGUARDANDO_APROVACAO", limit: 100 });
+    expect(call.params).toMatchObject({ finalidade: "LOJA", limit: 100 });
+    expect(call.params).not.toHaveProperty("status"); // abre mostrando todas: as compras do eBay já entram confirmadas
   });
 
   it("confirma uma compra com a versão certa e todas de uma vez", async () => {

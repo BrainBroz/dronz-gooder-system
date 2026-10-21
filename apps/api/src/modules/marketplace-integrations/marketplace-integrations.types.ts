@@ -170,6 +170,8 @@ export interface MarketplaceAdapter {
     connection: MarketplaceConnectionContext,
     externalOrderId: string
   ): Promise<NormalizedMarketplaceOrder>;
+  /** Decisão do PO: compras desta fonte entram já confirmadas (quando elegíveis e o usuário pode aprovar). */
+  readonly autoConfirmPurchases?: boolean;
   /** Foto principal por anúncio (id do anúncio → URL https). Melhor esforço: o que falhar fica de fora. */
   fetchItemImages?(
     connection: MarketplaceConnectionContext,

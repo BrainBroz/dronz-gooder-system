@@ -99,7 +99,7 @@ export function PurchasesPage() {
   const can = (code: string) => permissions.includes("SYSTEM_ADMIN") || permissions.includes(code);
   const [loja, setLoja] = useState("");
   const [origem, setOrigem] = useState<"LOJA" | "PESSOAL">("LOJA");
-  const [situacao, setSituacao] = useState<"AGUARDANDO_APROVACAO" | "APROVADA" | "">("AGUARDANDO_APROVACAO");
+  const [situacao, setSituacao] = useState<"AGUARDANDO_APROVACAO" | "APROVADA" | "">("");
   const [newOpen, setNewOpen] = useState(false);
   const feed = useQuery<Feed>({
     queryKey: ["purchases-feed", loja, origem, situacao],
@@ -121,7 +121,7 @@ export function PurchasesPage() {
       <Stack gap={2.5}>
         <PageHeader
           title="Compras"
-          description="Tudo o que foi comprado, com foto, valor, loja e rastreio. Compras confirmadas ficam a caminho de Miami."
+          description="Tudo o que foi comprado, com foto, valor, loja e rastreio. As compras do eBay entram já confirmadas; só o que não pôde ser confirmado sozinho fica marcado como A confirmar."
           actions={can("COMPRAS_IMPORTADAS_IMPORTAR") && <Button variant="outlined" onClick={() => setNewOpen(true)}>Cadastrar compra</Button>}
         />
         <Stack direction={{ xs: "column", md: "row" }} gap={2} alignItems={{ md: "center" }} flexWrap="wrap">

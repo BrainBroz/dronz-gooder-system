@@ -81,6 +81,7 @@ const isoOf = (value: string | undefined) =>
 
 export class EbayBuyerAdapter implements MarketplaceAdapter {
   readonly provider = "EBAY" as const;
+  readonly autoConfirmPurchases = true;
   readonly capabilities = [
     "LIST_ORDERS",
     "GET_ORDER",

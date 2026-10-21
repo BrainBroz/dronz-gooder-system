@@ -2797,7 +2797,7 @@ describe("B10: evidência multicanal, confiança e resolução humana", () => {
 });
 
 describe("B11: adapter eBay Buyer no pipeline comum", () => {
-  it("sincroniza GetOrders buyer em evidências e candidatos sem aprovar, materializar ou duplicar no replay", async () => {
+  it("sincroniza GetOrders buyer em evidências e candidatos, confirma sozinho o que não está cancelado e não duplica no replay", async () => {
     const { EbayBuyerAdapter } = await import("../src/modules/marketplace-integrations/ebay-buyer.adapter");
     const fixture = await connectionFixture("EBAY", "SHARED", `b11-${randomUUID().slice(0, 6)}`);
     const xml = `<?xml version="1.0"?><GetOrdersResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Success</Ack>
@@ -2827,12 +2827,47 @@ describe("B11: adapter eBay Buyer no pipeline comum", () => {
       where: { currentEvidence: { conexaoMarketplaceId: fixture.connectionId } }, include: { currentEvidence: true }
     });
     expect(candidates.map((candidate) => [candidate.externalOrderIdNormalized, candidate.status]).sort())
-      .toEqual([["EB-1", "AGUARDANDO_APROVACAO"], ["EB-2", "CANCELADA"]]);
+      .toEqual([["EB-1", "APROVADA"], ["EB-2", "CANCELADA"]]);
     expect(candidates.every((candidate) => candidate.currentEvidence.source === "EBAY_BUYER_API")).toBe(true);
-    expect(await prisma.compraImportada.count({ where: { conexaoMarketplaceId: fixture.connectionId } })).toBe(0);
+    // Compra do eBay entra confirmada (virou compra importada); a cancelada não vira compra.
+    expect(await prisma.compraImportada.count({ where: { conexaoMarketplaceId: fixture.connectionId } })).toBe(1);
     const evidenceCount = await prisma.buyerEvidence.count({ where: { conexaoMarketplaceId: fixture.connectionId } });
     await syncConnection(identity, fixture.connectionId, { ...window, replay: true }, `b11-replay-${randomUUID()}`, registry);
     expect(await prisma.buyerEvidence.count({ where: { conexaoMarketplaceId: fixture.connectionId } })).toBe(evidenceCount);
+    expect(await prisma.compraImportada.count({ where: { conexaoMarketplaceId: fixture.connectionId } })).toBe(1);
+  });
+});
+
+describe("B11b: conta eBay dedicada à loja entra confirmada, atribuída e com foto", () => {
+  it("uma sincronização deixa a compra confirmada na loja da conta, com rastreio e foto, sem nenhum clique", async () => {
+    const { EbayBuyerAdapter } = await import("../src/modules/marketplace-integrations/ebay-buyer.adapter");
+    const fixture = await connectionFixture("EBAY", "STORE_DEDICATED", `b11b-${randomUUID().slice(0, 6)}`, "gooder");
+    const offer = `batch8-offer-${randomUUID().slice(0, 6)}`;
+    const orders = `<?xml version="1.0"?><GetOrdersResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Success</Ack><HasMoreOrders>false</HasMoreOrders><OrderArray>
+      <Order><OrderID>EB-D1</OrderID><OrderStatus>Completed</OrderStatus><CreatedTime>2026-10-10T12:00:00.000Z</CreatedTime>
+        <LastModifiedTime>2026-10-11T09:00:00.000Z</LastModifiedTime><Total currencyID="USD">30.00</Total><SellerUserID>seller_b11b</SellerUserID>
+        <TransactionArray><Transaction><OrderLineItemID>EB-D1-L1</OrderLineItemID><Item><ItemID>${offer}</ItemID><Title>Hélice</Title></Item>
+          <QuantityPurchased>3</QuantityPurchased><TransactionPrice currencyID="USD">10.00</TransactionPrice>
+          <ShippingDetails><ShipmentTrackingDetails><ShippingCarrierUsed>USPS</ShippingCarrierUsed><ShipmentTrackingNumber>9400B11B</ShipmentTrackingNumber></ShipmentTrackingDetails></ShippingDetails>
+        </Transaction></TransactionArray></Order></OrderArray></GetOrdersResponse>`;
+    const item = `<GetItemResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Success</Ack><Item><PictureDetails><PictureURL>https://i.ebayimg.com/b11b.jpg</PictureURL></PictureDetails></Item></GetItemResponse>`;
+    const fetchImpl = async (url: string, init: { headers: Record<string, string> }) =>
+      url.includes("/identity/")
+        ? { status: 200, text: async () => JSON.stringify({ access_token: "tok", expires_in: 7200 }) }
+        : { status: 200, text: async () => (init.headers["X-EBAY-API-CALL-NAME"] === "GetItem" ? item : orders) };
+    const secrets = { get: async () => JSON.stringify({ clientId: "c", clientSecret: "s", refreshToken: "r" }) };
+    const adapter = new EbayBuyerAdapter(secrets, fetchImpl as never, () => new Date("2026-10-18T12:00:00.000Z"));
+    const identity = await getAuthenticatedUser(fixture.userId);
+    const registry = { AMAZON: new FakeAdapter("AMAZON", []), EBAY: adapter };
+    const window = { replay: false, from: new Date("2026-10-01T00:00:00.000Z"), to: new Date("2026-10-18T00:00:00.000Z") };
+    expect((await syncConnection(identity, fixture.connectionId, window, `batch8-b11b-${randomUUID()}`, registry)).status).toBe("SUCCEEDED");
+
+    const purchase = await prisma.compraImportada.findFirstOrThrow({ where: { conexaoMarketplaceId: fixture.connectionId }, include: { itens: { include: { atribuicoes: true } } } });
+    expect(purchase.itens[0]!.atribuicoes).toEqual([expect.objectContaining({ lojaId: fixture.gooder.id, quantidade: 3 })]);
+    const response = await request(fixture.app).get("/integrations/marketplaces/purchases?limit=100").set(bearer(fixture.token));
+    const row = (response.body.items as { orderId: string; status: string; canApprove: boolean; store: { slug: string }; trackings: { code: string }[]; items: { imageUrl: string | null }[] }[]).find((entry) => entry.orderId === "EB-D1")!;
+    expect(row).toMatchObject({ status: "APROVADA", canApprove: false, store: { slug: "gooder" }, trackings: [{ code: "9400B11B" }] });
+    expect(row.items[0]!.imageUrl).toBe("https://i.ebayimg.com/b11b.jpg");
   });
 });
 
