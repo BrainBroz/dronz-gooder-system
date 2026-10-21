@@ -51,6 +51,16 @@ const ProductsPage = React.lazy(() =>
     default: module.ProductsPage
   }))
 );
+const MarketplaceConnectionsPage = React.lazy(() =>
+  import("./pages/MarketplaceConnectionsPage").then((module) => ({
+    default: module.MarketplaceConnectionsPage
+  }))
+);
+const EbayCallbackPage = React.lazy(() =>
+  import("./pages/MarketplaceConnectionsPage").then((module) => ({
+    default: module.EbayCallbackPage
+  }))
+);
 const LogisticsPage = React.lazy(() =>
   import("./pages/LogisticsPage").then((module) => ({
     default: module.LogisticsPage
@@ -385,6 +395,26 @@ export function AppRoutes() {
                 <AuthGate>
                   <Shell>
                     <SalesPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/integracoes"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <MarketplaceConnectionsPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/integracoes/ebay/callback"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <EbayCallbackPage />
                   </Shell>
                 </AuthGate>
               }

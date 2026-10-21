@@ -157,6 +157,7 @@ Implementado e coberto por testes:
 - vendas com baixa por lote/custo em snapshot e indicadores derivados com controle financeiro.
 - reconstrução visual Etapa 1 (referência Bolt aprovada): shell com navegação agrupada por permissão, seletor de loja e dashboard sobre read models reais (`docs/UX_OPERATIONAL_FOUNDATION_V1.md`, seção 20); demais telas ainda sem redesenho.
 - configurações econômicas versionadas por loja, captura automática diária do dólar comercial (Yahoo Finance) mais R$ 0,20 e simulador de compra com busca de produto, composição de custos e venda, snapshot e sem efeitos operacionais (`docs/CONFIGURACOES_E_SIMULADOR_COMPRA_V1.md`); o número de parcelas do plano de 16% aguarda confirmação do PO.
+- conexão de contas eBay pela tela (`/integracoes`, 20/10/2026): uma conta por loja, consentimento OAuth feito pela aplicação (`/integrations/marketplaces/ebay/connect-intents` e `/connections/complete`), refresh token em arquivo 0600 fora do repositório e credenciais do aplicativo em `MARKETPLACE_EBAY_APP`; sincronização e revisão seguem o fluxo existente (aprovação humana). Detalhes em `docs/EBAY_BUYER_SPECIFICATION_V1.md`.
 
 Não implementado:
 
