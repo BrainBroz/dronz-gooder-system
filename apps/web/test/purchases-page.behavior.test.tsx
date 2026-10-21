@@ -111,6 +111,20 @@ describe("Compras: trocar a loja com um clique", () => {
   });
 });
 
+describe("situação da compra", () => {
+  it("pedido cancelado aparece como Cancelada, e não como Rejeitada", async () => {
+    vi.spyOn(api, "get").mockImplementation(async (url) =>
+      url === "/integrations/marketplaces/purchases"
+        ? { data: { items: [{ ...rows[2], status: "CANCELADA" }], total: 1 } }
+        : { data: { items: [], page: 1, limit: 100, total: 0 } }
+    );
+    renderWithProviders(<PurchasesPage />, { permissions: perms });
+    await screen.findByText("Camiseta ALO");
+    expect(screen.getByText("Cancelada")).toBeTruthy();
+    expect(screen.queryByText("Rejeitada")).toBeNull();
+  });
+});
+
 describe("situação do envio", () => {
   it("cancelado, com rastreio, enviado sem rastreio e aguardando", () => {
     expect(shippingState({ cancelled: true, trackings: [{ carrier: null, code: "x" }], shippedAt: null }).label).toBe("Cancelado");

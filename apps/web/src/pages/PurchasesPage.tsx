@@ -36,6 +36,14 @@ const BASE = "/integrations/marketplaces";
 const money = (value: number, currency: string) => value.toLocaleString("pt-BR", { style: "currency", currency });
 const day = (value: string) => new Date(value).toLocaleDateString("pt-BR");
 
+const statusLabel: Record<PurchaseRow["status"], string> = {
+  APROVADA: "Confirmada",
+  AGUARDANDO_APROVACAO: "A confirmar",
+  COM_DIVERGENCIA: "Com divergência",
+  REJEITADA: "Rejeitada",
+  CANCELADA: "Cancelada"
+};
+
 /** Situação para quem compra: o que o vendedor já fez (cancelou, enviou com rastreio ou ainda não enviou). */
 export function shippingState(row: Pick<PurchaseRow, "cancelled" | "trackings" | "shippedAt">): { label: string; color: "error" | "success" | "warning" } {
   if (row.cancelled) return { label: "Cancelado", color: "error" };
@@ -87,7 +95,7 @@ function PurchaseCard({ row, stores, onConfirm, onPickStore, busy }: { row: Purc
           )}
           {row.purpose === "PESSOAL" && <Chip size="small" label="Pessoal" />}
           <Chip size="small" color={shipping.color} label={shipping.label} />
-          <Chip size="small" variant="outlined" color={confirmed ? "success" : "default"} label={confirmed ? "Confirmada" : row.status === "AGUARDANDO_APROVACAO" ? "A confirmar" : row.status === "COM_DIVERGENCIA" ? "Com divergência" : "Rejeitada"} />
+          <Chip size="small" variant="outlined" color={confirmed ? "success" : "default"} label={statusLabel[row.status]} />
           <Typography variant="caption" color="text.secondary" sx={{ ml: "auto" }}>
             {day(row.orderedAt)} · pedido {row.orderId} · conta {row.account}
           </Typography>
