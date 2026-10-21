@@ -170,6 +170,11 @@ export interface MarketplaceAdapter {
     connection: MarketplaceConnectionContext,
     externalOrderId: string
   ): Promise<NormalizedMarketplaceOrder>;
+  /** Foto principal por anúncio (id do anúncio → URL https). Melhor esforço: o que falhar fica de fora. */
+  fetchItemImages?(
+    connection: MarketplaceConnectionContext,
+    itemIds: string[]
+  ): Promise<Record<string, string>>;
 }
 
 export type MarketplaceAdapterRegistry = Readonly<

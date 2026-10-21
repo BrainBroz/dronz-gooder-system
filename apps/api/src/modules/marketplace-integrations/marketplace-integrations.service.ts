@@ -22,6 +22,7 @@ import {
   translateMarketplaceAdapterError
 } from "./marketplace-integrations.adapters";
 import { hasDuplicateOfficialLineId, isStructuredApiSource, recordMarketplaceEvidence } from "./buyer-evidence.service";
+import { ensureItemImages } from "./item-images";
 import {
   capabilitySchema,
   marketplaceOrderPageSchema,
@@ -741,6 +742,29 @@ export async function decideBuyerCandidate(
           data: { conexaoMarketplaceId: candidate.currentEvidence.conexaoMarketplaceId }
         });
         await persistShippingData(tx, purchaseId, order);
+        // Conta dedicada a uma loja: as compras já nascem atribuídas a ela (sem passo manual).
+        const owner = candidate.currentEvidence.conexaoMarketplaceId
+          ? await tx.conexaoMarketplace.findUnique({
+              where: { id: candidate.currentEvidence.conexaoMarketplaceId },
+              select: { escopo: true, lojaPermitidaId: true }
+            })
+          : null;
+        if (owner?.escopo === "STORE_DEDICATED" && owner.lojaPermitidaId) {
+          const lines = await tx.compraImportadaItem.findMany({ where: { compraImportadaId: purchaseId } });
+          for (const line of lines) {
+            const eligible = line.quantidade - line.quantidadeCancelada - line.quantidadeReembolsada;
+            if (eligible > 0)
+              await tx.atribuicaoCompraItem.create({
+                data: {
+                  itemExternoId: line.id,
+                  lojaId: owner.lojaPermitidaId,
+                  quantidade: eligible,
+                  motivo: "Atribuição automática: conta eBay dedicada à loja",
+                  atribuidoPorId: identity.user.id
+                }
+              });
+          }
+        }
       }
       const decided = await tx.buyerPurchaseCandidate.update({
         where: { id },
@@ -985,6 +1009,18 @@ async function executePages(
     } catch (error) {
       throw translateMarketplaceAdapterError(error);
     }
+    await ensureItemImages(
+      adapter,
+      {
+        id: connection.id,
+        provider: connection.provider,
+        externalIdentifier: connection.identificadorExterno,
+        region: connection.regiao ?? undefined,
+        marketplace: connection.marketplace ?? undefined,
+        secretReference: connection.secretReference ?? undefined
+      },
+      page.orders
+    );
     let pageFailed = false;
     for (const order of page.orders) {
       counts.processed += 1;
@@ -1185,7 +1221,11 @@ export async function syncConnection(
       });
       await tx.conexaoMarketplace.update({
         where: { id: connection.id },
-        data: { ultimoErroSanitizado: errorCode }
+        // Autorização recusada pelo marketplace: a conexão passa a pedir reconexão em vez de parecer ativa.
+        data: {
+          ultimoErroSanitizado: errorCode,
+          ...(errorCode === "marketplace_authorization_expired" ? { status: "AUTHORIZATION_EXPIRED" as const } : {})
+        }
       });
       await audit(tx, {
         usuarioId: identity.user.id,

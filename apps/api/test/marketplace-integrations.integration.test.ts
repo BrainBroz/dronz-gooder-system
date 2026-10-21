@@ -180,6 +180,9 @@ async function cleanup() {
   await prisma.execucaoSincronizacao.deleteMany({
     where: { conexao: { identificadorExterno: { startsWith: "batch8-" } } }
   });
+  await prisma.imagemAnuncioExterno.deleteMany({
+    where: { anuncioId: { startsWith: "batch8-" } }
+  });
   await prisma.conexaoMarketplace.deleteMany({
     where: { identificadorExterno: { startsWith: "batch8-" } }
   });
@@ -2869,5 +2872,103 @@ describe("PD-07: replay histórico incompleto bloqueia a incremental", () => {
         await syncConnection(identity, fixture.connectionId, {}, `pd07-inc2-${randomUUID()}`, registry())
       ).status
     ).toBe("SUCCEEDED");
+  });
+});
+
+describe("Compras: lista com foto, loja da conta e atribuição automática", () => {
+  const ebayOrder = (id: string) =>
+    order(id, {
+      externalStatus: "Completed",
+      items: [{ externalLineId: `line-${id}`, title: "Apple iPhone 17 Pro Max 1 TB", offerId: `batch8-offer-${id}`, quantity: 2, cancelledQuantity: 0, refundedQuantity: 0, unitPrice: 900, currency: "USD" }],
+      shipments: [{
+        externalShipmentId: id, status: "SHIPPED", shippedAt: "2026-07-14T10:00:00.000Z", updatedAt: "2026-07-14T10:00:00.000Z",
+        packages: [{ externalPackageId: "USPS:9400111", carrier: "USPS", trackings: [{ code: "9400111", carrier: "USPS", updatedAt: "2026-07-14T10:00:00.000Z" }] }]
+      }]
+    });
+  const feed = async (fixture: Awaited<ReturnType<typeof connectionFixture>>, query = "") =>
+    (await request(fixture.app).get(`/integrations/marketplaces/purchases${query}`).set(bearer(fixture.token))).body as {
+      items: { candidateId: string; version: number; status: string; store: { slug: string } | null; purpose: string; trackings: { carrier: string; code: string }[]; shippedAt: string | null; externalStatus: string; canApprove: boolean; items: { title: string; quantity: number; unitPrice: number; imageUrl: string | null }[] }[];
+      total: number;
+    };
+  const approve = (fixture: Awaited<ReturnType<typeof connectionFixture>>, candidateId: string, expectedVersion: number) =>
+    request(fixture.app).post(`/integrations/marketplaces/buyer-candidates/${candidateId}/decision`).set(bearer(fixture.token)).set("idempotency-key", `batch8-approve-${randomUUID()}`).send({ decision: "APROVAR", expectedVersion });
+  const record = async (fixture: Awaited<ReturnType<typeof connectionFixture>>, value: Order) => {
+    const connection = await prisma.conexaoMarketplace.findUniqueOrThrow({ where: { id: fixture.connectionId } });
+    return recordMarketplaceEvidence({ provider: "EBAY", accountId: connection.contaExternaId, connectionId: fixture.connectionId, order: value, actorId: fixture.userId, correlationId: randomUUID() });
+  };
+
+  it("mostra produto, foto, valor, loja, rastreio e status do eBay; aprovar atribui à loja da conta", async () => {
+    const fixture = await connectionFixture("EBAY", "STORE_DEDICATED", `lista-${randomUUID().slice(0, 6)}`, "gooder");
+    const saved = ebayOrder(`batch8-LISTA-${randomUUID().slice(0, 6)}`);
+    const recorded = await record(fixture, saved);
+    await prisma.imagemAnuncioExterno.create({ data: { provider: "EBAY", anuncioId: saved.items[0]!.offerId!, url: "https://i.ebayimg.com/images/g/abc/s-l500.jpg" } });
+
+    const before = await feed(fixture, "?limit=100");
+    const row = before.items.find((item) => item.candidateId === recorded.candidateId)!;
+    expect(row).toMatchObject({ status: "AGUARDANDO_APROVACAO", store: { slug: "gooder" }, purpose: "LOJA", externalStatus: "Completed", shippedAt: "2026-07-14T10:00:00.000Z", canApprove: true });
+    expect(row.trackings).toEqual([{ carrier: "USPS", code: "9400111" }]);
+    expect(row.items).toEqual([expect.objectContaining({ title: "Apple iPhone 17 Pro Max 1 TB", quantity: 2, unitPrice: 900, imageUrl: "https://i.ebayimg.com/images/g/abc/s-l500.jpg" })]);
+    // filtros: por loja e por status
+    expect((await feed(fixture, `?lojaId=${fixture.dronz.id}&limit=100`)).items.some((item) => item.candidateId === recorded.candidateId)).toBe(false);
+    expect((await feed(fixture, `?lojaId=${fixture.gooder.id}&limit=100`)).items.some((item) => item.candidateId === recorded.candidateId)).toBe(true);
+
+    expect((await approve(fixture, recorded.candidateId!, row.version)).status).toBe(200);
+    const purchase = await prisma.compraImportada.findFirstOrThrow({ where: { buyerCandidate: { id: recorded.candidateId! } }, include: { itens: { include: { atribuicoes: true } } } });
+    expect(purchase.itens).toHaveLength(1);
+    expect(purchase.itens[0]!.atribuicoes).toEqual([expect.objectContaining({ lojaId: fixture.gooder.id, quantidade: 2 })]);
+    expect((await feed(fixture, "?limit=100")).items.find((item) => item.candidateId === recorded.candidateId)).toMatchObject({ status: "APROVADA", canApprove: false });
+  });
+
+  it("conta compartilhada não atribui loja ao aprovar; só aprovada pelo fluxo normal", async () => {
+    const fixture = await connectionFixture("EBAY", "SHARED", `lista-sh-${randomUUID().slice(0, 6)}`);
+    const recorded = await record(fixture, ebayOrder(`batch8-LISTASH-${randomUUID().slice(0, 6)}`));
+    const row = (await feed(fixture, "?limit=100")).items.find((item) => item.candidateId === recorded.candidateId)!;
+    expect(row.store).toBeNull();
+    expect((await approve(fixture, recorded.candidateId!, row.version)).status).toBe(200);
+    const assignments = await prisma.atribuicaoCompraItem.count({ where: { itemExterno: { compraImportada: { buyerCandidate: { id: recorded.candidateId! } } } } });
+    expect(assignments).toBe(0);
+  });
+
+  it("busca a foto principal de cada anúncio no eBay, guarda uma vez e não deixa a falha de um derrubar os outros", async () => {
+    await import("../src/modules/marketplace-integrations/marketplace-integrations.adapters");
+    const { EbayBuyerAdapter } = await import("../src/modules/marketplace-integrations/ebay-buyer.adapter");
+    const { ensureItemImages } = await import("../src/modules/marketplace-integrations/item-images");
+    const calls: string[] = [];
+    const fetchImpl = async (url: string, init: { headers: Record<string, string>; body: string }) => {
+      if (url.includes("/identity/")) return { status: 200, text: async () => JSON.stringify({ access_token: "tok", expires_in: 7200 }) };
+      const id = /<ItemID>([^<]+)</.exec(init.body)![1]!;
+      calls.push(id);
+      if (id.endsWith("quebrado")) return { status: 500, text: async () => "" };
+      const pictures = id.endsWith("semfoto") ? "" : "<PictureURL>https://i.ebayimg.com/a.jpg</PictureURL><PictureURL>https://i.ebayimg.com/b.jpg</PictureURL>";
+      return { status: 200, text: async () => `<GetItemResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Success</Ack><Item><PictureDetails>${pictures}</PictureDetails></Item></GetItemResponse>` };
+    };
+    const secrets = { get: async () => JSON.stringify({ clientId: "c", clientSecret: "s", refreshToken: "r" }) };
+    const adapter = new EbayBuyerAdapter(secrets, fetchImpl as never);
+    const context = { id: "conn-imagens", provider: "EBAY" as const, externalIdentifier: "batch8-img", secretReference: "env:MARKETPLACE_X" };
+    const ids = ["batch8-ok-1", "batch8-ok-2", "batch8-quebrado", "batch8-semfoto"];
+    expect(await adapter.fetchItemImages(context, ids)).toEqual({ "batch8-ok-1": "https://i.ebayimg.com/a.jpg", "batch8-ok-2": "https://i.ebayimg.com/a.jpg" });
+
+    const orders = ids.map((id) => ebayOrder(`batch8-IMG-${id}`)).map((value, index) => ({ ...value, items: [{ ...value.items[0]!, offerId: ids[index] }] }));
+    calls.length = 0;
+    await ensureItemImages(adapter, context, orders);
+    expect((await prisma.imagemAnuncioExterno.findMany({ where: { anuncioId: { startsWith: "batch8-" } }, orderBy: { anuncioId: "asc" } })).map((row) => row.anuncioId)).toEqual(["batch8-ok-1", "batch8-ok-2"]);
+    calls.length = 0;
+    await ensureItemImages(adapter, context, orders);
+    expect(calls.sort()).toEqual(["batch8-quebrado", "batch8-semfoto"]); // quem já tem foto não é buscado de novo
+    // uma falha do adapter inteiro não propaga
+    await expect(ensureItemImages({ ...adapter, provider: "EBAY", capabilities: [], authorize: adapter.authorize, refreshAuthorization: adapter.refreshAuthorization, listOrders: adapter.listOrders, getOrder: adapter.getOrder, fetchItemImages: async () => { throw new Error("boom"); } } as never, context, [ebayOrder("batch8-IMG-x")])).resolves.toBeUndefined();
+  });
+
+  it("token recusado pelo marketplace marca a conexão como autorização expirada (a tela passa a pedir reconexão)", async () => {
+    const fixture = await connectionFixture("EBAY", "STORE_DEDICATED", `exp-${randomUUID().slice(0, 6)}`, "gooder");
+    const identity = await getAuthenticatedUser(fixture.userId);
+    const expired = new FakeAdapter("EBAY", [], undefined, new MarketplaceAdapterError("AUTHORIZATION_EXPIRED", "refresh token rejected"));
+    await expect(syncConnection(identity, fixture.connectionId, { replay: false }, `batch8-exp-${randomUUID()}`, disabledRegistry(expired))).rejects.toMatchObject({ code: "marketplace_authorization_expired" });
+    expect(await prisma.conexaoMarketplace.findUniqueOrThrow({ where: { id: fixture.connectionId }, select: { status: true, ultimoErroSanitizado: true } })).toEqual({ status: "AUTHORIZATION_EXPIRED", ultimoErroSanitizado: "marketplace_authorization_expired" });
+    // Outro tipo de falha (limite de chamadas) não derruba a autorização.
+    await prisma.conexaoMarketplace.update({ where: { id: fixture.connectionId }, data: { status: "ACTIVE" } });
+    const slow = new FakeAdapter("EBAY", [], undefined, new MarketplaceAdapterError("THROTTLED", "slow down", 1000));
+    await expect(syncConnection(identity, fixture.connectionId, { replay: false }, `batch8-thr-${randomUUID()}`, disabledRegistry(slow))).rejects.toMatchObject({ code: "marketplace_provider_throttled" });
+    expect((await prisma.conexaoMarketplace.findUniqueOrThrow({ where: { id: fixture.connectionId } })).status).toBe("ACTIVE");
   });
 });

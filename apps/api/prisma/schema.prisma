@@ -281,6 +281,17 @@ model ProdutoBase {
   @@index([categoria])
 }
 
+/// Foto de um anúncio externo (ex.: item do eBay), guardada à parte da evidência para não alterar o histórico de versões dos pedidos.
+model ImagemAnuncioExterno {
+  id        String              @id @default(cuid())
+  provider  MarketplaceProvider
+  anuncioId String
+  url       String
+  createdAt DateTime            @default(now())
+
+  @@unique([provider, anuncioId])
+}
+
 model Categoria {
   id        String   @id @default(cuid())
   lojaId    String
