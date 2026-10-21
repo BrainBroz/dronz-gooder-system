@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
+import bcrypt from "bcryptjs";
 import { PrismaClient } from "@prisma/client";
 
 process.env.DATABASE_URL =
@@ -2871,6 +2872,126 @@ describe("B11b: conta eBay dedicada à loja entra confirmada, atribuída e com f
   });
 });
 
+describe("B11c: compra confirmada se atualiza sozinha (rastreio e cancelamento) e só preço pede revisão", () => {
+  type Stage = { modified: string; status?: string; tracking?: string; price?: number };
+  const setup = async (orderId: string) => {
+    const { EbayBuyerAdapter } = await import("../src/modules/marketplace-integrations/ebay-buyer.adapter");
+    const fixture = await connectionFixture("EBAY", "STORE_DEDICATED", `b11c-${randomUUID().slice(0, 6)}`, "gooder");
+    let stage: Stage = { modified: "2026-10-11T09:00:00.000Z" };
+    const orders = () => `<?xml version="1.0"?><GetOrdersResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Success</Ack><HasMoreOrders>false</HasMoreOrders><OrderArray>
+      <Order><OrderID>${orderId}</OrderID><OrderStatus>${stage.status ?? "Completed"}</OrderStatus><CreatedTime>2026-10-10T12:00:00.000Z</CreatedTime>
+        <LastModifiedTime>${stage.modified}</LastModifiedTime><Total currencyID="USD">${(stage.price ?? 10) * 3}.00</Total><SellerUserID>seller_b11c</SellerUserID>
+        <TransactionArray><Transaction><OrderLineItemID>${orderId}-L1</OrderLineItemID><Item><ItemID>batch8-offer-${orderId}</ItemID><Title>Hélice</Title></Item>
+          <QuantityPurchased>3</QuantityPurchased><TransactionPrice currencyID="USD">${stage.price ?? 10}.00</TransactionPrice>
+          ${stage.tracking ? `<ShippingDetails><ShipmentTrackingDetails><ShippingCarrierUsed>USPS</ShippingCarrierUsed><ShipmentTrackingNumber>${stage.tracking}</ShipmentTrackingNumber></ShipmentTrackingDetails></ShippingDetails>` : ""}
+        </Transaction></TransactionArray></Order></OrderArray></GetOrdersResponse>`;
+    const fetchImpl = async (url: string, init: { headers: Record<string, string> }) =>
+      url.includes("/identity/")
+        ? { status: 200, text: async () => JSON.stringify({ access_token: "tok", expires_in: 7200 }) }
+        : { status: 200, text: async () => (init.headers["X-EBAY-API-CALL-NAME"] === "GetItem" ? "<GetItemResponse><Ack>Failure</Ack></GetItemResponse>" : orders()) };
+    const secrets = { get: async () => JSON.stringify({ clientId: "c", clientSecret: "s", refreshToken: "r" }) };
+    const adapter = new EbayBuyerAdapter(secrets, fetchImpl as never, () => new Date("2026-10-18T12:00:00.000Z"));
+    const identity = await getAuthenticatedUser(fixture.userId);
+    const registry = { AMAZON: new FakeAdapter("AMAZON", []), EBAY: adapter };
+    const window = { replay: false, from: new Date("2026-10-01T00:00:00.000Z"), to: new Date("2026-10-18T00:00:00.000Z") };
+    return {
+      fixture,
+      run: async (next: Stage) => {
+        stage = next;
+        expect((await syncConnection(identity, fixture.connectionId, window, `batch8-b11c-${randomUUID()}`, registry)).status).toBe("SUCCEEDED");
+      },
+      row: async () => {
+        const response = await request(fixture.app).get("/integrations/marketplaces/purchases?limit=100").set(bearer(fixture.token));
+        return (response.body.items as { orderId: string; status: string; cancelled: boolean; trackings: { code: string }[]; externalStatus: string }[]).find((entry) => entry.orderId === orderId)!;
+      },
+      candidate: () => prisma.buyerPurchaseCandidate.findFirstOrThrow({ where: { externalOrderIdNormalized: orderId, contaExterna: { conexoes: { some: { id: fixture.connectionId } } } }, include: { compraImportada: { include: { itens: { include: { atribuicoes: true } } } } } })
+    };
+  };
+
+  it("rastreio que chega depois e cancelamento atualizam a compra confirmada sem pedir revisão", async () => {
+    const ctx = await setup("EB-U1");
+    await ctx.run({ modified: "2026-10-11T09:00:00.000Z" });
+    expect(await ctx.row()).toMatchObject({ status: "APROVADA", cancelled: false, trackings: [] });
+
+    await ctx.run({ modified: "2026-10-12T09:00:00.000Z", tracking: "9400U1" });
+    expect(await ctx.row()).toMatchObject({ status: "APROVADA", cancelled: false, trackings: [{ code: "9400U1" }] });
+    expect(await prisma.buyerReconciliationConflict.count({ where: { candidate: { externalOrderIdNormalized: "EB-U1" } } })).toBe(0);
+
+    await ctx.run({ modified: "2026-10-13T09:00:00.000Z", tracking: "9400U1", status: "Cancelled" });
+    expect(await ctx.row()).toMatchObject({ status: "CANCELADA", cancelled: true, externalStatus: "Cancelled" });
+    const candidate = await ctx.candidate();
+    expect(candidate.compraImportada!.itens[0]).toMatchObject({ quantidade: 3, quantidadeCancelada: 3 });
+    expect(candidate.compraImportada!.itens[0]!.atribuicoes).toEqual([]);
+    expect(candidate.compraImportada!.statusExterno).toBe("Cancelled");
+    expect(await prisma.buyerReconciliationConflict.count({ where: { candidate: { externalOrderIdNormalized: "EB-U1" } } })).toBe(0);
+  });
+
+  it("mudança de preço depois da confirmação continua indo para revisão", async () => {
+    const ctx = await setup("EB-U2");
+    await ctx.run({ modified: "2026-10-11T09:00:00.000Z" });
+    expect(await ctx.row()).toMatchObject({ status: "APROVADA" });
+    await ctx.run({ modified: "2026-10-12T09:00:00.000Z", price: 12 });
+    expect(await ctx.row()).toMatchObject({ status: "COM_DIVERGENCIA" });
+    expect((await ctx.candidate()).compraImportada!.itens[0]!.atribuicoes).toHaveLength(1);
+  });
+});
+
+describe("Atualização do eBay: agendada e por botão", () => {
+  it("atualiza as conexões autorizadas, pula as que ninguém autoriza e uma falha não derruba as demais", async () => {
+    const { refreshActiveConnections } = await import("../src/modules/marketplace-integrations/marketplace-refresh");
+    const mine = await connectionFixture("EBAY", "STORE_DEDICATED", `atu-a-${randomUUID().slice(0, 6)}`, "gooder");
+    const other = await connectionFixture("EBAY", "STORE_DEDICATED", `atu-b-${randomUUID().slice(0, 6)}`, "dronz");
+    const identity = await getAuthenticatedUser(mine.userId);
+    const fresh = order(`batch8-ATU-${randomUUID().slice(0, 6)}`);
+    const ok = await refreshActiveConnections(async (connection) => (connection.id === mine.connectionId ? identity : null), disabledRegistry(new FakeAdapter("EBAY", [{ orders: [fresh] }])));
+    expect(ok.filter((entry) => entry.conexao.includes("Conexão EBAY"))).toHaveLength(1);
+    expect(ok[0]).toMatchObject({ status: "SUCCEEDED", criados: 1 });
+    expect(await prisma.conexaoMarketplace.findUniqueOrThrow({ where: { id: other.connectionId }, select: { ultimaSincronizacaoEm: true } })).toEqual({ ultimaSincronizacaoEm: null });
+
+    const failing = new FakeAdapter("EBAY", [], undefined, new MarketplaceAdapterError("AUTHORIZATION_EXPIRED", "refresh token rejected"));
+    const results = await refreshActiveConnections(async (connection) => (connection.id === mine.connectionId ? identity : null), disabledRegistry(failing));
+    expect(results).toEqual([{ conexao: "Conexão EBAY", status: "FALHOU", erro: "marketplace_authorization_expired" }]);
+    expect((await prisma.conexaoMarketplace.findUniqueOrThrow({ where: { id: mine.connectionId } })).status).toBe("AUTHORIZATION_EXPIRED");
+  });
+
+  it("o botão Atualizar agora responde por conexão e exige a permissão de sincronizar", async () => {
+    const fixture = await connectionFixture("EBAY", "STORE_DEDICATED", `atu-btn-${randomUUID().slice(0, 6)}`, "gooder");
+    const response = await request(fixture.app).post("/integrations/marketplaces/purchases/refresh").set(bearer(fixture.token));
+    expect(response.status).toBe(200);
+    // Em teste o leitor real do eBay está desligado: a conexão responde com o motivo, sem derrubar a chamada.
+    expect(response.body.resultados.find((entry: { conexao: string }) => entry.conexao === "Conexão EBAY")).toMatchObject({ status: "FALHOU", erro: "marketplace_provider_not_configured" });
+    const denied = await scopedUser(fixture, ["BUYER_INGESTION_VISUALIZAR"], [fixture.gooder.id]);
+    expect((await request(fixture.app).post("/integrations/marketplaces/purchases/refresh").set(bearer(denied))).status).toBe(403);
+  });
+
+  it("o agendador roda no intervalo, nunca em cima da rodada anterior, e só liga com o leitor do eBay ativo", async () => {
+    const { startMarketplaceScheduler } = await import("../src/modules/marketplace-integrations/marketplace-refresh");
+    vi.useFakeTimers();
+    try {
+      let release!: () => void;
+      let calls = 0;
+      const run = () => { calls += 1; return new Promise<[]>((resolve) => { release = () => resolve([]); }); };
+      const timer = startMarketplaceScheduler({ MARKETPLACE_EBAY_BUYER_ENABLED: "true", MARKETPLACE_SYNC_INTERVAL_MINUTES: "30" } as never, run as never);
+      expect(timer).not.toBeNull();
+      await vi.advanceTimersByTimeAsync(29 * 60_000);
+      expect(calls).toBe(0);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(calls).toBe(1);
+      await vi.advanceTimersByTimeAsync(30 * 60_000); // a primeira ainda não terminou: não começa outra
+      expect(calls).toBe(1);
+      release();
+      await vi.advanceTimersByTimeAsync(30 * 60_000);
+      expect(calls).toBe(2);
+      clearInterval(timer!);
+      release();
+      expect(startMarketplaceScheduler({ MARKETPLACE_EBAY_BUYER_ENABLED: "false" } as never, run as never)).toBeNull();
+      expect(startMarketplaceScheduler({ MARKETPLACE_EBAY_BUYER_ENABLED: "true", MARKETPLACE_SYNC_INTERVAL_MINUTES: "0" } as never, run as never)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("PD-07: replay histórico incompleto bloqueia a incremental", () => {
   it("incremental recusada até um replay terminar com sucesso", async () => {
     const fixture = await connectionFixture("EBAY", "SHARED", "pd07-replay-block");
@@ -2922,7 +3043,7 @@ describe("Compras: lista com foto, loja da conta e atribuição automática", ()
     });
   const feed = async (fixture: Awaited<ReturnType<typeof connectionFixture>>, query = "") =>
     (await request(fixture.app).get(`/integrations/marketplaces/purchases${query}`).set(bearer(fixture.token))).body as {
-      items: { candidateId: string; version: number; status: string; store: { slug: string } | null; purpose: string; trackings: { carrier: string; code: string }[]; shippedAt: string | null; externalStatus: string; canApprove: boolean; canChangeStore: boolean; items: { title: string; quantity: number; unitPrice: number; imageUrl: string | null }[] }[];
+      items: { candidateId: string; version: number; status: string; store: { slug: string } | null; purpose: string; trackings: { carrier: string; code: string }[]; shippedAt: string | null; externalStatus: string; fase: string; canApprove: boolean; canChangeStore: boolean; items: { title: string; quantity: number; unitPrice: number; imageUrl: string | null }[] }[];
       total: number;
     };
   const approve = (fixture: Awaited<ReturnType<typeof connectionFixture>>, candidateId: string, expectedVersion: number) =>
@@ -2992,6 +3113,125 @@ describe("Compras: lista com foto, loja da conta e atribuição automática", ()
     expect(await rowOf(dedicated, fixed.candidateId!)).toMatchObject({ store: { slug: "gooder" }, canChangeStore: false });
     expect((await put(dedicated, fixed.candidateId!, dedicated.dronz.id)).body.error).toBe("marketplace_connection_store_mismatch");
     expect(await assigned(fixed.candidateId!)).toEqual([["gooder", 2]]);
+  });
+
+  it("lotes por mês e filtros: mês, busca por produto/rastreio e loja do topo", async () => {
+    const shared = await connectionFixture("EBAY", "SHARED", `lote-sh-${randomUUID().slice(0, 6)}`);
+    const dedicated = await connectionFixture("EBAY", "STORE_DEDICATED", `lote-ded-${randomUUID().slice(0, 6)}`, "gooder");
+    const tag = randomUUID().slice(0, 6);
+    const make = (id: string, orderedAt: string, over: Partial<ReturnType<typeof ebayOrder>> = {}) => ({ ...ebayOrder(id), orderedAt, updatedAt: orderedAt, ...over });
+    const september = await record(shared, make(`batch8-LOTE-S-${tag}`, "2026-09-20T15:00:00.000Z"));
+    const october = await record(dedicated, make(`batch8-LOTE-O-${tag}`, "2026-10-05T15:00:00.000Z"));
+    const noTracking = await record(dedicated, make(`batch8-LOTE-N-${tag}`, "2026-10-06T15:00:00.000Z", { shipments: [] }));
+    const cancelled = await record(dedicated, make(`batch8-LOTE-C-${tag}`, "2026-10-07T15:00:00.000Z", { cancelled: true, externalStatus: "Cancelled" }));
+    for (const [fixture, id] of [[shared, september], [dedicated, october], [dedicated, noTracking]] as const) {
+      const row = (await feed(fixture, "?limit=300")).items.find((item) => item.candidateId === id.candidateId)!;
+      expect((await approve(fixture, id.candidateId!, row.version)).status).toBe(200);
+    }
+    const mine = (response: Awaited<ReturnType<typeof feed>>) => response.items.filter((item) => [september, october, noTracking, cancelled].some((entry) => entry.candidateId === item.candidateId));
+
+    const all = await feed(dedicated, "?limit=300");
+    const byId = (id: string) => all.items.find((item) => item.candidateId === id)!;
+    expect(byId(october.candidateId!).fase).toBe("A_CAMINHO_MIAMI");
+    expect(byId(noTracking.candidateId!).fase).toBe("COMPRADO");
+    expect(byId(cancelled.candidateId!).fase).toBe("CANCELADO");
+    // mês: só outubro, mais novo primeiro
+    expect(mine(await feed(dedicated, "?mes=2026-10&limit=300")).map((item) => item.candidateId)).toEqual([cancelled.candidateId, noTracking.candidateId, october.candidateId]);
+    expect(mine(await feed(dedicated, "?mes=2026-09&limit=300")).map((item) => item.candidateId)).toEqual([september.candidateId]);
+    // busca por rastreio e por produto
+    expect(mine(await feed(dedicated, "?busca=9400111&limit=300")).length).toBe(3); // só o pedido sem rastreio fica de fora
+    expect(mine(await feed(dedicated, "?busca=iphone&limit=300")).length).toBe(4);
+    expect(mine(await feed(dedicated, "?busca=nao-existe-xyz&limit=300")).length).toBe(0);
+    // loja do topo: a Gooder vê as da conta dedicada; a Dronz não vê nenhuma delas; a de setembro (compartilhada, sem loja) só em "todas"
+    const gooder = mine(await feed(dedicated, `?lojaId=${dedicated.gooder.id}&limit=300`)).map((item) => item.candidateId);
+    expect(gooder).toEqual(expect.arrayContaining([october.candidateId, noTracking.candidateId, cancelled.candidateId]));
+    expect(gooder).not.toContain(september.candidateId);
+    expect(mine(await feed(dedicated, `?lojaId=${dedicated.dronz.id}&limit=300`))).toEqual([]);
+
+    const lots = (await request(dedicated.app).get(`/integrations/marketplaces/purchases/lots`).set(bearer(dedicated.token))).body as { lotes: { mes: string; pedidos: number; unidades: number; custoUsd: number; cancelados: number; semLoja: number; porLoja: Record<string, number> }[]; atualizadoEm: string | null };
+    const lot = (mes: string) => lots.lotes.find((entry) => entry.mes === mes)!;
+    expect(lot("2026-10")).toMatchObject({ cancelados: 1 });
+    expect(lot("2026-10").pedidos).toBeGreaterThanOrEqual(3);
+    expect(lot("2026-09").semLoja).toBeGreaterThanOrEqual(1);
+    expect(lots.lotes.map((entry) => entry.mes)).toEqual([...lots.lotes.map((entry) => entry.mes)].sort().reverse());
+    const gooderLots = (await request(dedicated.app).get(`/integrations/marketplaces/purchases/lots?lojaId=${dedicated.gooder.id}`).set(bearer(dedicated.token))).body as typeof lots;
+    expect(gooderLots.lotes.find((entry) => entry.mes === "2026-09")?.pedidos ?? 0).toBe(0);
+    expect(gooderLots.lotes.find((entry) => entry.mes === "2026-10")!.porLoja.gooder).toBeGreaterThanOrEqual(2);
+    // com uma loja no topo, as compras sem loja somem dos lotes, mas o total avisa que existem
+    expect((gooderLots as typeof gooderLots & { semLojaTotal: number }).semLojaTotal).toBeGreaterThanOrEqual(1);
+    expect((lots as typeof lots & { semLojaTotal: number }).semLojaTotal).toBe((gooderLots as typeof gooderLots & { semLojaTotal: number }).semLojaTotal);
+  });
+
+  it("etapas da compra: Miami, remessa e Brasil, um passo por vez, com datas, permissões e desfazer", async () => {
+    const dedicated = await connectionFixture("EBAY", "STORE_DEDICATED", `etapa-ded-${randomUUID().slice(0, 6)}`, "gooder");
+    const tag = randomUUID().slice(0, 6);
+    const make = (id: string, over: Partial<ReturnType<typeof ebayOrder>> = {}) => ({ ...ebayOrder(id), ...over });
+    const a = await record(dedicated, make(`batch8-ETAPA-A-${tag}`));
+    const b = await record(dedicated, make(`batch8-ETAPA-B-${tag}`, { shipments: [] }));
+    const c = await record(dedicated, make(`batch8-ETAPA-C-${tag}`, { cancelled: true, externalStatus: "Cancelled" }));
+    const pending = await record(dedicated, make(`batch8-ETAPA-P-${tag}`));
+    type Row = Awaited<ReturnType<typeof feed>>["items"][number] & { etapa: { chegouMiamiEm: string | null; remessa: string | null; enviadaEm: string | null; chegouBrasilEm: string | null } | null };
+    const rowOf = async (id: string) => ((await feed(dedicated, "?limit=300")).items as Row[]).find((item) => item.candidateId === id)!;
+    for (const id of [a, b]) expect((await approve(dedicated, id.candidateId!, (await rowOf(id.candidateId!)).version)).status).toBe(200);
+    const stage = (token: string, ids: string[], etapa: string, extra: Record<string, unknown> = {}) =>
+      request(dedicated.app).put("/integrations/marketplaces/purchases/stage").set(bearer(token)).send({ candidateIds: ids, etapa, ...extra });
+
+    expect((await rowOf(a.candidateId!)).fase).toBe("A_CAMINHO_MIAMI");
+    expect((await rowOf(b.candidateId!)).fase).toBe("COMPRADO");
+    // não pula etapa, não mexe em cancelada nem em compra ainda não confirmada
+    expect((await stage(dedicated.token, [a.candidateId!], "EM_REMESSA")).body.error).toBe("stage_transition_invalid");
+    expect((await stage(dedicated.token, [a.candidateId!], "NO_BRASIL")).body.error).toBe("stage_transition_invalid");
+    expect((await stage(dedicated.token, [c.candidateId!], "EM_MIAMI")).body.error).toBe("purchase_cancelled");
+    expect((await stage(dedicated.token, [pending.candidateId!], "EM_MIAMI")).body.error).toBe("purchase_not_confirmed");
+    expect((await stage(dedicated.token, [`c${randomUUID().replace(/-/g, "").slice(0, 24)}`], "EM_MIAMI")).status).toBe(404);
+
+    // chegou em Miami, com a data em que chegou (compra sem rastreio também pode)
+    const arrived = await stage(dedicated.token, [a.candidateId!, b.candidateId!], "EM_MIAMI", { ocorreuEm: "2026-10-10" });
+    expect(arrived.body).toEqual({ alteradas: 2, iguais: 0 });
+    expect(await rowOf(a.candidateId!)).toMatchObject({ fase: "EM_MIAMI", etapa: { chegouMiamiEm: "2026-10-10T00:00:00.000Z", remessa: null } });
+    expect((await stage(dedicated.token, [a.candidateId!], "EM_MIAMI")).body).toEqual({ alteradas: 0, iguais: 1 }); // repetir não muda nada
+    // tudo ou nada: uma inválida no meio não deixa a outra mudar
+    expect((await stage(dedicated.token, [a.candidateId!, c.candidateId!], "EM_REMESSA")).status).toBe(409);
+    expect((await rowOf(a.candidateId!)).fase).toBe("EM_MIAMI");
+
+    // remessa e Brasil
+    expect((await stage(dedicated.token, [a.candidateId!], "EM_REMESSA", { remessa: "Remessa Rafa 1", ocorreuEm: "2026-10-12" })).status).toBe(200);
+    expect(await rowOf(a.candidateId!)).toMatchObject({ fase: "EM_REMESSA", etapa: { chegouMiamiEm: "2026-10-10T00:00:00.000Z", remessa: "Remessa Rafa 1", enviadaEm: "2026-10-12T00:00:00.000Z", chegouBrasilEm: null } });
+    expect((await stage(dedicated.token, [a.candidateId!], "NO_BRASIL", { ocorreuEm: "2026-10-20" })).status).toBe(200);
+    expect(await rowOf(a.candidateId!)).toMatchObject({ fase: "NO_BRASIL", etapa: { remessa: "Remessa Rafa 1", chegouBrasilEm: "2026-10-20T00:00:00.000Z" } });
+    expect((await feed(dedicated, `?fases=NO_BRASIL,EM_REMESSA&limit=300`)).items.map((item) => item.candidateId)).toContain(a.candidateId);
+    expect((await feed(dedicated, `?fases=EM_MIAMI&limit=300`)).items.map((item) => item.candidateId)).toEqual([b.candidateId]);
+
+    // desfazer volta um passo e mantém as datas anteriores
+    expect((await stage(dedicated.token, [a.candidateId!], "EM_REMESSA")).status).toBe(200);
+    expect(await rowOf(a.candidateId!)).toMatchObject({ fase: "EM_REMESSA", etapa: { remessa: "Remessa Rafa 1", enviadaEm: "2026-10-12T00:00:00.000Z", chegouBrasilEm: null } });
+    expect((await stage(dedicated.token, [a.candidateId!], "EM_MIAMI")).status).toBe(200);
+    expect(await rowOf(a.candidateId!)).toMatchObject({ fase: "EM_MIAMI", etapa: { chegouMiamiEm: "2026-10-10T00:00:00.000Z", remessa: null, enviadaEm: null } });
+    expect((await stage(dedicated.token, [a.candidateId!], "COMPRADO")).status).toBe(200);
+    expect(await rowOf(a.candidateId!)).toMatchObject({ fase: "A_CAMINHO_MIAMI", etapa: null });
+    expect(await prisma.auditLog.count({ where: { action: "PURCHASE_STAGE_CHANGED", correlationId: a.candidateId! } })).toBe(6);
+
+    // permissões: quem confirma Miami não confirma o Brasil, e quem não é da loja não enxerga a compra
+    const profile = await prisma.perfil.create({ data: { code: `TEST_${randomUUID()}`, name: "etapas" } });
+    for (const code of ["BUYER_INGESTION_VISUALIZAR", "MIAMI_RECEBIMENTO_CONFIRMAR"])
+      await prisma.perfilPermissao.create({ data: { perfilId: profile.id, permissaoId: (await prisma.permissao.findUniqueOrThrow({ where: { code } })).id } });
+    const email = `etapas-${randomUUID()}@example.com`;
+    const limited = await prisma.usuario.create({
+      data: { name: "Etapas", email, passwordHash: await bcrypt.hash("change-me", 12), lojas: { create: { lojaId: dedicated.gooder.id } }, perfis: { create: { perfilId: profile.id } } }
+    });
+    const login = await request(dedicated.app).post("/auth/login").send({ email, password: "change-me" });
+    expect(login.status).toBe(200);
+    expect((await stage(login.body.accessToken, [a.candidateId!], "EM_MIAMI")).status).toBe(200);
+    expect((await stage(login.body.accessToken, [a.candidateId!], "EM_REMESSA")).status).toBe(200);
+    expect((await stage(login.body.accessToken, [a.candidateId!], "NO_BRASIL")).body.error).toBe("insufficient_permission");
+    expect((await stage(dedicated.token, [a.candidateId!], "NO_BRASIL")).status).toBe(200);
+    expect((await stage(login.body.accessToken, [a.candidateId!], "EM_REMESSA")).body.error).toBe("insufficient_permission"); // voltar do Brasil também é do Brasil
+    await prisma.refreshToken.deleteMany({ where: { usuarioId: limited.id } });
+    await prisma.usuarioPerfil.deleteMany({ where: { usuarioId: limited.id } });
+    await prisma.usuarioLoja.deleteMany({ where: { usuarioId: limited.id } });
+    await prisma.usuario.delete({ where: { id: limited.id } });
+    await prisma.perfilPermissao.deleteMany({ where: { perfilId: profile.id } });
+    await prisma.perfil.delete({ where: { id: profile.id } });
   });
 
   it("busca a foto principal de cada anúncio no eBay, guarda uma vez e não deixa a falha de um derrubar os outros", async () => {

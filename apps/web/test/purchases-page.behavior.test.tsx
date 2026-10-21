@@ -1,61 +1,139 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { api } from "../src/api/client";
-import { PurchasesPage, shippingState } from "../src/pages/PurchasesPage";
+import { PurchasesPage, monthLabel } from "../src/pages/PurchasesPage";
 import { renderWithProviders } from "./render";
 
 beforeEach(() => vi.restoreAllMocks());
 
 const base = {
-  version: 3, status: "AGUARDANDO_APROVACAO", orderedAt: "2026-10-15T12:00:00.000Z", currency: "USD", total: 900, externalStatus: "Completed", cancelled: false,
+  version: 3, status: "AGUARDANDO_APROVACAO", orderedAt: "2026-10-15T12:00:00.000Z", currency: "USD", cancelled: false,
   account: "impetit", purpose: "LOJA", shippedAt: null, canApprove: true, canChangeStore: false
 };
 const rows = [
-  { ...base, candidateId: "c1", orderId: "13-15311-66647", store: { id: "store-gooder", slug: "gooder", nome: "Gooder" },
+  { ...base, candidateId: "c1", orderId: "13-15311-66647", fase: "A_CAMINHO_MIAMI", store: { id: "store-gooder", slug: "gooder", nome: "Gooder" },
     trackings: [{ carrier: "USPS", code: "9434908106245702187606" }], shippedAt: "2026-10-16T10:00:00.000Z",
     items: [{ title: "Apple iPhone 17 Pro Max 1 TB", quantity: 2, cancelledQuantity: 0, unitPrice: 900, currency: "USD", imageUrl: "https://i.ebayimg.com/a.jpg" }] },
-  { ...base, candidateId: "c2", orderId: "19-15300-00124", version: 5, store: null, trackings: [],
+  { ...base, candidateId: "c2", orderId: "19-15300-00124", version: 5, fase: "COMPRADO", store: null, trackings: [],
     items: [{ title: "Nintendo Switch 2", quantity: 1, cancelledQuantity: 0, unitPrice: 450, currency: "USD", imageUrl: null }] },
-  { ...base, candidateId: "c3", orderId: "11-15264-26580", cancelled: true, canApprove: false, store: { id: "store-dronz", slug: "dronz", nome: "Dronz" }, trackings: [],
+  { ...base, candidateId: "c3", orderId: "11-15264-26580", fase: "CANCELADO", cancelled: true, canApprove: false, store: { id: "store-dronz", slug: "dronz", nome: "Dronz" }, trackings: [],
     items: [{ title: "Camiseta ALO", quantity: 1, cancelledQuantity: 1, unitPrice: 60, currency: "USD", imageUrl: null }] }
 ];
+const lot = { mes: "2026-10", pedidos: 3, unidades: 3, custoUsd: 1350, cancelados: 1, aConfirmar: 2, semLoja: 1, porLoja: { gooder: 1, dronz: 1 } };
 const perms = ["BUYER_INGESTION_VISUALIZAR", "BUYER_INGESTION_APROVAR", "COMPRAS_IMPORTADAS_VISUALIZAR", "COMPRAS_IMPORTADAS_IMPORTAR"];
-const mock = () =>
+const FEED = "/integrations/marketplaces/purchases";
+const LOTS = "/integrations/marketplaces/purchases/lots";
+const mock = (feedRows: unknown[] = rows) =>
   vi.spyOn(api, "get").mockImplementation(async (url) => {
-    if (url === "/integrations/marketplaces/purchases") return { data: { items: rows, total: rows.length } };
-    if (url === "/imported-purchases" || String(url).startsWith("/imported-purchases")) return { data: { items: [], page: 1, limit: 100, total: 0 } };
+    if (url === LOTS) return { data: { lotes: [lot], semLojaTotal: 1, atualizadoEm: new Date().toISOString() } };
+    if (url === FEED) return { data: { items: feedRows, total: feedRows.length, atualizadoEm: new Date(Date.now() - 5 * 60_000).toISOString() } };
+    if (String(url).startsWith("/imported-purchases")) return { data: { items: [], page: 1, limit: 100, total: 0 } };
     throw new Error(`GET inesperado: ${url}`);
   });
+const callsTo = (get: ReturnType<typeof mock>, url: string) => get.mock.calls.filter(([target]) => target === url).map(([, config]) => (config as { params: Record<string, unknown> }).params);
+const MONTH = { route: "/compras?mes=2026-10", permissions: perms };
 
-describe("Compras (lista)", () => {
-  it("mostra produto, foto, valor, loja, rastreio e situação do envio; sem mostrar merchant, progresso ou idade", async () => {
+describe("Compras: lotes por mês", () => {
+  it("abre nos lotes, só com o seletor do topo (sem descrição nem botões de filtro), e o mês abre o resumo", async () => {
+    const user = userEvent.setup();
     const get = mock();
     renderWithProviders(<PurchasesPage />, { permissions: perms });
+    const card = await screen.findByRole("button", { name: `Abrir lote ${monthLabel("2026-10")}` });
+    expect(within(card).getByText("US$ 1.350,00")).toBeTruthy();
+    expect(within(card).getByText("GOODER 1")).toBeTruthy();
+    expect(within(card).getByText("1 sem loja")).toBeTruthy();
+    expect(within(card).getByText("2 a confirmar")).toBeTruthy();
+    expect(within(card).getByText("1 cancelado")).toBeTruthy();
+    // sem a linha de filtros por loja/situação: a loja vem do seletor do topo
+    expect(screen.queryByRole("button", { name: "Gooder" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Confirmadas" })).toBeNull();
+    expect(callsTo(get, LOTS)[0]).toEqual({ finalidade: "LOJA", lojaId: "store-dronz" });
+    expect(callsTo(get, FEED)).toHaveLength(0);
+
+    await user.click(card);
     expect(await screen.findByText("Apple iPhone 17 Pro Max 1 TB")).toBeTruthy();
-    expect(screen.getByText((_, element) => element?.tagName === "P" && /2 × US\$\s*900,00 = US\$\s*1\.800,00/.test(element.textContent ?? ""))).toBeTruthy();
-    expect(screen.getByText(/Rastreio: USPS 9434908106245702187606/)).toBeTruthy();
-    expect(screen.getByText("Enviado pelo vendedor")).toBeTruthy();
-    expect(screen.getByText("Aguardando envio do vendedor")).toBeTruthy();
-    expect(screen.getByText("Cancelado")).toBeTruthy();
-    expect(screen.getAllByText(/o vendedor ainda não informou/)).toHaveLength(2);
-    // "Gooder" aparece no filtro e na etiqueta de loja da primeira compra.
-    expect(screen.getAllByText("Gooder")).toHaveLength(2);
-    expect(screen.getByText("Sem loja")).toBeTruthy();
+    expect(callsTo(get, FEED)[0]).toMatchObject({ finalidade: "LOJA", mes: "2026-10", lojaId: "store-dronz", limit: 300 });
+    expect(callsTo(get, FEED)[0]).not.toHaveProperty("status");
+  });
+
+  it("'Todas as lojas' não manda lojaId; a loja escolhida no topo filtra tudo", async () => {
+    const get = mock();
+    renderWithProviders(<PurchasesPage />, { permissions: perms, viewAll: true });
+    await screen.findByRole("button", { name: /Abrir lote/ });
+    expect(callsTo(get, LOTS)[0]).toEqual({ finalidade: "LOJA" });
+    expect(screen.getByText(/Todas as lojas/)).toBeTruthy();
+    expect(screen.queryByText(/ainda está sem loja/)).toBeNull();
+  });
+
+  it("com uma loja no topo, avisa das compras sem loja e leva para Todos", async () => {
+    const user = userEvent.setup();
+    const get = mock();
+    renderWithProviders(<PurchasesPage />, { permissions: perms });
+    expect(await screen.findByText(/1 compra confirmada ainda está sem loja/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Ver em Todos" }));
+    await waitFor(() => expect(callsTo(get, LOTS).at(-1)).toEqual({ finalidade: "LOJA" }));
+    expect(screen.queryByText(/ainda está sem loja/)).toBeNull();
+  });
+
+  it("sem lotes, avisa", async () => {
+    vi.spyOn(api, "get").mockResolvedValue({ data: { lotes: [], semLojaTotal: 0, atualizadoEm: null } });
+    renderWithProviders(<PurchasesPage />, { permissions: perms });
+    expect(await screen.findByText("Nenhuma compra neste filtro.")).toBeTruthy();
+  });
+});
+
+describe("Compras: resumo do lote", () => {
+  it("mostra produto com foto, empresa, quantidade, custo, status e rastreio com operadora", async () => {
+    mock();
+    renderWithProviders(<PurchasesPage />, MONTH);
+    expect(await screen.findByText("Apple iPhone 17 Pro Max 1 TB")).toBeTruthy();
+    const table = screen.getByRole("table", { name: "Compras do lote" });
+    expect(within(table).getAllByRole("columnheader").map((header) => header.textContent)).toEqual(
+      ["Produto", "Empresa", "Qtd", "Custo unid.", "Venda proj.", "Markup", "Status", "Tracking"]
+    );
+    expect(within(table).getByText("A CAMINHO DE MIAMI")).toBeTruthy();
+    expect(within(table).getByText("COMPRADO")).toBeTruthy();
+    expect(within(table).getByText("CANCELADO")).toBeTruthy();
+    expect(within(table).getByText("USPS")).toBeTruthy();
+    expect(within(table).getByText("9434908106245702187606")).toBeTruthy();
+    expect(within(table).getAllByText("Vendedor ainda não enviou")).toHaveLength(1); // a cancelada não mostra isso
+    expect(within(table).getByText("GOODER")).toBeTruthy();
+        expect(document.querySelector('img[src="https://i.ebayimg.com/a.jpg"]')).toBeTruthy();
+    expect(within(table).getAllByText("sem foto")).toHaveLength(2);
     expect(screen.queryByText(/Merchant|Progresso|Idade/)).toBeNull();
-    const image = document.querySelector('img[src="https://i.ebayimg.com/a.jpg"]');
-    expect(image).toBeTruthy();
-    expect(screen.getAllByText("sem foto").length).toBe(2);
-    const call = get.mock.calls.find(([url]) => url === "/integrations/marketplaces/purchases")![1] as { params: Record<string, unknown> };
-    expect(call.params).toMatchObject({ finalidade: "LOJA", limit: 100 });
-    expect(call.params).not.toHaveProperty("status"); // abre mostrando todas: as compras do eBay já entram confirmadas
+    // totais do lote ignoram a compra cancelada
+    expect(screen.getByText("US$ 2.250,00")).toBeTruthy();
+  });
+
+  it("copia o rastreio", async () => {
+    const user = userEvent.setup();
+    mock();
+    renderWithProviders(<PurchasesPage />, MONTH);
+    await screen.findByText("9434908106245702187606");
+    await user.click(screen.getByRole("button", { name: "Copiar rastreio 9434908106245702187606" }));
+    expect(await navigator.clipboard.readText()).toBe("9434908106245702187606");
+    expect(await screen.findByRole("button", { name: "Copiar rastreio 9434908106245702187606" })).toHaveProperty("textContent", "✓");
+  });
+
+  it("filtra por status e busca pela API", async () => {
+    const user = userEvent.setup();
+    const get = mock();
+    renderWithProviders(<PurchasesPage />, MONTH);
+    await screen.findByText("Nintendo Switch 2");
+    await user.click(screen.getByRole("combobox", { name: "Status" }));
+    await user.click(screen.getByRole("option", { name: "Cancelado" }));
+    await waitFor(() => expect(screen.queryByText("Nintendo Switch 2")).toBeNull());
+    expect(screen.getByText("Camiseta ALO")).toBeTruthy();
+    await user.type(screen.getByRole("textbox", { name: "Buscar produto, pedido ou rastreio" }), "iphone");
+    await waitFor(() => expect(callsTo(get, FEED).at(-1)).toMatchObject({ busca: "iphone", mes: "2026-10" }));
   });
 
   it("confirma uma compra com a versão certa e todas de uma vez", async () => {
     const user = userEvent.setup();
     mock();
     const post = vi.spyOn(api, "post").mockResolvedValue({ data: {} });
-    renderWithProviders(<PurchasesPage />, { permissions: perms });
+    renderWithProviders(<PurchasesPage />, MONTH);
     await screen.findByText("Nintendo Switch 2");
     const buttons = screen.getAllByRole("button", { name: "Confirmar compra" });
     expect(buttons).toHaveLength(2); // a cancelada não tem confirmação
@@ -73,34 +151,24 @@ describe("Compras (lista)", () => {
     ]);
   });
 
-  it("filtros pedem à API loja, origem e situação; sem permissão de aprovar não há botão", async () => {
+  it("troca para as compras pessoais", async () => {
     const user = userEvent.setup();
     const get = mock();
-    renderWithProviders(<PurchasesPage />, { permissions: ["BUYER_INGESTION_VISUALIZAR"] });
+    renderWithProviders(<PurchasesPage />, { ...MONTH, permissions: ["BUYER_INGESTION_VISUALIZAR"] });
     await screen.findByText("Nintendo Switch 2");
-    await user.click(screen.getByRole("button", { name: "Compras pessoais" }));
-    await user.click(screen.getByRole("button", { name: "Confirmadas" }));
-    await user.click(screen.getByRole("button", { name: "Gooder" }));
-    await waitFor(() => {
-      const last = get.mock.calls.filter(([url]) => url === "/integrations/marketplaces/purchases").at(-1)![1] as { params: Record<string, unknown> };
-      expect(last.params).toMatchObject({ finalidade: "PESSOAL", status: "APROVADA", lojaId: "store-gooder" });
-    });
+    await user.click(screen.getByRole("button", { name: "Pessoais" }));
+    await waitFor(() => expect(callsTo(get, FEED).at(-1)).toMatchObject({ finalidade: "PESSOAL" }));
   });
-});
 
-describe("Compras: trocar a loja com um clique", () => {
   it("mostra as bolinhas das lojas só onde pode trocar e atribui a compra inteira à loja clicada", async () => {
     const user = userEvent.setup();
-    const shared = { ...base, candidateId: "s1", orderId: "SHARED-1", status: "APROVADA", canApprove: false, canChangeStore: true, store: null, trackings: [],
+    const shared = { ...base, candidateId: "s1", orderId: "SHARED-1", status: "APROVADA", fase: "COMPRADO", canApprove: false, canChangeStore: true, store: null, trackings: [],
       items: [{ title: "Mac mini M4", quantity: 1, cancelledQuantity: 0, unitPrice: 600, currency: "USD", imageUrl: null }] };
     const fixed = { ...shared, candidateId: "s2", orderId: "FIXED-2", canChangeStore: false, store: { id: "store-gooder", slug: "gooder", nome: "Gooder" },
       items: [{ title: "Echo Dot", quantity: 1, cancelledQuantity: 0, unitPrice: 30, currency: "USD", imageUrl: null }] };
-    vi.spyOn(api, "get").mockImplementation(async (url) => {
-      if (url === "/integrations/marketplaces/purchases") return { data: { items: [shared, fixed], total: 2 } };
-      return { data: { items: [], page: 1, limit: 100, total: 0 } };
-    });
+    mock([shared, fixed]);
     const put = vi.spyOn(api, "put").mockResolvedValue({ data: {} });
-    renderWithProviders(<PurchasesPage />, { permissions: [...perms, "COMPRAS_IMPORTADAS_ATRIBUIR"] });
+    renderWithProviders(<PurchasesPage />, { ...MONTH, permissions: [...perms, "COMPRAS_IMPORTADAS_ATRIBUIR"] });
     await screen.findByText("Mac mini M4");
     expect(screen.getByText("Escolha a loja")).toBeTruthy();
     // só a compra de conta compartilhada tem as bolinhas; a da conta dedicada mostra a etiqueta fixa
@@ -111,11 +179,34 @@ describe("Compras: trocar a loja com um clique", () => {
   });
 });
 
-describe("situação do envio", () => {
-  it("cancelado, com rastreio, enviado sem rastreio e aguardando", () => {
-    expect(shippingState({ cancelled: true, trackings: [{ carrier: null, code: "x" }], shippedAt: null }).label).toBe("Cancelado");
-    expect(shippingState({ cancelled: false, trackings: [{ carrier: null, code: "x" }], shippedAt: null }).label).toBe("Enviado pelo vendedor");
-    expect(shippingState({ cancelled: false, trackings: [], shippedAt: "2026-10-16T10:00:00.000Z" }).label).toBe("Enviado, sem rastreio ainda");
-    expect(shippingState({ cancelled: false, trackings: [], shippedAt: null }).label).toBe("Aguardando envio do vendedor");
+describe("Compras: atualizar agora", () => {
+  it("pede a atualização ao eBay, mostra o resultado e recarrega; sem permissão não há botão", async () => {
+    const user = userEvent.setup();
+    const get = mock();
+    const post = vi.spyOn(api, "post").mockResolvedValue({ data: { resultados: [{ conexao: "Existence", status: "ACTIVE", criados: 2, atualizados: 1 }] } });
+    renderWithProviders(<PurchasesPage />, { permissions: [...perms, "INTEGRACAO_MARKETPLACE_SINCRONIZAR"] });
+    await screen.findByRole("button", { name: /Abrir lote/ });
+    expect(screen.getByText(/atualizado agora há pouco/)).toBeTruthy();
+    const before = callsTo(get, LOTS).length;
+    await user.click(screen.getByRole("button", { name: "Atualizar agora" }));
+    expect(await screen.findByText("Existence: 2 com novidades, 1 sem mudança")).toBeTruthy();
+    expect(post.mock.calls[0]![0]).toBe("/integrations/marketplaces/purchases/refresh");
+    await waitFor(() => expect(callsTo(get, LOTS).length).toBeGreaterThan(before));
+  });
+
+  it("explica quando a autorização do eBay expirou", async () => {
+    const user = userEvent.setup();
+    mock();
+    vi.spyOn(api, "post").mockResolvedValue({ data: { resultados: [{ conexao: "impetit", status: "AUTHORIZATION_EXPIRED", erro: "marketplace_authorization_expired" }] } });
+    renderWithProviders(<PurchasesPage />, { permissions: [...perms, "INTEGRACAO_MARKETPLACE_SINCRONIZAR"] });
+    await user.click(await screen.findByRole("button", { name: "Atualizar agora" }));
+    expect(await screen.findByText(/impetit: autorização do eBay expirada: reconecte em Integrações/)).toBeTruthy();
+  });
+
+  it("sem permissão de sincronizar, não mostra o botão", async () => {
+    mock();
+    renderWithProviders(<PurchasesPage />, { permissions: perms });
+    await screen.findByRole("button", { name: /Abrir lote/ });
+    expect(screen.queryByRole("button", { name: "Atualizar agora" })).toBeNull();
   });
 });

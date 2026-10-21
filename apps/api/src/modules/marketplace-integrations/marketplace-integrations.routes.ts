@@ -19,6 +19,8 @@ import {
 import * as service from "./marketplace-integrations.service";
 import * as ebayOAuth from "./ebay-oauth.service";
 import * as purchasesFeed from "./purchases-feed.service";
+import * as purchaseStage from "./purchase-stage.service";
+import { refreshForUser } from "./marketplace-refresh";
 
 export const marketplaceIntegrationsRouter = Router();
 marketplaceIntegrationsRouter.use(requireAuth);
@@ -56,6 +58,31 @@ marketplaceIntegrationsRouter.get(
   requirePermission("BUYER_INGESTION_VISUALIZAR"),
   wrap(async (request, response) => {
     response.json(await purchasesFeed.purchasesFeed(identity(request), purchasesFeed.feedQuerySchema.parse(request.query)));
+  })
+);
+
+marketplaceIntegrationsRouter.get(
+  "/purchases/lots",
+  requirePermission("BUYER_INGESTION_VISUALIZAR"),
+  wrap(async (request, response) => {
+    response.json(await purchasesFeed.purchaseLots(identity(request), purchasesFeed.lotsQuerySchema.parse(request.query)));
+  })
+);
+
+// "Atualizar agora": consulta o eBay já, sem esperar a atualização automática.
+marketplaceIntegrationsRouter.post(
+  "/purchases/refresh",
+  requirePermission("INTEGRACAO_MARKETPLACE_SINCRONIZAR"),
+  wrap(async (request, response) => {
+    response.json({ resultados: await refreshForUser(identity(request)) });
+  })
+);
+
+marketplaceIntegrationsRouter.put(
+  "/purchases/stage",
+  requirePermission("BUYER_INGESTION_VISUALIZAR"),
+  wrap(async (request, response) => {
+    response.json(await purchaseStage.setPurchaseStage(identity(request), purchaseStage.stageSchema.parse(request.body)));
   })
 );
 

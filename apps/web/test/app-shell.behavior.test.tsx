@@ -14,7 +14,7 @@ import { renderWithProviders, testStores } from "./render";
 const routesInApp = [
   "/", "/operacao", "/checkpoints", "/categorias", "/produtos", "/fornecedores", "/compras", "/pedidos",
   "/logistica", "/estoque", "/financeiro", "/relatorios", "/vendas", "/compras/painel-mensal", "/compras/controle", "/integracoes",
-  "/compras/revisao", "/compras/fila", "/posicoes", "/compras/simulador", "/configuracoes"
+  "/compras/revisao", "/compras/fila", "/posicoes", "/compras/simulador", "/configuracoes", "/estoque/miami", "/estoque/brasil"
 ];
 
 beforeEach(() => vi.restoreAllMocks());
@@ -73,13 +73,19 @@ describe("navegação agrupada", () => {
     }
   });
 
-  it("troca a loja ativa pelos botões; \"Todos\" fica indisponível sem visão consolidada", async () => {
+  it("troca a loja ativa pelos botões; \"Todos\" liga a visão de todas as lojas sem perder a loja ativa", async () => {
     const user = userEvent.setup();
     renderWithProviders(<Shell>Conteúdo</Shell>);
-    expect((screen.getByRole("button", { name: "Todas as lojas (indisponível)" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("button", { name: "Todas as lojas" }).getAttribute("aria-pressed")).toBe("false");
     expect(screen.getByRole("button", { name: "Dronz" }).getAttribute("aria-pressed")).toBe("true");
+    await user.click(screen.getByRole("button", { name: "Todas as lojas" }));
+    expect(useAuthStore.getState().viewAll).toBe(true);
+    expect(useAuthStore.getState().activeStoreId).toBe(testStores[0]!.id);
+    expect(screen.getByRole("button", { name: "Todas as lojas" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Dronz" }).getAttribute("aria-pressed")).toBe("false");
     await user.click(screen.getByRole("button", { name: "Gooder" }));
     expect(useAuthStore.getState().activeStoreId).toBe(testStores[1]!.id);
+    expect(useAuthStore.getState().viewAll).toBe(false);
     expect(screen.getByRole("button", { name: "Gooder" }).getAttribute("aria-pressed")).toBe("true");
   });
 });
