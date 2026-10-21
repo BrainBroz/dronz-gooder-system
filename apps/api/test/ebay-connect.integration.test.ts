@@ -193,4 +193,24 @@ describe("conectar conta eBay pela tela", () => {
     expect([mine(store, pessoal.id), mine(store, loja.id)]).toEqual([0, 1]);
     expect([mine(all, pessoal.id), mine(all, loja.id)]).toEqual([1, 1]);
   });
+
+  it("conta compartilhada entre lojas (como a Existence): não pede loja, fica sem loja fixa e exige uma das duas formas", async () => {
+    const ctx = await setup();
+    const post = (body: object) => request(ctx.app).post("/integrations/marketplaces/ebay/connect-intents").set(ctx.auth).send(body);
+    expect((await post({})).status).toBe(400);
+    expect((await post({ lojaId: ctx.gooder.id, compartilhada: true })).status).toBe(400);
+    const started = await post({ compartilhada: true, nome: "Existence" });
+    expect(started.status).toBe(200);
+    const state = new URL(started.body.url).searchParams.get("state")!;
+    ebayReplies("ok");
+    const done = await request(ctx.app).post("/integrations/marketplaces/ebay/connections/complete").set(ctx.auth).send({ state, code: "codigo-qualquer-valido" });
+    expect(done.status).toBe(201);
+    expect(done.body).toMatchObject({ nome: "Existence", lojaId: null, status: "ACTIVE" });
+    expect(await prisma.conexaoMarketplace.findFirstOrThrow({ where: { identificadorExterno: EBAY_USER } })).toMatchObject({ escopo: "SHARED", lojaPermitidaId: null, status: "ACTIVE" });
+    // Reconectar a mesma conta como de uma loja é recusado: o escopo não muda por engano.
+    const asStore = await intent(ctx, ctx.gooder.id);
+    const clash = await request(ctx.app).post("/integrations/marketplaces/ebay/connections/complete").set(ctx.auth).send({ state: asStore.state, code: "codigo-qualquer-valido" });
+    expect(clash.status).toBe(409);
+    expect(clash.body.error).toBe("ebay_account_other_store");
+  });
 });

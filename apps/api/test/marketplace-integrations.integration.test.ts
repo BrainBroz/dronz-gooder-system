@@ -2922,7 +2922,7 @@ describe("Compras: lista com foto, loja da conta e atribuição automática", ()
     });
   const feed = async (fixture: Awaited<ReturnType<typeof connectionFixture>>, query = "") =>
     (await request(fixture.app).get(`/integrations/marketplaces/purchases${query}`).set(bearer(fixture.token))).body as {
-      items: { candidateId: string; version: number; status: string; store: { slug: string } | null; purpose: string; trackings: { carrier: string; code: string }[]; shippedAt: string | null; externalStatus: string; canApprove: boolean; items: { title: string; quantity: number; unitPrice: number; imageUrl: string | null }[] }[];
+      items: { candidateId: string; version: number; status: string; store: { slug: string } | null; purpose: string; trackings: { carrier: string; code: string }[]; shippedAt: string | null; externalStatus: string; canApprove: boolean; canChangeStore: boolean; items: { title: string; quantity: number; unitPrice: number; imageUrl: string | null }[] }[];
       total: number;
     };
   const approve = (fixture: Awaited<ReturnType<typeof connectionFixture>>, candidateId: string, expectedVersion: number) =>
@@ -2962,6 +2962,36 @@ describe("Compras: lista com foto, loja da conta e atribuição automática", ()
     expect((await approve(fixture, recorded.candidateId!, row.version)).status).toBe(200);
     const assignments = await prisma.atribuicaoCompraItem.count({ where: { itemExterno: { compraImportada: { buyerCandidate: { id: recorded.candidateId! } } } } });
     expect(assignments).toBe(0);
+  });
+
+  it("conta compartilhada: a loja da compra confirmada muda com um clique; conta dedicada e compra não confirmada não deixam", async () => {
+    const shared = await connectionFixture("EBAY", "SHARED", `loja-sh-${randomUUID().slice(0, 6)}`);
+    const recorded = await record(shared, ebayOrder(`batch8-LOJASH-${randomUUID().slice(0, 6)}`));
+    const rowOf = async (fixture: typeof shared, id: string) => (await feed(fixture, "?limit=100")).items.find((item) => item.candidateId === id)!;
+    const put = (fixture: typeof shared, id: string, lojaId: string) =>
+      request(fixture.app).put(`/integrations/marketplaces/purchases/${id}/store`).set(bearer(fixture.token)).send({ lojaId });
+    const assigned = async (id: string) =>
+      (await prisma.atribuicaoCompraItem.findMany({ where: { itemExterno: { compraImportada: { buyerCandidate: { id } } } }, include: { loja: true } })).map((entry) => [entry.loja.slug, entry.quantidade]);
+
+    expect((await put(shared, recorded.candidateId!, shared.dronz.id)).body.error).toBe("purchase_not_confirmed");
+    const pending = await rowOf(shared, recorded.candidateId!);
+    expect((await approve(shared, recorded.candidateId!, pending.version)).status).toBe(200);
+    expect(await rowOf(shared, recorded.candidateId!)).toMatchObject({ store: null, canChangeStore: true });
+
+    expect((await put(shared, recorded.candidateId!, shared.dronz.id)).status).toBe(200);
+    expect(await rowOf(shared, recorded.candidateId!)).toMatchObject({ store: { slug: "dronz" }, canChangeStore: true });
+    expect(await assigned(recorded.candidateId!)).toEqual([["dronz", 2]]);
+    expect((await put(shared, recorded.candidateId!, shared.gooder.id)).status).toBe(200);
+    expect(await rowOf(shared, recorded.candidateId!)).toMatchObject({ store: { slug: "gooder" } });
+    expect(await assigned(recorded.candidateId!)).toEqual([["gooder", 2]]);
+
+    const dedicated = await connectionFixture("EBAY", "STORE_DEDICATED", `loja-ded-${randomUUID().slice(0, 6)}`, "gooder");
+    const fixed = await record(dedicated, ebayOrder(`batch8-LOJADED-${randomUUID().slice(0, 6)}`));
+    const fixedRow = await rowOf(dedicated, fixed.candidateId!);
+    expect((await approve(dedicated, fixed.candidateId!, fixedRow.version)).status).toBe(200);
+    expect(await rowOf(dedicated, fixed.candidateId!)).toMatchObject({ store: { slug: "gooder" }, canChangeStore: false });
+    expect((await put(dedicated, fixed.candidateId!, dedicated.dronz.id)).body.error).toBe("marketplace_connection_store_mismatch");
+    expect(await assigned(fixed.candidateId!)).toEqual([["gooder", 2]]);
   });
 
   it("busca a foto principal de cada anúncio no eBay, guarda uma vez e não deixa a falha de um derrubar os outros", async () => {

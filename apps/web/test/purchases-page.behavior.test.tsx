@@ -9,7 +9,7 @@ beforeEach(() => vi.restoreAllMocks());
 
 const base = {
   version: 3, status: "AGUARDANDO_APROVACAO", orderedAt: "2026-10-15T12:00:00.000Z", currency: "USD", total: 900, externalStatus: "Completed", cancelled: false,
-  account: "impetit", purpose: "LOJA", shippedAt: null, canApprove: true
+  account: "impetit", purpose: "LOJA", shippedAt: null, canApprove: true, canChangeStore: false
 };
 const rows = [
   { ...base, candidateId: "c1", orderId: "13-15311-66647", store: { id: "store-gooder", slug: "gooder", nome: "Gooder" },
@@ -85,6 +85,29 @@ describe("Compras (lista)", () => {
       const last = get.mock.calls.filter(([url]) => url === "/integrations/marketplaces/purchases").at(-1)![1] as { params: Record<string, unknown> };
       expect(last.params).toMatchObject({ finalidade: "PESSOAL", status: "APROVADA", lojaId: "store-gooder" });
     });
+  });
+});
+
+describe("Compras: trocar a loja com um clique", () => {
+  it("mostra as bolinhas das lojas só onde pode trocar e atribui a compra inteira à loja clicada", async () => {
+    const user = userEvent.setup();
+    const shared = { ...base, candidateId: "s1", orderId: "SHARED-1", status: "APROVADA", canApprove: false, canChangeStore: true, store: null, trackings: [],
+      items: [{ title: "Mac mini M4", quantity: 1, cancelledQuantity: 0, unitPrice: 600, currency: "USD", imageUrl: null }] };
+    const fixed = { ...shared, candidateId: "s2", orderId: "FIXED-2", canChangeStore: false, store: { id: "store-gooder", slug: "gooder", nome: "Gooder" },
+      items: [{ title: "Echo Dot", quantity: 1, cancelledQuantity: 0, unitPrice: 30, currency: "USD", imageUrl: null }] };
+    vi.spyOn(api, "get").mockImplementation(async (url) => {
+      if (url === "/integrations/marketplaces/purchases") return { data: { items: [shared, fixed], total: 2 } };
+      return { data: { items: [], page: 1, limit: 100, total: 0 } };
+    });
+    const put = vi.spyOn(api, "put").mockResolvedValue({ data: {} });
+    renderWithProviders(<PurchasesPage />, { permissions: [...perms, "COMPRAS_IMPORTADAS_ATRIBUIR"] });
+    await screen.findByText("Mac mini M4");
+    expect(screen.getByText("Escolha a loja")).toBeTruthy();
+    // só a compra de conta compartilhada tem as bolinhas; a da conta dedicada mostra a etiqueta fixa
+    expect(screen.getAllByRole("button", { name: "Atribuir à Dronz" })).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Atribuir à Dronz" }));
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
+    expect(put.mock.calls[0]!.slice(0, 2)).toEqual(["/integrations/marketplaces/purchases/s1/store", { lojaId: "store-dronz" }]);
   });
 });
 

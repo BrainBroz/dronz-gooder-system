@@ -59,6 +59,14 @@ marketplaceIntegrationsRouter.get(
   })
 );
 
+marketplaceIntegrationsRouter.put(
+  "/purchases/:candidateId/store",
+  requirePermission("COMPRAS_IMPORTADAS_ATRIBUIR"),
+  wrap(async (request, response) => {
+    response.json(await purchasesFeed.setPurchaseStore(identity(request), z.string().cuid().parse(request.params.candidateId), purchasesFeed.storeSchema.parse(request.body)));
+  })
+);
+
 marketplaceIntegrationsRouter.get(
   "/buyer-candidates",
   requirePermission("BUYER_INGESTION_VISUALIZAR"),

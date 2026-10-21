@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Alert, Avatar, Box, Button, Chip, Stack, ToggleButton, ToggleButtonGroup, Typography } from "@mui/material";
+import { Alert, Avatar, Box, Button, Chip, Stack, ToggleButton, ToggleButtonGroup, Tooltip, Typography } from "@mui/material";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { authHeader, useAuthStore } from "../stores/auth";
@@ -28,6 +28,7 @@ type PurchaseRow = {
   trackings: { carrier: string | null; code: string }[];
   items: { title: string; quantity: number; cancelledQuantity: number; unitPrice: number; currency: string; imageUrl: string | null }[];
   canApprove: boolean;
+  canChangeStore: boolean;
 };
 type Feed = { items: PurchaseRow[]; total: number };
 
@@ -42,14 +43,41 @@ export function shippingState(row: Pick<PurchaseRow, "cancelled" | "trackings" |
   return { label: row.shippedAt ? "Enviado, sem rastreio ainda" : "Aguardando envio do vendedor", color: "warning" };
 }
 
-function PurchaseCard({ row, onConfirm, busy }: { row: PurchaseRow; onConfirm: () => void; busy: boolean }) {
+/** Bolinhas coloridas, uma por loja: a da loja atual fica cheia; clicar atribui a compra inteira àquela loja. */
+function StorePicker({ row, stores, onPick, busy }: { row: PurchaseRow; stores: { id: string; slug: string; nome: string }[]; onPick: (lojaId: string) => void; busy: boolean }) {
+  return (
+    <Stack direction="row" gap={0.75} alignItems="center" role="group" aria-label="Loja da compra">
+      {stores.map((store) => {
+        const selected = row.store?.id === store.id;
+        return (
+          <Tooltip key={store.id} title={selected ? `Loja: ${store.nome}` : `Atribuir à ${store.nome}`}>
+            <span>
+              <Box
+                component="button" type="button" disabled={busy || selected} aria-label={`Atribuir à ${store.nome}`} aria-pressed={selected}
+                onClick={() => onPick(store.id)}
+                sx={{ width: 22, height: 22, borderRadius: "50%", border: `2px solid ${storeColor(store.slug)}`, bgcolor: selected ? storeColor(store.slug) : "transparent", cursor: selected ? "default" : "pointer", p: 0 }}
+              />
+            </span>
+          </Tooltip>
+        );
+      })}
+      <Typography variant="caption" sx={{ color: row.store ? storeTextColor(row.store.slug) : "warning.main", fontWeight: 600 }}>
+        {row.store ? row.store.nome : "Escolha a loja"}
+      </Typography>
+    </Stack>
+  );
+}
+
+function PurchaseCard({ row, stores, onConfirm, onPickStore, busy }: { row: PurchaseRow; stores: { id: string; slug: string; nome: string }[]; onConfirm: () => void; onPickStore: (lojaId: string) => void; busy: boolean }) {
   const shipping = shippingState(row);
   const confirmed = row.status === "APROVADA";
   return (
     <ContentCard>
       <Stack gap={1.5}>
         <Stack direction="row" gap={1} alignItems="center" flexWrap="wrap">
-          {row.store ? (
+          {row.canChangeStore ? (
+            <StorePicker row={row} stores={stores} onPick={onPickStore} busy={busy} />
+          ) : row.store ? (
             <Chip
               size="small" variant="outlined" label={row.store.nome}
               sx={{ color: storeTextColor(row.store.slug), borderColor: storeColor(row.store.slug), fontWeight: 600 }}
@@ -114,6 +142,11 @@ export function PurchasesPage() {
     },
     onSettled: () => client.invalidateQueries({ queryKey: ["purchases-feed"] })
   });
+  const changeStore = useMutation({
+    mutationFn: async ({ candidateId, lojaId }: { candidateId: string; lojaId: string }) =>
+      (await api.put(`${BASE}/purchases/${candidateId}/store`, { lojaId }, { headers: authHeader() })).data,
+    onSettled: () => client.invalidateQueries({ queryKey: ["purchases-feed"] })
+  });
   const rows = feed.data?.items ?? [];
   const toConfirm = rows.filter((row) => row.canApprove);
   return (
@@ -145,11 +178,15 @@ export function PurchasesPage() {
           )}
         </Stack>
         {confirm.isError && <Alert severity="error">{extractErrorMessage(confirm.error)}</Alert>}
+        {changeStore.isError && <Alert severity="error">{extractErrorMessage(changeStore.error)}</Alert>}
         {feed.isLoading && <Typography role="status">Carregando…</Typography>}
         {feed.isError && <Alert severity="error">Não foi possível carregar as compras.</Alert>}
         {feed.data && rows.length === 0 && <Typography>Nenhuma compra neste filtro.</Typography>}
         {rows.map((row) => (
-          <PurchaseCard key={row.candidateId} row={row} busy={confirm.isPending} onConfirm={() => confirm.mutate([row])} />
+          <PurchaseCard
+            key={row.candidateId} row={row} stores={stores} busy={confirm.isPending || changeStore.isPending}
+            onConfirm={() => confirm.mutate([row])} onPickStore={(lojaId) => changeStore.mutate({ candidateId: row.candidateId, lojaId })}
+          />
         ))}
       </Stack>
       <NewPurchaseDrawer open={newOpen} onClose={() => setNewOpen(false)} listItems={legacy.list.data?.items ?? []} />
