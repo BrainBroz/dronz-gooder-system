@@ -61,6 +61,11 @@ const EbayCallbackPage = React.lazy(() =>
     default: module.EbayCallbackPage
   }))
 );
+const ProductBasePage = React.lazy(() =>
+  import("./pages/ProductBasePage").then((module) => ({
+    default: module.ProductBasePage
+  }))
+);
 const LogisticsPage = React.lazy(() =>
   import("./pages/LogisticsPage").then((module) => ({
     default: module.LogisticsPage
@@ -315,6 +320,16 @@ export function AppRoutes() {
                 <AuthGate>
                   <Shell>
                     <ProductsPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/produtos-base"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <ProductBasePage />
                   </Shell>
                 </AuthGate>
               }

@@ -1,6 +1,7 @@
 export const catalogQueryKeys = {
   categories: (storeId: string | null) => ["categories", storeId] as const,
-  products: (storeId: string | null) => ["products", storeId] as const
+  products: (storeId: string | null) => ["products", storeId] as const,
+  productBases: ["product-bases"] as const
 };
 export const purchasingQueryKeys = {
   suppliers: (storeId: string | null) => ["suppliers", storeId] as const,

@@ -267,6 +267,20 @@ model ProjecaoOperacional {
   @@index([lojaId, entity, updatedAt])
 }
 
+/// Cadastro geral de produtos que já trabalhamos, compartilhado pelas lojas (exceção deliberada ao lojaId:
+/// não é estoque nem preço). Guarda o histórico de peso para estimar frete e reconhecer produtos nas compras.
+model ProdutoBase {
+  id        String   @id @default(cuid())
+  nome      String
+  slug      String   @unique
+  categoria String?
+  pesoKg    Decimal? @db.Decimal(10, 3)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([categoria])
+}
+
 model Categoria {
   id        String   @id @default(cuid())
   lojaId    String
