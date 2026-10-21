@@ -51,6 +51,16 @@ const ProductsPage = React.lazy(() =>
     default: module.ProductsPage
   }))
 );
+const MarketplaceConnectionsPage = React.lazy(() =>
+  import("./pages/MarketplaceConnectionsPage").then((module) => ({
+    default: module.MarketplaceConnectionsPage
+  }))
+);
+const EbayCallbackPage = React.lazy(() =>
+  import("./pages/MarketplaceConnectionsPage").then((module) => ({
+    default: module.EbayCallbackPage
+  }))
+);
 const ProductBasePage = React.lazy(() =>
   import("./pages/ProductBasePage").then((module) => ({
     default: module.ProductBasePage
@@ -59,6 +69,11 @@ const ProductBasePage = React.lazy(() =>
 const PurchaseControlPage = React.lazy(() =>
   import("./pages/PurchaseControlPage").then((module) => ({
     default: module.PurchaseControlPage
+  }))
+);
+const PurchasesPage = React.lazy(() =>
+  import("./pages/PurchasesPage").then((module) => ({
+    default: module.PurchasesPage
   }))
 );
 const LogisticsPage = React.lazy(() =>
@@ -344,6 +359,16 @@ export function AppRoutes() {
               element={
                 <AuthGate>
                   <Shell>
+                    <PurchasesPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/compras/fila"
+              element={
+                <AuthGate>
+                  <Shell>
                     <PurchaseQueuePage />
                   </Shell>
                 </AuthGate>
@@ -415,6 +440,26 @@ export function AppRoutes() {
                 <AuthGate>
                   <Shell>
                     <PurchaseControlPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/integracoes"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <MarketplaceConnectionsPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/integracoes/ebay/callback"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <EbayCallbackPage />
                   </Shell>
                 </AuthGate>
               }

@@ -74,6 +74,17 @@ describe("Revisão buyer", () => {
     expect(config.headers["idempotency-key"]).toMatch(/.{8,}/);
   });
 
+  it("separa as compras da loja das compras pessoais pela aba", async () => {
+    const user = userEvent.setup();
+    const get = mockReads([candidate()]);
+    renderWithProviders(<BuyerReviewPage />, { permissions: ["BUYER_INGESTION_VISUALIZAR"] });
+    await screen.findByText(/Confiança 45\/100/);
+    const listCalls = () => get.mock.calls.filter(([url]) => url === "/integrations/marketplaces/buyer-candidates").map(([, config]) => (config as { params: { finalidade?: string } }).params.finalidade);
+    expect(listCalls()).toEqual(["LOJA"]);
+    await user.click(screen.getByRole("button", { name: "Compras pessoais" }));
+    await waitFor(() => expect(listCalls()).toContain("PESSOAL"));
+  });
+
   it("divergência só se resolve com motivo e escolha de evidência", async () => {
     const user = userEvent.setup();
     mockReads(

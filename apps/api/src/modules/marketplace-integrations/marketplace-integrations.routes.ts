@@ -17,6 +17,8 @@ import {
   syncHistorySchema
 } from "./marketplace-integrations.schemas";
 import * as service from "./marketplace-integrations.service";
+import * as ebayOAuth from "./ebay-oauth.service";
+import * as purchasesFeed from "./purchases-feed.service";
 
 export const marketplaceIntegrationsRouter = Router();
 marketplaceIntegrationsRouter.use(requireAuth);
@@ -47,6 +49,23 @@ const identity = (request: AuthenticatedRequest) => {
 
 const idempotencyKey = (request: AuthenticatedRequest) =>
   z.string().min(8).max(200).parse(request.headers["idempotency-key"]);
+
+// Lista de compras para a tela (foto, itens, loja, rastreio e status do eBay), uma linha por pedido.
+marketplaceIntegrationsRouter.get(
+  "/purchases",
+  requirePermission("BUYER_INGESTION_VISUALIZAR"),
+  wrap(async (request, response) => {
+    response.json(await purchasesFeed.purchasesFeed(identity(request), purchasesFeed.feedQuerySchema.parse(request.query)));
+  })
+);
+
+marketplaceIntegrationsRouter.put(
+  "/purchases/:candidateId/store",
+  requirePermission("COMPRAS_IMPORTADAS_ATRIBUIR"),
+  wrap(async (request, response) => {
+    response.json(await purchasesFeed.setPurchaseStore(identity(request), z.string().cuid().parse(request.params.candidateId), purchasesFeed.storeSchema.parse(request.body)));
+  })
+);
 
 marketplaceIntegrationsRouter.get(
   "/buyer-candidates",
@@ -146,6 +165,23 @@ marketplaceIntegrationsRouter.post(
       buyerConflictResolutionSchema.parse(request.body),
       idempotencyKey(request)
     ));
+  })
+);
+
+// Conectar conta eBay pela tela: 1) URL de consentimento; 2) conclusão com o código devolvido pelo eBay.
+marketplaceIntegrationsRouter.post(
+  "/ebay/connect-intents",
+  requirePermission("INTEGRACAO_MARKETPLACE_GERENCIAR"),
+  wrap(async (request, response) => {
+    response.json(ebayOAuth.startConnection(identity(request), ebayOAuth.startSchema.parse(request.body)));
+  })
+);
+
+marketplaceIntegrationsRouter.post(
+  "/ebay/connections/complete",
+  requirePermission("INTEGRACAO_MARKETPLACE_GERENCIAR"),
+  wrap(async (request, response) => {
+    response.status(201).json(await ebayOAuth.completeConnection(identity(request), ebayOAuth.completeSchema.parse(request.body)));
   })
 );
 

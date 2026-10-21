@@ -29,12 +29,13 @@ export const appNavigation: readonly AppNavGroup[] = [
     label: "Compras",
     icon: "cart",
     children: [
-      { label: "Fila de compras", path: "/compras", permissions: ["COMPRAS_IMPORTADAS_VISUALIZAR"] },
-      { label: "Revisão de compras", path: "/compras/revisao", permissions: ["BUYER_INGESTION_VISUALIZAR"] },
-      { label: "Pedidos operacionais", path: "/pedidos", permissions: ["PEDIDOS_COMPRA_VISUALIZAR"] },
+      { label: "Compras", path: "/compras", permissions: ["BUYER_INGESTION_VISUALIZAR", "COMPRAS_IMPORTADAS_VISUALIZAR"] },
       { label: "Controle de compras", path: "/compras/controle", permissions: ["COMPRAS_IMPORTADAS_VISUALIZAR"] },
       { label: "Painel mensal", path: "/compras/painel-mensal", permissions: ["COMPRAS_IMPORTADAS_VISUALIZAR"] },
-      { label: "Simulador de compra", path: "/compras/simulador", permissions: ["SIMULACAO_VISUALIZAR", "SIMULACAO_GERENCIAR"] }
+      { label: "Simulador de compra", path: "/compras/simulador", permissions: ["SIMULACAO_VISUALIZAR", "SIMULACAO_GERENCIAR"] },
+      { label: "Avançado: divergências", path: "/compras/revisao", permissions: ["BUYER_INGESTION_VISUALIZAR"] },
+      { label: "Avançado: fila técnica", path: "/compras/fila", permissions: ["COMPRAS_IMPORTADAS_VISUALIZAR"] },
+      { label: "Avançado: pedidos operacionais", path: "/pedidos", permissions: ["PEDIDOS_COMPRA_VISUALIZAR"] }
     ]
   },
   {
@@ -86,6 +87,7 @@ export const appNavigation: readonly AppNavGroup[] = [
     children: [
       { label: "Categorias", path: "/categorias", permissions: ["CATALOGO_VISUALIZAR"] },
       { label: "Fornecedores", path: "/fornecedores", permissions: ["CATALOGO_VISUALIZAR"] },
+      { label: "Integrações", path: "/integracoes", permissions: ["INTEGRACAO_MARKETPLACE_VISUALIZAR", "INTEGRACAO_MARKETPLACE_GERENCIAR"] },
       { label: "Configurações econômicas", path: "/configuracoes", permissions: ["FINANCEIRO_VISUALIZAR", "SIMULACAO_VISUALIZAR"] }
     ]
   }

@@ -22,6 +22,7 @@ import {
   translateMarketplaceAdapterError
 } from "./marketplace-integrations.adapters";
 import { hasDuplicateOfficialLineId, isStructuredApiSource, recordMarketplaceEvidence } from "./buyer-evidence.service";
+import { ensureItemImages } from "./item-images";
 import {
   capabilitySchema,
   marketplaceOrderPageSchema,
@@ -139,6 +140,7 @@ function connectionReadModel(
     region: connection.regiao,
     marketplace: connection.marketplace,
     scope: connection.escopo,
+    purpose: connection.finalidade,
     allowedStore: connection.lojaPermitida
       ? {
           id: connection.lojaPermitida.id,
@@ -408,7 +410,14 @@ export async function listBuyerCandidates(
 ) {
   if (!hasPermission(identity, "BUYER_INGESTION_VISUALIZAR"))
     throw new AppError(403, "insufficient_permission");
-  const where = { status: input.status };
+  const where = {
+    status: input.status,
+    ...(input.finalidade === "PESSOAL"
+      ? { contaExterna: { conexoes: { some: { finalidade: "PESSOAL" as const } } } }
+      : input.finalidade === "LOJA"
+        ? { contaExterna: { conexoes: { none: { finalidade: "PESSOAL" as const } } } }
+        : {})
+  };
   return prisma.$transaction(async (tx) => {
     const [items, total] = await Promise.all([
       tx.buyerPurchaseCandidate.findMany({
@@ -427,7 +436,7 @@ export async function listBuyerCandidates(
       entity: "BuyerPurchaseCandidate",
       entityId: "LIST",
       correlationId: randomUUID(),
-      after: { status: input.status ?? null, page: input.page, limit: input.limit, total },
+      after: { status: input.status ?? null, finalidade: input.finalidade ?? null, page: input.page, limit: input.limit, total },
       origin: ORIGIN
     });
     return {
@@ -733,6 +742,29 @@ export async function decideBuyerCandidate(
           data: { conexaoMarketplaceId: candidate.currentEvidence.conexaoMarketplaceId }
         });
         await persistShippingData(tx, purchaseId, order);
+        // Conta dedicada a uma loja: as compras já nascem atribuídas a ela (sem passo manual).
+        const owner = candidate.currentEvidence.conexaoMarketplaceId
+          ? await tx.conexaoMarketplace.findUnique({
+              where: { id: candidate.currentEvidence.conexaoMarketplaceId },
+              select: { escopo: true, lojaPermitidaId: true }
+            })
+          : null;
+        if (owner?.escopo === "STORE_DEDICATED" && owner.lojaPermitidaId) {
+          const lines = await tx.compraImportadaItem.findMany({ where: { compraImportadaId: purchaseId } });
+          for (const line of lines) {
+            const eligible = line.quantidade - line.quantidadeCancelada - line.quantidadeReembolsada;
+            if (eligible > 0)
+              await tx.atribuicaoCompraItem.create({
+                data: {
+                  itemExternoId: line.id,
+                  lojaId: owner.lojaPermitidaId,
+                  quantidade: eligible,
+                  motivo: "Atribuição automática: conta eBay dedicada à loja",
+                  atribuidoPorId: identity.user.id
+                }
+              });
+          }
+        }
       }
       const decided = await tx.buyerPurchaseCandidate.update({
         where: { id },
@@ -913,7 +945,8 @@ async function importNormalizedOrder(
   connection: ConnectionWithRelations,
   order: NormalizedMarketplaceOrder,
   correlationId: string,
-  idempotencyKey: string
+  idempotencyKey: string,
+  autoConfirm = false
 ) {
   const evidence = await recordMarketplaceEvidence({
     provider: connection.provider,
@@ -924,6 +957,21 @@ async function importNormalizedOrder(
     correlationId,
     idempotencyKey
   });
+  // Decisão do PO (21/10/2026): compra do eBay já entra confirmada. Pedido cancelado, divergente ou sem permissão
+  // de aprovar do usuário que sincroniza fica "a confirmar" e segue o fluxo normal de revisão.
+  const candidateId = "candidateId" in evidence ? evidence.candidateId : undefined;
+  if (autoConfirm && !order.cancelled && candidateId) {
+    const candidate = await prisma.buyerPurchaseCandidate.findUnique({
+      where: { id: candidateId },
+      select: { id: true, status: true, version: true, compraImportadaId: true }
+    });
+    if (candidate?.status === "AGUARDANDO_APROVACAO" && !candidate.compraImportadaId)
+      try {
+        await decideBuyerCandidate(identity, candidate.id, { decision: "APROVAR", expectedVersion: candidate.version }, `auto-confirmar-${candidate.id}-v${candidate.version}`);
+      } catch {
+        // continua a confirmar: a revisão manual cobre o que a confirmação automática não pôde fazer
+      }
+  }
   return { created: evidence.created };
 }
 
@@ -977,6 +1025,18 @@ async function executePages(
     } catch (error) {
       throw translateMarketplaceAdapterError(error);
     }
+    await ensureItemImages(
+      adapter,
+      {
+        id: connection.id,
+        provider: connection.provider,
+        externalIdentifier: connection.identificadorExterno,
+        region: connection.regiao ?? undefined,
+        marketplace: connection.marketplace ?? undefined,
+        secretReference: connection.secretReference ?? undefined
+      },
+      page.orders
+    );
     let pageFailed = false;
     for (const order of page.orders) {
       counts.processed += 1;
@@ -985,7 +1045,8 @@ async function executePages(
         for (let attempt = 0; ; attempt += 1) {
           try {
             result = await importNormalizedOrder(
-              identity, connection, order, correlationId, idempotencyKey
+              identity, connection, order, correlationId, idempotencyKey,
+              adapter.autoConfirmPurchases === true
             );
             break;
           } catch (error) {
@@ -1177,7 +1238,11 @@ export async function syncConnection(
       });
       await tx.conexaoMarketplace.update({
         where: { id: connection.id },
-        data: { ultimoErroSanitizado: errorCode }
+        // Autorização recusada pelo marketplace: a conexão passa a pedir reconexão em vez de parecer ativa.
+        data: {
+          ultimoErroSanitizado: errorCode,
+          ...(errorCode === "marketplace_authorization_expired" ? { status: "AUTHORIZATION_EXPIRED" as const } : {})
+        }
       });
       await audit(tx, {
         usuarioId: identity.user.id,
