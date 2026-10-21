@@ -13,6 +13,7 @@ import { authHeader, useAuthStore } from "../stores/auth";
 import { catalogQueryKeys } from "../queryKeys";
 import type { Product } from "../types/catalog";
 import { useCategories, useProducts } from "../hooks/useCatalog";
+import { Link as RouterLink } from "react-router-dom";
 import { formatSalePrice } from "../utils/formatting";
 
 const productSchema = z.object({
@@ -231,7 +232,14 @@ export function ProductsPage() {
   return (
     <PageContainer>
       <Stack gap={{ xs: 2.5, md: 3.5 }}>
-        <PageHeader title="Produtos" />
+        <PageHeader
+          title="Produtos"
+          actions={
+            <Button component={RouterLink} to="/produtos-base" variant="outlined">
+              Base de produtos
+            </Button>
+          }
+        />
         {loading && <Typography>Carregando...</Typography>}
         {error && <Typography color="error.main">{error}</Typography>}
         <Stack direction="row" gap={2} flexWrap="wrap">

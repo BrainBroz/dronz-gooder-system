@@ -6,6 +6,7 @@ import { errorHandler } from "./middlewares/error";
 import { authRouter } from "./modules/auth/auth.routes";
 import { categoriesRouter } from "./modules/categories/categories.routes";
 import { productsRouter } from "./modules/products/products.routes";
+import { productBasesRouter } from "./modules/product-bases/product-bases.routes";
 import { suppliersRouter } from "./modules/suppliers/suppliers.routes";
 import { purchaseOrdersRouter } from "./modules/purchase-orders/purchase-orders.routes";
 import { logisticsRouter } from "./modules/logistics/logistics.routes";
@@ -31,6 +32,7 @@ export function createApp() {
   app.use("/auth", authRouter);
   app.use("/categories", categoriesRouter);
   app.use("/products", productsRouter);
+  app.use("/product-bases", productBasesRouter);
   app.use("/suppliers", suppliersRouter);
   app.use("/purchase-orders", purchaseOrdersRouter);
   app.use("/logistics", logisticsRouter);

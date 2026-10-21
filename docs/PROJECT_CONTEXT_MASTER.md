@@ -157,6 +157,7 @@ Implementado e coberto por testes:
 - vendas com baixa por lote/custo em snapshot e indicadores derivados com controle financeiro.
 - reconstrução visual Etapa 1 (referência Bolt aprovada): shell com navegação agrupada por permissão, seletor de loja e dashboard sobre read models reais (`docs/UX_OPERATIONAL_FOUNDATION_V1.md`, seção 20); demais telas ainda sem redesenho.
 - configurações econômicas versionadas por loja, captura automática diária do dólar comercial (Yahoo Finance) mais R$ 0,20 e simulador de compra com busca de produto, composição de custos e venda, snapshot e sem efeitos operacionais (`docs/CONFIGURACOES_E_SIMULADOR_COMPRA_V1.md`); o número de parcelas do plano de 16% aguarda confirmação do PO.
+- base geral de produtos (`ProdutoBase`, decisão do PO em 20/10/2026): cadastro **sem loja**, compartilhado por Dronz e Gooder (exceção deliberada ao `lojaId`; não é estoque nem preço), com nome, categoria e peso em kg. Tela `/produtos-base` (busca, categoria, "só sem peso", peso editável) e importação de Excel (`exceljs` no navegador) ou CSV com conferência prévia (`POST /product-bases/import?dryRun=true`): completa o peso de quem não tem e nunca troca peso existente. Serve para achar o produto, reaproveitar o peso (frete da caixa) e reconhecer produtos importados do eBay; o vínculo com `Produto` por loja e com as compras virá nas telas de compras.
 
 Não implementado:
 
