@@ -58,6 +58,9 @@ export type PurchaseRow = {
   }[];
   /** Todos os rastreios da compra constam como entregues no Parcel. */
   entregue: boolean;
+  /** Compra cadastrada à mão: o rastreio dela é editado aqui. */
+  manual: boolean;
+  canEditTracking: boolean;
   items: {
     title: string;
     quantity: number;
@@ -166,12 +169,35 @@ function DeliveryChip({ entrega }: { entrega: Delivery }) {
   );
 }
 
-export function TrackingCell({ row }: { row: PurchaseRow }) {
+export function TrackingCell({
+  row,
+  onEdit
+}: {
+  row: PurchaseRow;
+  onEdit?: (row: PurchaseRow) => void;
+}) {
+  const edit = onEdit && row.canEditTracking && !row.cancelled && (
+    <Button
+      size="small"
+      variant="text"
+      onClick={() => onEdit(row)}
+      sx={{ alignSelf: "flex-start", minWidth: 0, px: 0.5, fontSize: 11 }}
+    >
+      {row.trackings.length ? "Editar rastreio" : "Adicionar rastreio"}
+    </Button>
+  );
   if (!row.trackings.length)
     return (
-      <Typography variant="body2" color="text.secondary">
-        {row.cancelled ? "—" : "Vendedor ainda não enviou"}
-      </Typography>
+      <Stack gap={0.25}>
+        <Typography variant="body2" color="text.secondary">
+          {row.cancelled
+            ? "—"
+            : row.manual
+              ? "Sem rastreio ainda"
+              : "Vendedor ainda não enviou"}
+        </Typography>
+        {edit}
+      </Stack>
     );
   return (
     <Stack gap={0.5}>
@@ -204,6 +230,7 @@ export function TrackingCell({ row }: { row: PurchaseRow }) {
           {tracking.entrega && <DeliveryChip entrega={tracking.entrega} />}
         </Stack>
       ))}
+      {edit}
     </Stack>
   );
 }
