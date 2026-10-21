@@ -339,3 +339,15 @@ Esses itens não invalidam o onboarding. Regras de produto que afetem o pipeline
 4. Sincronização manual autorizada (`POST /integrations/marketplaces/connections/:id/sync-runs`); cada pedido entra como evidência e candidato aguardando aprovação humana.
 
 Continuam abertos: secret manager de produção, frequência automática, validação com mais de uma página em dados reais e retenção/minimização de XML (o adapter não persiste XML bruto).
+
+### Conexão de contas pela tela (20/10/2026)
+
+O consentimento OAuth passou a ser feito pela aplicação, uma conta eBay por loja (`ConexaoMarketplace` `STORE_DEDICATED`):
+
+1. `POST /integrations/marketplaces/ebay/connect-intents` (`INTEGRACAO_MARKETPLACE_GERENCIAR`): devolve a URL de consentimento (`auth.ebay.com/oauth2/authorize`, `prompt=login` para poder escolher outra conta, escopo `api_scope`). O `state` é um JWT de 15 minutos com a loja e o usuário.
+2. O eBay devolve o usuário ao "accepted URL" do RuName com `code` e `state`. A página `/integracoes/ebay/callback` chama `POST /integrations/marketplaces/ebay/connections/complete`; se o eBay devolver a outro endereço, a tela aceita o endereço completo colado ("Concluir conexão").
+3. A API troca o código (uso único), descobre a conta por `GetUser`, cria ou reautoriza a conexão (a mesma conta eBay não serve a duas lojas) e grava o refresh token fora do banco.
+
+Credenciais do aplicativo: `MARKETPLACE_EBAY_APP` (JSON com `clientId`, `clientSecret`, `ruName`), só no ambiente. Refresh tokens: `file:ebay-<id>`, arquivo 0600 em `~/.dronz-gooder/secrets` (ou `MARKETPLACE_SECRET_DIR`); o provider junta token e credenciais do aplicativo na leitura. **Arquivo local serve a desenvolvimento; produção exige secret manager** (decisão em aberto, item de "Continuam abertos").
+
+**Conta pessoal (20/10/2026).** Cada conexão tem `finalidade` (`LOJA` ou `PESSOAL`). Conta pessoal continua dedicada a uma loja (a Gooder) e as compras seguem o mesmo fluxo de aprovação e atribuição, mas aparecem à parte na revisão (`GET /buyer-candidates?finalidade=PESSOAL`; `LOJA` exclui as pessoais). Contas sem conexão, como evidências manuais, contam como `LOJA`. Um mesmo aplicativo eBay (App ID) serve a todas as contas; cada conta autoriza com o seu próprio login.

@@ -409,6 +409,12 @@ enum EscopoConexaoMarketplace {
   STORE_DEDICATED
 }
 
+/// Para que serve a conta conectada: compras da loja ou compras pessoais (revisadas à parte, mas atribuíveis à loja).
+enum FinalidadeConexao {
+  LOJA
+  PESSOAL
+}
+
 enum StatusConexaoMarketplace {
   NOT_CONFIGURED
   ACTIVE
@@ -583,6 +589,7 @@ model ConexaoMarketplace {
   regiao                String?
   marketplace           String?
   escopo                EscopoConexaoMarketplace
+  finalidade            FinalidadeConexao        @default(LOJA)
   lojaPermitidaId       String?
   secretReference       String?
   status                StatusConexaoMarketplace @default(NOT_CONFIGURED)

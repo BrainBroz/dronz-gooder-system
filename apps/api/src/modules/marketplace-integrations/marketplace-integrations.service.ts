@@ -139,6 +139,7 @@ function connectionReadModel(
     region: connection.regiao,
     marketplace: connection.marketplace,
     scope: connection.escopo,
+    purpose: connection.finalidade,
     allowedStore: connection.lojaPermitida
       ? {
           id: connection.lojaPermitida.id,
@@ -408,7 +409,14 @@ export async function listBuyerCandidates(
 ) {
   if (!hasPermission(identity, "BUYER_INGESTION_VISUALIZAR"))
     throw new AppError(403, "insufficient_permission");
-  const where = { status: input.status };
+  const where = {
+    status: input.status,
+    ...(input.finalidade === "PESSOAL"
+      ? { contaExterna: { conexoes: { some: { finalidade: "PESSOAL" as const } } } }
+      : input.finalidade === "LOJA"
+        ? { contaExterna: { conexoes: { none: { finalidade: "PESSOAL" as const } } } }
+        : {})
+  };
   return prisma.$transaction(async (tx) => {
     const [items, total] = await Promise.all([
       tx.buyerPurchaseCandidate.findMany({
@@ -427,7 +435,7 @@ export async function listBuyerCandidates(
       entity: "BuyerPurchaseCandidate",
       entityId: "LIST",
       correlationId: randomUUID(),
-      after: { status: input.status ?? null, page: input.page, limit: input.limit, total },
+      after: { status: input.status ?? null, finalidade: input.finalidade ?? null, page: input.page, limit: input.limit, total },
       origin: ORIGIN
     });
     return {

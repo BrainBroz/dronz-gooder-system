@@ -185,6 +185,7 @@ export type MarketplaceConnectionReadModel = {
   region: string | null;
   marketplace: string | null;
   scope: "SHARED" | "STORE_DEDICATED";
+  purpose: "LOJA" | "PESSOAL";
   allowedStore: { id: string; slug: string; name: string } | null;
   status:
     | "NOT_CONFIGURED"

@@ -17,6 +17,7 @@ import {
   syncHistorySchema
 } from "./marketplace-integrations.schemas";
 import * as service from "./marketplace-integrations.service";
+import * as ebayOAuth from "./ebay-oauth.service";
 
 export const marketplaceIntegrationsRouter = Router();
 marketplaceIntegrationsRouter.use(requireAuth);
@@ -146,6 +147,23 @@ marketplaceIntegrationsRouter.post(
       buyerConflictResolutionSchema.parse(request.body),
       idempotencyKey(request)
     ));
+  })
+);
+
+// Conectar conta eBay pela tela: 1) URL de consentimento; 2) conclusão com o código devolvido pelo eBay.
+marketplaceIntegrationsRouter.post(
+  "/ebay/connect-intents",
+  requirePermission("INTEGRACAO_MARKETPLACE_GERENCIAR"),
+  wrap(async (request, response) => {
+    response.json(ebayOAuth.startConnection(identity(request), ebayOAuth.startSchema.parse(request.body)));
+  })
+);
+
+marketplaceIntegrationsRouter.post(
+  "/ebay/connections/complete",
+  requirePermission("INTEGRACAO_MARKETPLACE_GERENCIAR"),
+  wrap(async (request, response) => {
+    response.status(201).json(await ebayOAuth.completeConnection(identity(request), ebayOAuth.completeSchema.parse(request.body)));
   })
 );
 

@@ -85,6 +85,7 @@ export const appNavigation: readonly AppNavGroup[] = [
     children: [
       { label: "Categorias", path: "/categorias", permissions: ["CATALOGO_VISUALIZAR"] },
       { label: "Fornecedores", path: "/fornecedores", permissions: ["CATALOGO_VISUALIZAR"] },
+      { label: "Integrações", path: "/integracoes", permissions: ["INTEGRACAO_MARKETPLACE_VISUALIZAR", "INTEGRACAO_MARKETPLACE_GERENCIAR"] },
       { label: "Configurações econômicas", path: "/configuracoes", permissions: ["FINANCEIRO_VISUALIZAR", "SIMULACAO_VISUALIZAR"] }
     ]
   }

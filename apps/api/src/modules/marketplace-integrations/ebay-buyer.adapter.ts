@@ -19,10 +19,10 @@ import {
 } from "./xml";
 
 // EBAY_BUYER_SPECIFICATION_V1: Trading API GetOrders com OrderRole=Buyer, nível 1423 validado no gate.
-const TRADING_URL = "https://api.ebay.com/ws/api.dll";
-const TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token";
-const COMPATIBILITY_LEVEL = "1423";
-const SCOPE = "https://api.ebay.com/oauth/api_scope";
+export const TRADING_URL = "https://api.ebay.com/ws/api.dll";
+export const TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token";
+export const COMPATIBILITY_LEVEL = "1423";
+export const SCOPE = "https://api.ebay.com/oauth/api_scope";
 const MAX_WINDOW_MS = 30 * 86_400_000;
 // Sobreposição ao abrir a próxima janela: capta mudanças gravadas com atraso no eBay.
 const OVERLAP_MS = 60 * 60_000;
