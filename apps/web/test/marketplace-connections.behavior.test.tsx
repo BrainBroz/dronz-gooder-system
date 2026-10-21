@@ -13,7 +13,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 const connection = {
-  id: "c1", provider: "EBAY", name: "Conta Gooder", account: { name: "gooder_buyer", externalIdentifier: "gooder_buyer" },
+  id: "c1", provider: "EBAY", name: "Conta Gooder", purpose: "LOJA", account: { name: "gooder_buyer", externalIdentifier: "gooder_buyer" },
   allowedStore: { id: "store-gooder", name: "Gooder" }, status: "ACTIVE", authorizationExpiresAt: "2028-04-01T12:00:00.000Z", lastSyncAt: null, lastError: null,
   allowedActions: ["SYNC_CONNECTION"]
 };
@@ -54,14 +54,21 @@ describe("Integrações: contas do eBay por loja", () => {
     renderWithProviders(<MarketplaceConnectionsPage />, { permissions: perms });
     const dronz = (await screen.findByRole("heading", { name: "Dronz" })).closest("div")!.parentElement!;
     await user.type(within(dronz).getByLabelText("Nome da conta (opcional)"), "Conta Dronz");
+    await user.click(within(dronz).getByLabelText("Conta pessoal (compras pessoais)"));
     await user.click(within(dronz).getByRole("button", { name: "Conectar conta eBay" }));
     await waitFor(() => expect(assign).toHaveBeenCalledWith("https://auth.ebay.com/oauth2/authorize?state=abc"));
-    expect(post.mock.calls[0]!.slice(0, 2)).toEqual(["/integrations/marketplaces/ebay/connect-intents", { lojaId: "store-dronz", nome: "Conta Dronz" }]);
+    expect(post.mock.calls[0]!.slice(0, 2)).toEqual(["/integrations/marketplaces/ebay/connect-intents", { lojaId: "store-dronz", nome: "Conta Dronz", finalidade: "PESSOAL" }]);
 
     await user.type(within(dronz).getByLabelText(/Cole aqui o endereço/), "https://painel.exemplo.com/cb?code=abc&state=def");
     await user.click(within(dronz).getByRole("button", { name: "Concluir conexão" }));
     await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
     expect(post.mock.calls[1]!.slice(0, 2)).toEqual(["/integrations/marketplaces/ebay/connections/complete", { redirectedUrl: "https://painel.exemplo.com/cb?code=abc&state=def", state: "abc" }]);
+  });
+
+  it("marca a conta pessoal na lista", async () => {
+    vi.spyOn(api, "get").mockResolvedValue({ data: [{ ...connection, id: "c2", name: "Minha conta", purpose: "PESSOAL" }] });
+    renderWithProviders(<MarketplaceConnectionsPage />, { permissions: perms });
+    expect(await screen.findByText("Pessoal")).toBeTruthy();
   });
 
   it("sem permissão de gerenciar não há botão de conectar", async () => {

@@ -78,7 +78,9 @@ export const buyerCandidateListSchema = z.object({
   status: z.enum([
     "AGUARDANDO_APROVACAO", "COM_DIVERGENCIA", "APROVADA",
     "REJEITADA", "CANCELADA"
-  ]).optional()
+  ]).optional(),
+  // LOJA exclui as contas pessoais; PESSOAL mostra só elas. Sem o filtro, vem tudo.
+  finalidade: z.enum(["LOJA", "PESSOAL"]).optional()
 }).strict();
 
 export const buyerConflictResolutionSchema = z.object({

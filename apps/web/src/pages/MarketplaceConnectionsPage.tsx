@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link as RouterLink, useSearchParams } from "react-router-dom";
-import { Box, Button, Chip, Stack, TextField, Typography } from "@mui/material";
+import { Box, Button, Checkbox, Chip, FormControlLabel, Stack, TextField, Typography } from "@mui/material";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { authHeader, useAuthStore } from "../stores/auth";
@@ -14,6 +14,7 @@ type Connection = {
   id: string;
   provider: string;
   name: string;
+  purpose: "LOJA" | "PESSOAL";
   account: { name: string; externalIdentifier: string };
   allowedStore: { id: string; name: string } | null;
   status: "NOT_CONFIGURED" | "ACTIVE" | "INACTIVE" | "AUTHORIZATION_EXPIRED" | "ERROR";
@@ -53,9 +54,10 @@ function StoreConnections({ store, connections, canManage }: { store: { id: stri
   const client = useQueryClient();
   const headers = authHeader();
   const [label, setLabel] = useState("");
+  const [personal, setPersonal] = useState(false);
   const [pasted, setPasted] = useState("");
   const start = useMutation({
-    mutationFn: async () => (await api.post(`${BASE}/ebay/connect-intents`, { lojaId: store.id, nome: label.trim() || undefined }, { headers })).data as { url: string },
+    mutationFn: async () => (await api.post(`${BASE}/ebay/connect-intents`, { lojaId: store.id, nome: label.trim() || undefined, finalidade: personal ? "PESSOAL" : "LOJA" }, { headers })).data as { url: string },
     onSuccess: (data) => {
       rememberState(data.url);
       window.location.assign(data.url);
@@ -82,7 +84,7 @@ function StoreConnections({ store, connections, canManage }: { store: { id: stri
           return (
             <Stack key={connection.id} direction={{ xs: "column", sm: "row" }} gap={1.5} alignItems={{ sm: "center" }} justifyContent="space-between" sx={{ borderTop: 1, borderColor: "divider", pt: 1.5 }}>
               <Box>
-                <Typography>{connection.name} <Typography component="span" variant="body2" color="text.secondary">· conta eBay {connection.account.externalIdentifier}</Typography></Typography>
+                <Typography component="div">{connection.name} {connection.purpose === "PESSOAL" && <Chip size="small" label="Pessoal" sx={{ mr: 0.5 }} />}<Typography component="span" variant="body2" color="text.secondary">· conta eBay {connection.account.externalIdentifier}</Typography></Typography>
                 <Typography variant="body2" color="text.secondary">
                   Autorização vale até {when(connection.authorizationExpiresAt)} · última sincronização {when(connection.lastSyncAt)}
                 </Typography>
@@ -102,6 +104,7 @@ function StoreConnections({ store, connections, canManage }: { store: { id: stri
           <Stack gap={1.5} sx={{ borderTop: 1, borderColor: "divider", pt: 1.5 }}>
             <Stack direction={{ xs: "column", sm: "row" }} gap={1.5}>
               <TextField size="small" label="Nome da conta (opcional)" value={label} onChange={(event) => setLabel(event.target.value)} sx={{ minWidth: 240 }} />
+              <FormControlLabel control={<Checkbox checked={personal} onChange={(event) => setPersonal(event.target.checked)} />} label="Conta pessoal (compras pessoais)" />
               <Button variant="contained" disabled={start.isPending} onClick={() => start.mutate()}>Conectar conta eBay</Button>
             </Stack>
             <MutationStatus mutation={start} loadingMessage="Abrindo o eBay…" successMessage="Redirecionando para o eBay…" />

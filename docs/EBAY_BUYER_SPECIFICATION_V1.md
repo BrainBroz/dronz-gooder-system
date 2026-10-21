@@ -349,3 +349,5 @@ O consentimento OAuth passou a ser feito pela aplicação, uma conta eBay por lo
 3. A API troca o código (uso único), descobre a conta por `GetUser`, cria ou reautoriza a conexão (a mesma conta eBay não serve a duas lojas) e grava o refresh token fora do banco.
 
 Credenciais do aplicativo: `MARKETPLACE_EBAY_APP` (JSON com `clientId`, `clientSecret`, `ruName`), só no ambiente. Refresh tokens: `file:ebay-<id>`, arquivo 0600 em `~/.dronz-gooder/secrets` (ou `MARKETPLACE_SECRET_DIR`); o provider junta token e credenciais do aplicativo na leitura. **Arquivo local serve a desenvolvimento; produção exige secret manager** (decisão em aberto, item de "Continuam abertos").
+
+**Conta pessoal (20/10/2026).** Cada conexão tem `finalidade` (`LOJA` ou `PESSOAL`). Conta pessoal continua dedicada a uma loja (a Gooder) e as compras seguem o mesmo fluxo de aprovação e atribuição, mas aparecem à parte na revisão (`GET /buyer-candidates?finalidade=PESSOAL`; `LOJA` exclui as pessoais). Contas sem conexão, como evidências manuais, contam como `LOJA`. Um mesmo aplicativo eBay (App ID) serve a todas as contas; cada conta autoriza com o seu próprio login.

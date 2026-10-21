@@ -20,6 +20,7 @@ const prisma = new PrismaClient();
 let createApp: typeof import("../src/app").createApp;
 let secretProvider: typeof import("../src/modules/marketplace-integrations/marketplace-integrations.secrets").secretProvider;
 const EBAY_USER = "test-gooder-buyer";
+const EBAY_PERSONAL = "test-personal-buyer";
 beforeAll(async () => {
   ({ createApp } = await import("../src/app"));
   ({ secretProvider } = await import("../src/modules/marketplace-integrations/marketplace-integrations.secrets"));
@@ -27,8 +28,18 @@ beforeAll(async () => {
 afterEach(async () => {
   vi.restoreAllMocks();
   process.env.MARKETPLACE_EBAY_APP = JSON.stringify(APP);
-  await prisma.conexaoMarketplace.deleteMany({ where: { identificadorExterno: EBAY_USER } });
-  await prisma.contaExterna.deleteMany({ where: { identificadorExterno: EBAY_USER } });
+  const accounts = await prisma.contaExterna.findMany({ where: { identificadorExterno: { in: [EBAY_USER, EBAY_PERSONAL] } }, select: { id: true } });
+  const ids = accounts.map((account) => account.id);
+  const candidates = await prisma.buyerPurchaseCandidate.findMany({ where: { contaExternaId: { in: ids } }, select: { id: true } });
+  const candidateIds = candidates.map((c) => c.id);
+  await prisma.buyerReconciliationConflict.deleteMany({ where: { candidateId: { in: candidateIds } } });
+  await prisma.buyerApprovalDecision.deleteMany({ where: { candidateId: { in: candidateIds } } });
+  await prisma.buyerEvidenceLink.deleteMany({ where: { candidateId: { in: candidateIds } } });
+  await prisma.buyerPurchaseCandidate.deleteMany({ where: { id: { in: candidateIds } } });
+  await prisma.buyerEvidenceItem.deleteMany({ where: { evidence: { contaExternaId: { in: ids } } } });
+  await prisma.buyerEvidence.deleteMany({ where: { contaExternaId: { in: ids } } });
+  await prisma.conexaoMarketplace.deleteMany({ where: { contaExternaId: { in: ids } } });
+  await prisma.contaExterna.deleteMany({ where: { id: { in: ids } } });
 });
 afterAll(async () => {
   rmSync(secretDir, { recursive: true, force: true });
@@ -43,11 +54,11 @@ async function setup() {
   const auth = { Authorization: `Bearer ${login.body.accessToken}` };
   return { app, auth, dronz: stores.find((s) => s.slug === "dronz")!, gooder: stores.find((s) => s.slug === "gooder")! };
 }
-const intent = async (ctx: Awaited<ReturnType<typeof setup>>, lojaId: string, nome?: string) => {
-  const response = await request(ctx.app).post("/integrations/marketplaces/ebay/connect-intents").set(ctx.auth).send({ lojaId, nome });
+const intent = async (ctx: Awaited<ReturnType<typeof setup>>, lojaId: string, nome?: string, finalidade?: string) => {
+  const response = await request(ctx.app).post("/integrations/marketplaces/ebay/connect-intents").set(ctx.auth).send({ lojaId, nome, finalidade });
   return { response, state: response.status === 200 ? new URL(response.body.url).searchParams.get("state")! : "" };
 };
-const ebayReplies = (code: string, calls: { url: string; init: RequestInit }[] = []) =>
+const ebayReplies = (code: string, calls: { url: string; init: RequestInit }[] = [], user = EBAY_USER) =>
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
     calls.push({ url, init: init ?? {} });
@@ -55,7 +66,7 @@ const ebayReplies = (code: string, calls: { url: string; init: RequestInit }[] =
       return code === "ok"
         ? new Response(JSON.stringify({ access_token: "ACCESS-TOKEN", refresh_token: "REFRESH-TOKEN-SECRET", refresh_token_expires_in: 47304000, expires_in: 7200 }))
         : new Response("{}", { status: 400 });
-    return new Response(`<GetUserResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Success</Ack><User><UserID>${EBAY_USER}</UserID></User></GetUserResponse>`);
+    return new Response(`<GetUserResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Success</Ack><User><UserID>${user}</UserID></User></GetUserResponse>`);
   });
 
 describe("conectar conta eBay pela tela", () => {
@@ -133,5 +144,53 @@ describe("conectar conta eBay pela tela", () => {
     expect(rejected.body.error).toBe("ebay_code_rejected");
     expect(await prisma.conexaoMarketplace.count({ where: { identificadorExterno: EBAY_USER } })).toBe(0);
     expect((await request(ctx.app).post("/integrations/marketplaces/ebay/connections/complete").send({ state, code: "codigo-qualquer-valido" })).status).toBe(401);
+  });
+
+  it("conta pessoal: fica separada das compras da loja na revisão, mas atribuível à Gooder", async () => {
+    const ctx = await setup();
+    const connect = async (user: string, finalidade: "LOJA" | "PESSOAL") => {
+      vi.restoreAllMocks();
+      ebayReplies("ok", [], user);
+      const { state } = await intent(ctx, ctx.gooder.id, user, finalidade);
+      const done = await request(ctx.app).post("/integrations/marketplaces/ebay/connections/complete").set(ctx.auth).send({ state, code: "codigo-qualquer-valido" });
+      expect(done.status).toBe(201);
+      expect(done.body.finalidade).toBe(finalidade);
+      return prisma.contaExterna.findFirstOrThrow({ where: { identificadorExterno: user } });
+    };
+    const loja = await connect(EBAY_USER, "LOJA");
+    const pessoal = await connect(EBAY_PERSONAL, "PESSOAL");
+    const row = await prisma.conexaoMarketplace.findFirstOrThrow({ where: { contaExternaId: pessoal.id } });
+    expect(row).toMatchObject({ finalidade: "PESSOAL", lojaPermitidaId: ctx.gooder.id, escopo: "STORE_DEDICATED" });
+    const listed = await request(ctx.app).get("/integrations/marketplaces/connections").set(ctx.auth).query({ provider: "EBAY", lojaId: ctx.gooder.id });
+    expect(listed.body.filter((c: { externalIdentifier: string }) => c.externalIdentifier.startsWith("test-")).map((c: { purpose: string }) => c.purpose).sort()).toEqual(["LOJA", "PESSOAL"]);
+
+    // Uma compra em cada conta; a revisão separa por finalidade.
+    const now = new Date().toISOString();
+    for (const account of [loja, pessoal]) {
+      const evidence = await request(ctx.app)
+        .post("/integrations/marketplaces/buyer-evidence")
+        .set(ctx.auth)
+        .set("idempotency-key", `ebay-${account.id}`)
+        .send({
+          source: "MANUAL", provider: "EBAY", contaExternaId: account.id, externalEvidenceId: `ev-${account.id}`,
+          order: {
+            externalOrderId: `TEST-${account.id}`, reference: `TEST-${account.id}`, orderedAt: now, updatedAt: now, currency: "USD", cancelled: false,
+            items: [{ title: "Item de teste", quantity: 1, cancelledQuantity: 0, refundedQuantity: 0, unitPrice: 10, currency: "USD" }], shipments: []
+          }
+        });
+      expect(evidence.status).toBe(201);
+    }
+    const accountOf = async (finalidade?: string) => {
+      const response = await request(ctx.app).get("/integrations/marketplaces/buyer-candidates").set(ctx.auth).query({ limit: 100, ...(finalidade ? { finalidade } : {}) });
+      expect(response.status).toBe(200);
+      return (response.body.items as { externalOrderId?: string; reference?: string; contaExternaId?: string }[]).map((item) => JSON.stringify(item));
+    };
+    const mine = (items: string[], id: string) => items.filter((item) => item.includes(id)).length;
+    const personal = await accountOf("PESSOAL");
+    const store = await accountOf("LOJA");
+    const all = await accountOf();
+    expect([mine(personal, pessoal.id), mine(personal, loja.id)]).toEqual([1, 0]);
+    expect([mine(store, pessoal.id), mine(store, loja.id)]).toEqual([0, 1]);
+    expect([mine(all, pessoal.id), mine(all, loja.id)]).toEqual([1, 1]);
   });
 });

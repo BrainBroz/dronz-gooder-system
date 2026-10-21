@@ -14,7 +14,9 @@ const AUTHORIZE_URL = "https://auth.ebay.com/oauth2/authorize";
 const ORIGIN = "API_MARKETPLACE_INTEGRATIONS";
 const STATE_AUDIENCE = "ebay-connect";
 
-export const startSchema = z.object({ lojaId: z.string().cuid(), nome: z.string().trim().min(1).max(200).optional() }).strict();
+export const startSchema = z
+  .object({ lojaId: z.string().cuid(), nome: z.string().trim().min(1).max(200).optional(), finalidade: z.enum(["LOJA", "PESSOAL"]).default("LOJA") })
+  .strict();
 export const completeSchema = z
   .object({ state: z.string().min(10).max(4000).optional(), code: z.string().min(10).max(4000).optional(), redirectedUrl: z.string().url().max(8000).optional() })
   .strict()
@@ -31,16 +33,16 @@ const app = () => {
 export function startConnection(identity: AuthIdentity, input: z.infer<typeof startSchema>) {
   if (!hasStore(identity, input.lojaId)) throw new AppError(403, "marketplace_connection_store_mismatch");
   const credentials = app();
-  const state = jwt.sign({ lojaId: input.lojaId, nome: input.nome ?? null, uid: identity.user.id }, env.JWT_ACCESS_SECRET, { audience: STATE_AUDIENCE, expiresIn: "15m" });
+  const state = jwt.sign({ lojaId: input.lojaId, nome: input.nome ?? null, finalidade: input.finalidade, uid: identity.user.id }, env.JWT_ACCESS_SECRET, { audience: STATE_AUDIENCE, expiresIn: "15m" });
   const query = new URLSearchParams({ client_id: credentials.clientId, response_type: "code", redirect_uri: credentials.ruName, scope: SCOPE, state, prompt: "login" });
   return { url: `${AUTHORIZE_URL}?${query.toString()}`, validoPorMinutos: 15 };
 }
 
 function readState(identity: AuthIdentity, state: string | undefined) {
   try {
-    const payload = jwt.verify(state ?? "", env.JWT_ACCESS_SECRET, { audience: STATE_AUDIENCE }) as { lojaId?: string; nome?: string | null; uid?: string };
+    const payload = jwt.verify(state ?? "", env.JWT_ACCESS_SECRET, { audience: STATE_AUDIENCE }) as { lojaId?: string; nome?: string | null; finalidade?: string; uid?: string };
     if (!payload.lojaId || payload.uid !== identity.user.id || !hasStore(identity, payload.lojaId)) throw new Error("mismatch");
-    return { lojaId: payload.lojaId, nome: payload.nome ?? null };
+    return { lojaId: payload.lojaId, nome: payload.nome ?? null, finalidade: payload.finalidade === "PESSOAL" ? ("PESSOAL" as const) : ("LOJA" as const) };
   } catch {
     throw new AppError(400, "ebay_state_invalid");
   }
@@ -112,7 +114,7 @@ export async function completeConnection(identity: AuthIdentity, input: z.infer<
     const existing = await tx.conexaoMarketplace.findFirst({ where: { OR: [{ contaExternaId: account.id }, { provider: "EBAY", identificadorExterno: ebayUserId }] } });
     if (existing && existing.lojaPermitidaId !== state.lojaId) throw new AppError(409, "ebay_account_other_store");
     const connection = existing
-      ? await tx.conexaoMarketplace.update({ where: { id: existing.id }, data: { status: "NOT_CONFIGURED", ultimoErroSanitizado: null, version: { increment: 1 } } })
+      ? await tx.conexaoMarketplace.update({ where: { id: existing.id }, data: { status: "NOT_CONFIGURED", finalidade: state.finalidade, ultimoErroSanitizado: null, version: { increment: 1 } } })
       : await tx.conexaoMarketplace.create({
           data: {
             provider: "EBAY",
@@ -121,6 +123,7 @@ export async function completeConnection(identity: AuthIdentity, input: z.infer<
             identificadorExterno: ebayUserId,
             marketplace: "EBAY_US",
             escopo: "STORE_DEDICATED",
+            finalidade: state.finalidade,
             lojaPermitidaId: state.lojaId,
             status: "NOT_CONFIGURED",
             capabilities: [...marketplaceAdapterRegistry.EBAY.capabilities],
@@ -153,5 +156,5 @@ export async function completeConnection(identity: AuthIdentity, input: z.infer<
     });
     return updated;
   });
-  return { id: connection.id, nome: connection.nome, ebayUserId, lojaId: state.lojaId, status: connection.status, autorizacaoExpiraEm: connection.autorizacaoExpiraEm };
+  return { id: connection.id, nome: connection.nome, ebayUserId, lojaId: state.lojaId, finalidade: connection.finalidade, status: connection.status, autorizacaoExpiraEm: connection.autorizacaoExpiraEm };
 }
