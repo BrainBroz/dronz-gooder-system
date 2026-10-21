@@ -30,6 +30,22 @@ const statusLabel: Record<Connection["status"], [string, "success" | "warning" |
   AUTHORIZATION_EXPIRED: ["Autorização expirada: reconecte", "warning"],
   ERROR: ["Com erro", "error"]
 };
+// O eBay pode devolver a página padrão sem o `state`; guardamos o da última tentativa para completar a conexão.
+const STATE_KEY = "ebay-connect-state";
+const rememberState = (url: string) => {
+  try {
+    localStorage.setItem(STATE_KEY, new URL(url).searchParams.get("state") ?? "");
+  } catch {
+    // sem armazenamento: o endereço colado precisa trazer o state
+  }
+};
+const rememberedState = () => {
+  try {
+    return localStorage.getItem(STATE_KEY) || undefined;
+  } catch {
+    return undefined;
+  }
+};
 const when = (value: string | null) => (value ? new Date(value).toLocaleString("pt-BR") : "—");
 export const callbackAddress = () => `${window.location.origin}/integracoes/ebay/callback`;
 
@@ -40,10 +56,13 @@ function StoreConnections({ store, connections, canManage }: { store: { id: stri
   const [pasted, setPasted] = useState("");
   const start = useMutation({
     mutationFn: async () => (await api.post(`${BASE}/ebay/connect-intents`, { lojaId: store.id, nome: label.trim() || undefined }, { headers })).data as { url: string },
-    onSuccess: (data) => window.location.assign(data.url)
+    onSuccess: (data) => {
+      rememberState(data.url);
+      window.location.assign(data.url);
+    }
   });
   const finish = useMutation({
-    mutationFn: async () => (await api.post(`${BASE}/ebay/connections/complete`, { redirectedUrl: pasted.trim() }, { headers })).data,
+    mutationFn: async () => (await api.post(`${BASE}/ebay/connections/complete`, { redirectedUrl: pasted.trim(), state: rememberedState() }, { headers })).data,
     onSuccess: () => {
       setPasted("");
       return client.invalidateQueries({ queryKey: ["marketplace-connections"] });

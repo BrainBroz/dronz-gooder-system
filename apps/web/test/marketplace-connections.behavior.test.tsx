@@ -6,7 +6,10 @@ import { api } from "../src/api/client";
 import { EbayCallbackPage, MarketplaceConnectionsPage } from "../src/pages/MarketplaceConnectionsPage";
 import { renderWithProviders } from "./render";
 
-beforeEach(() => vi.restoreAllMocks());
+beforeEach(() => {
+  vi.restoreAllMocks();
+  localStorage.clear();
+});
 afterEach(() => vi.unstubAllGlobals());
 
 const connection = {
@@ -58,7 +61,7 @@ describe("Integrações: contas do eBay por loja", () => {
     await user.type(within(dronz).getByLabelText(/Cole aqui o endereço/), "https://painel.exemplo.com/cb?code=abc&state=def");
     await user.click(within(dronz).getByRole("button", { name: "Concluir conexão" }));
     await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
-    expect(post.mock.calls[1]!.slice(0, 2)).toEqual(["/integrations/marketplaces/ebay/connections/complete", { redirectedUrl: "https://painel.exemplo.com/cb?code=abc&state=def" }]);
+    expect(post.mock.calls[1]!.slice(0, 2)).toEqual(["/integrations/marketplaces/ebay/connections/complete", { redirectedUrl: "https://painel.exemplo.com/cb?code=abc&state=def", state: "abc" }]);
   });
 
   it("sem permissão de gerenciar não há botão de conectar", async () => {
