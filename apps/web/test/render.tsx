@@ -13,6 +13,7 @@ type RenderOptions = {
   stores?: Store[];
   activeStoreId?: string | null;
   permissions?: string[];
+  viewAll?: boolean;
 };
 
 const testClients = new Set<QueryClient>();
@@ -60,7 +61,8 @@ export function renderWithProviders(ui: ReactElement, options: RenderOptions = {
     stores,
     permissions: options.permissions ?? ["CHECKPOINT_CORRIGIR"],
     activeStoreId:
-      options.activeStoreId === undefined ? (stores[0]?.id ?? null) : options.activeStoreId
+      options.activeStoreId === undefined ? (stores[0]?.id ?? null) : options.activeStoreId,
+    viewAll: options.viewAll ?? false
   });
   const client = createTestQueryClient();
   const result = render(

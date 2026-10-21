@@ -940,6 +940,38 @@ async function persistShippingData(
       }
 }
 
+/**
+ * Compra já confirmada que mudou no eBay: atualiza rastreio e status e, se o pedido foi cancelado, marca os itens
+ * como cancelados e solta a atribuição de loja (a menos que já tenham virado estoque).
+ */
+async function applyPostApprovalUpdate(identity: AuthIdentity, candidateId: string, order: NormalizedMarketplaceOrder) {
+  await prisma.$transaction(async (tx) => {
+    const candidate = await tx.buyerPurchaseCandidate.findUnique({ where: { id: candidateId }, select: { compraImportadaId: true } });
+    const purchaseId = candidate?.compraImportadaId;
+    if (!purchaseId) return;
+    await tx.compraImportada.update({ where: { id: purchaseId }, data: { statusExterno: order.externalStatus ?? null, version: { increment: 1 } } });
+    await persistShippingData(tx, purchaseId, order);
+    if (order.cancelled) {
+      const lines = await tx.compraImportadaItem.findMany({ where: { compraImportadaId: purchaseId } });
+      const stock = await tx.materializacaoCompra.findFirst({ where: { compraImportadaId: purchaseId }, select: { id: true } });
+      for (const line of lines) {
+        await tx.compraImportadaItem.update({ where: { id: line.id }, data: { quantidadeCancelada: line.quantidade, version: { increment: 1 } } });
+        if (!stock) await tx.atribuicaoCompraItem.deleteMany({ where: { itemExternoId: line.id } });
+      }
+    }
+    await audit(tx, {
+      usuarioId: identity.user.id,
+      permissionCode: "INTEGRACAO_MARKETPLACE_SINCRONIZAR",
+      action: order.cancelled ? "PURCHASE_CANCELLED_BY_MARKETPLACE" : "PURCHASE_AUTO_UPDATED",
+      entity: "CompraImportada",
+      entityId: purchaseId,
+      correlationId: candidateId,
+      after: { candidateId, externalStatus: order.externalStatus ?? null, cancelled: order.cancelled },
+      origin: ORIGIN
+    });
+  });
+}
+
 async function importNormalizedOrder(
   identity: AuthIdentity,
   connection: ConnectionWithRelations,
@@ -955,11 +987,14 @@ async function importNormalizedOrder(
     order,
     actorId: identity.user.id,
     correlationId,
-    idempotencyKey
+    idempotencyKey,
+    autoApplyPostApproval: autoConfirm
   });
   // Decisão do PO (21/10/2026): compra do eBay já entra confirmada. Pedido cancelado, divergente ou sem permissão
   // de aprovar do usuário que sincroniza fica "a confirmar" e segue o fluxo normal de revisão.
   const candidateId = "candidateId" in evidence ? evidence.candidateId : undefined;
+  if (candidateId && "postApprovalUpdate" in evidence && evidence.postApprovalUpdate)
+    await applyPostApprovalUpdate(identity, candidateId, order);
   if (autoConfirm && !order.cancelled && candidateId) {
     const candidate = await prisma.buyerPurchaseCandidate.findUnique({
       where: { id: candidateId },
