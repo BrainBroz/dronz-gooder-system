@@ -11,12 +11,19 @@ const filtersShape = {
   finalidade: z.enum(["LOJA", "PESSOAL"]).optional(),
   lojaId: z.string().cuid().optional()
 };
+export const purchasePhases = ["CANCELADO", "COMPRADO", "A_CAMINHO_MIAMI", "EM_MIAMI", "EM_REMESSA", "NO_BRASIL"] as const;
 export const lotsQuerySchema = z.object(filtersShape).strict();
 export const feedQuerySchema = z
   .object({
     ...filtersShape,
     mes: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional(),
     busca: z.string().trim().min(1).max(100).optional(),
+    // Fases separadas por vírgula (as telas de estoque pedem várias de uma vez).
+    fases: z
+      .string()
+      .transform((value) => value.split(",").filter(Boolean))
+      .pipe(z.array(z.enum(purchasePhases)).min(1))
+      .optional(),
     page: z.coerce.number().int().min(1).default(1),
     limit: z.coerce.number().int().min(1).max(300).default(50)
   })
@@ -29,11 +36,14 @@ const monthOf = (iso: string) => new Intl.DateTimeFormat("sv-SE", { timeZone: "A
 // shortcut: carrega até 2000 pedidos e filtra por mês, loja e busca em memória; vira consulta no banco se a base passar disso.
 const LOAD_LIMIT = 2000;
 
-/** Fase da compra para quem compra: cancelada, comprada (vendedor ainda não enviou) ou a caminho de Miami (vendedor enviou, com rastreio). */
-export type PurchasePhase = "CANCELADO" | "COMPRADO" | "A_CAMINHO_MIAMI";
+/**
+ * Fase da compra: cancelada; comprada (o vendedor ainda não enviou); a caminho de Miami (o vendedor enviou, com rastreio);
+ * e, depois de confirmadas pela equipe, em Miami, em remessa (a caminho do Brasil) e no Brasil.
+ */
+export type PurchasePhase = (typeof purchasePhases)[number];
 
 /** Carrega os pedidos visíveis ao usuário, já com loja efetiva (da conta dedicada ou da atribuição) e fase. Sem fotos. */
-async function loadRows(identity: AuthIdentity, input: { status?: string; finalidade?: string }) {
+export async function loadRows(identity: AuthIdentity, input: { status?: string; finalidade?: string }) {
   const allowedStores = identity.lojas.map((store) => store.id);
   const where = {
     ...(input.status ? { status: input.status as "APROVADA" } : {}),
@@ -60,12 +70,14 @@ async function loadRows(identity: AuthIdentity, input: { status?: string; finali
 
   // Compra confirmada de conta compartilhada: a loja é a das atribuições dos itens (uma só); pode ser trocada até virar estoque.
   const purchaseIds = parsed.map(({ candidate }) => candidate.compraImportadaId).filter((id): id is string => Boolean(id));
-  const [assignments, materialized] = purchaseIds.length
+  const [assignments, materialized, stages] = purchaseIds.length
     ? await Promise.all([
         prisma.atribuicaoCompraItem.findMany({ where: { itemExterno: { compraImportadaId: { in: purchaseIds } } }, include: { loja: true, itemExterno: { select: { compraImportadaId: true } } } }),
-        prisma.materializacaoCompra.findMany({ where: { compraImportadaId: { in: purchaseIds } }, select: { compraImportadaId: true } })
+        prisma.materializacaoCompra.findMany({ where: { compraImportadaId: { in: purchaseIds } }, select: { compraImportadaId: true } }),
+        prisma.etapaCompra.findMany({ where: { compraImportadaId: { in: purchaseIds } } })
       ])
-    : [[], []];
+    : [[], [], []];
+  const stageByPurchase = new Map(stages.map((stage) => [stage.compraImportadaId, stage]));
   const storesByPurchase = new Map<string, Map<string, { id: string; slug: string; nome: string }>>();
   for (const assignment of assignments) {
     const bucket = storesByPurchase.get(assignment.itemExterno.compraImportadaId) ?? new Map();
@@ -82,7 +94,8 @@ async function loadRows(identity: AuthIdentity, input: { status?: string; finali
       : null;
     const shipments = order.shipments;
     const trackings = shipments.flatMap((shipment) => shipment.packages.flatMap((pack) => pack.trackings.map((tracking) => ({ carrier: tracking.carrier ?? pack.carrier ?? null, code: tracking.code }))));
-    const phase: PurchasePhase = order.cancelled ? "CANCELADO" : trackings.length ? "A_CAMINHO_MIAMI" : "COMPRADO";
+    const stage = candidate.compraImportadaId ? (stageByPurchase.get(candidate.compraImportadaId) ?? null) : null;
+    const phase: PurchasePhase = order.cancelled ? "CANCELADO" : stage ? stage.etapa : trackings.length ? "A_CAMINHO_MIAMI" : "COMPRADO";
     return {
       provider: candidate.provider,
       candidateId: candidate.id,
@@ -101,6 +114,9 @@ async function loadRows(identity: AuthIdentity, input: { status?: string; finali
       // Troca de loja: só em compra confirmada de conta compartilhada e antes de virar estoque.
       canChangeStore: Boolean(candidate.compraImportadaId) && !dedicated && !lockedPurchases.has(candidate.compraImportadaId!) && can(identity, "COMPRAS_IMPORTADAS_ATRIBUIR"),
       shippedAt: shipments.map((shipment) => shipment.shippedAt).find(Boolean) ?? null,
+      etapa: stage
+        ? { chegouMiamiEm: stage.chegouMiamiEm?.toISOString() ?? null, remessa: stage.remessa, enviadaEm: stage.enviadaEm?.toISOString() ?? null, chegouBrasilEm: stage.chegouBrasilEm?.toISOString() ?? null }
+        : null,
       trackings,
       rawItems: order.items,
       canApprove: candidate.status === "AGUARDANDO_APROVACAO" && !candidate.compraImportadaId && can(identity, "BUYER_INGESTION_APROVAR")
@@ -135,6 +151,7 @@ export async function purchasesFeed(identity: AuthIdentity, input: z.infer<typeo
   const filtered = (await loadRows(identity, input))
     .filter((row) => !input.lojaId || row.store?.id === input.lojaId)
     .filter((row) => !input.mes || monthOf(row.orderedAt) === input.mes)
+    .filter((row) => !input.fases || input.fases.includes(row.fase))
     .filter((row) => !needle || row.orderId.toLowerCase().includes(needle) || row.rawItems.some((item) => item.title.toLowerCase().includes(needle)) || row.trackings.some((tracking) => tracking.code.toLowerCase().includes(needle)))
     .sort((a, b) => b.orderedAt.localeCompare(a.orderedAt));
   const page = filtered.slice((input.page - 1) * input.limit, input.page * input.limit);

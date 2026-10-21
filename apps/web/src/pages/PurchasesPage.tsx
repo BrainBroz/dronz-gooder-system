@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Alert, Avatar, Box, Button, Chip, MenuItem, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, ToggleButton, ToggleButtonGroup, Tooltip, Typography } from "@mui/material";
+import { Alert, Box, Button, Chip, MenuItem, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, ToggleButton, ToggleButtonGroup, Tooltip, Typography } from "@mui/material";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { authHeader, useAuthStore } from "../stores/auth";
@@ -11,90 +11,20 @@ import { NewPurchaseDrawer } from "../components/purchases/NewPurchaseDrawer";
 import { useUnifiedPurchases } from "../hooks/useUnifiedPurchases";
 import { extractErrorMessage } from "../utils/errors";
 import { storeColor, storeTextColor } from "../theme";
+import { ProductCell, StoreTag, TrackingCell, ago, money, phaseInfo, type Feed, type Phase, type PurchaseRow, type StoreRef } from "../components/purchases/purchaseParts";
 
-type Phase = "CANCELADO" | "COMPRADO" | "A_CAMINHO_MIAMI";
-type StoreRef = { id: string; slug: string; nome: string };
-type PurchaseRow = {
-  candidateId: string;
-  version: number;
-  status: "AGUARDANDO_APROVACAO" | "COM_DIVERGENCIA" | "APROVADA" | "REJEITADA" | "CANCELADA";
-  fase: Phase;
-  orderId: string;
-  orderedAt: string;
-  currency: string;
-  cancelled: boolean;
-  account: string;
-  purpose: "LOJA" | "PESSOAL";
-  store: StoreRef | null;
-  shippedAt: string | null;
-  trackings: { carrier: string | null; code: string }[];
-  items: { title: string; quantity: number; cancelledQuantity: number; unitPrice: number; currency: string; imageUrl: string | null }[];
-  canApprove: boolean;
-  canChangeStore: boolean;
-};
-type Feed = { items: PurchaseRow[]; total: number; atualizadoEm: string | null };
 type Lot = { mes: string; pedidos: number; unidades: number; custoUsd: number; cancelados: number; aConfirmar: number; semLoja: number; porLoja: Record<string, number> };
 type Lots = { lotes: Lot[]; semLojaTotal: number; atualizadoEm: string | null };
 type RefreshResult = { conexao: string; status: string; criados?: number; atualizados?: number; erro?: string };
 
 const BASE = "/integrations/marketplaces";
-const money = (value: number, currency = "USD") => value.toLocaleString("pt-BR", { style: "currency", currency });
-const day = (value: string) => new Date(value).toLocaleDateString("pt-BR");
 export const monthLabel = (mes: string) => new Date(`${mes}-15T12:00:00`).toLocaleDateString("pt-BR", { month: "long", year: "numeric" }).replace(" de ", " ").toUpperCase();
 
-/** Fase da compra: cancelada, comprada (o vendedor ainda não enviou) ou a caminho de Miami (o vendedor enviou, com rastreio). */
-export const phaseInfo: Record<Phase, { label: string; color: "error" | "warning" | "info" }> = {
-  CANCELADO: { label: "Cancelado", color: "error" },
-  COMPRADO: { label: "Comprado", color: "warning" },
-  A_CAMINHO_MIAMI: { label: "A caminho de Miami", color: "info" }
-};
-
-const ago = (iso: string) => {
-  const minutes = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60_000));
-  if (minutes < 1) return "agora há pouco";
-  if (minutes < 60) return `há ${minutes} min`;
-  return minutes < 1440 ? `há ${Math.round(minutes / 60)} h` : `há ${Math.round(minutes / 1440)} dias`;
-};
 const refreshProblem: Record<string, string> = {
   marketplace_authorization_expired: "autorização do eBay expirada: reconecte em Integrações",
   marketplace_provider_not_configured: "leitura do eBay desligada neste servidor",
   marketplace_sync_in_progress: "já estava atualizando"
 };
-
-function CopyTracking({ code }: { code: string }) {
-  const [copied, setCopied] = useState(false);
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(code);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // sem permissão da área de transferência: o código continua visível para copiar à mão
-    }
-  };
-  return (
-    <Tooltip title={copied ? "Copiado!" : "Copiar rastreio"}>
-      <Button size="small" variant="outlined" color={copied ? "success" : "inherit"} onClick={() => void copy()} aria-label={`Copiar rastreio ${code}`} sx={{ minWidth: 0, px: 0.75, py: 0.1, fontSize: 11 }}>
-        {copied ? "✓" : "Copiar"}
-      </Button>
-    </Tooltip>
-  );
-}
-
-function TrackingCell({ row }: { row: PurchaseRow }) {
-  if (!row.trackings.length) return <Typography variant="body2" color="text.secondary">{row.cancelled ? "—" : "Vendedor ainda não enviou"}</Typography>;
-  return (
-    <Stack gap={0.5}>
-      {row.trackings.map((tracking) => (
-        <Stack key={`${tracking.carrier}-${tracking.code}`} direction="row" gap={0.75} alignItems="center">
-          {tracking.carrier && <Chip size="small" label={tracking.carrier.toUpperCase()} sx={{ fontWeight: 700, fontSize: 10, height: 20, bgcolor: "action.selected" }} />}
-          <Typography variant="body2" sx={{ fontFamily: "monospace", fontSize: 12 }}>{tracking.code}</Typography>
-          <CopyTracking code={tracking.code} />
-        </Stack>
-      ))}
-    </Stack>
-  );
-}
 
 /** Empresa (loja) da compra, com a cor dela; em conta compartilhada, bolinhas coloridas para escolher a loja com um clique. */
 function StoreCell({ row, stores, onPick, busy }: { row: PurchaseRow; stores: StoreRef[]; onPick: (lojaId: string) => void; busy: boolean }) {
@@ -117,12 +47,7 @@ function StoreCell({ row, stores, onPick, busy }: { row: PurchaseRow; stores: St
         <Typography variant="caption" sx={{ color: row.store ? storeTextColor(row.store.slug) : "warning.main", fontWeight: 600 }}>{row.store ? row.store.nome : "Escolha a loja"}</Typography>
       </Stack>
     );
-  if (row.cancelled && !row.store) return <Typography variant="body2" color="text.secondary">—</Typography>;
-  return row.store ? (
-    <Chip size="small" variant="outlined" label={row.store.nome.toUpperCase()} sx={{ color: storeTextColor(row.store.slug), borderColor: storeColor(row.store.slug), fontWeight: 700, fontSize: 11 }} />
-  ) : (
-    <Chip size="small" variant="outlined" label="SEM LOJA" />
-  );
+  return <StoreTag row={row} />;
 }
 
 function StatusCell({ row, onConfirm, busy }: { row: PurchaseRow; onConfirm: () => void; busy: boolean }) {
@@ -317,15 +242,7 @@ export function PurchasesPage() {
                       row.items.map((item, index) => (
                         <TableRow key={`${row.candidateId}-${index}`} hover sx={{ borderLeft: `3px solid ${row.store ? storeColor(row.store.slug) : "transparent"}`, opacity: row.cancelled ? 0.6 : 1 }}>
                           <TableCell sx={{ minWidth: 240 }}>
-                            <Stack direction="row" gap={1.25} alignItems="center">
-                              <Avatar variant="rounded" src={item.imageUrl ?? undefined} alt="" sx={{ width: 44, height: 44, bgcolor: "action.hover" }}>
-                                <Box component="span" sx={{ fontSize: 9, color: "text.secondary" }}>sem foto</Box>
-                              </Avatar>
-                              <Box sx={{ minWidth: 0 }}>
-                                <Typography variant="body2" sx={{ fontWeight: 600 }}>{item.title}</Typography>
-                                <Typography variant="caption" color="text.secondary">{day(row.orderedAt)} · pedido {row.orderId}{row.purpose === "PESSOAL" ? " · pessoal" : ""}</Typography>
-                              </Box>
-                            </Stack>
+                            <ProductCell row={row} item={item} />
                           </TableCell>
                           <TableCell><StoreCell row={row} stores={stores} busy={busy} onPick={(target) => changeStore.mutate({ candidateId: row.candidateId, lojaId: target })} /></TableCell>
                           <TableCell>{item.quantity - item.cancelledQuantity || item.quantity}</TableCell>

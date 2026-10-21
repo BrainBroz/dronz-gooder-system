@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
+import bcrypt from "bcryptjs";
 import { PrismaClient } from "@prisma/client";
 
 process.env.DATABASE_URL =
@@ -3159,6 +3160,78 @@ describe("Compras: lista com foto, loja da conta e atribuição automática", ()
     // com uma loja no topo, as compras sem loja somem dos lotes, mas o total avisa que existem
     expect((gooderLots as typeof gooderLots & { semLojaTotal: number }).semLojaTotal).toBeGreaterThanOrEqual(1);
     expect((lots as typeof lots & { semLojaTotal: number }).semLojaTotal).toBe((gooderLots as typeof gooderLots & { semLojaTotal: number }).semLojaTotal);
+  });
+
+  it("etapas da compra: Miami, remessa e Brasil, um passo por vez, com datas, permissões e desfazer", async () => {
+    const dedicated = await connectionFixture("EBAY", "STORE_DEDICATED", `etapa-ded-${randomUUID().slice(0, 6)}`, "gooder");
+    const tag = randomUUID().slice(0, 6);
+    const make = (id: string, over: Partial<ReturnType<typeof ebayOrder>> = {}) => ({ ...ebayOrder(id), ...over });
+    const a = await record(dedicated, make(`batch8-ETAPA-A-${tag}`));
+    const b = await record(dedicated, make(`batch8-ETAPA-B-${tag}`, { shipments: [] }));
+    const c = await record(dedicated, make(`batch8-ETAPA-C-${tag}`, { cancelled: true, externalStatus: "Cancelled" }));
+    const pending = await record(dedicated, make(`batch8-ETAPA-P-${tag}`));
+    type Row = Awaited<ReturnType<typeof feed>>["items"][number] & { etapa: { chegouMiamiEm: string | null; remessa: string | null; enviadaEm: string | null; chegouBrasilEm: string | null } | null };
+    const rowOf = async (id: string) => ((await feed(dedicated, "?limit=300")).items as Row[]).find((item) => item.candidateId === id)!;
+    for (const id of [a, b]) expect((await approve(dedicated, id.candidateId!, (await rowOf(id.candidateId!)).version)).status).toBe(200);
+    const stage = (token: string, ids: string[], etapa: string, extra: Record<string, unknown> = {}) =>
+      request(dedicated.app).put("/integrations/marketplaces/purchases/stage").set(bearer(token)).send({ candidateIds: ids, etapa, ...extra });
+
+    expect((await rowOf(a.candidateId!)).fase).toBe("A_CAMINHO_MIAMI");
+    expect((await rowOf(b.candidateId!)).fase).toBe("COMPRADO");
+    // não pula etapa, não mexe em cancelada nem em compra ainda não confirmada
+    expect((await stage(dedicated.token, [a.candidateId!], "EM_REMESSA")).body.error).toBe("stage_transition_invalid");
+    expect((await stage(dedicated.token, [a.candidateId!], "NO_BRASIL")).body.error).toBe("stage_transition_invalid");
+    expect((await stage(dedicated.token, [c.candidateId!], "EM_MIAMI")).body.error).toBe("purchase_cancelled");
+    expect((await stage(dedicated.token, [pending.candidateId!], "EM_MIAMI")).body.error).toBe("purchase_not_confirmed");
+    expect((await stage(dedicated.token, [`c${randomUUID().replace(/-/g, "").slice(0, 24)}`], "EM_MIAMI")).status).toBe(404);
+
+    // chegou em Miami, com a data em que chegou (compra sem rastreio também pode)
+    const arrived = await stage(dedicated.token, [a.candidateId!, b.candidateId!], "EM_MIAMI", { ocorreuEm: "2026-10-10" });
+    expect(arrived.body).toEqual({ alteradas: 2, iguais: 0 });
+    expect(await rowOf(a.candidateId!)).toMatchObject({ fase: "EM_MIAMI", etapa: { chegouMiamiEm: "2026-10-10T00:00:00.000Z", remessa: null } });
+    expect((await stage(dedicated.token, [a.candidateId!], "EM_MIAMI")).body).toEqual({ alteradas: 0, iguais: 1 }); // repetir não muda nada
+    // tudo ou nada: uma inválida no meio não deixa a outra mudar
+    expect((await stage(dedicated.token, [a.candidateId!, c.candidateId!], "EM_REMESSA")).status).toBe(409);
+    expect((await rowOf(a.candidateId!)).fase).toBe("EM_MIAMI");
+
+    // remessa e Brasil
+    expect((await stage(dedicated.token, [a.candidateId!], "EM_REMESSA", { remessa: "Remessa Rafa 1", ocorreuEm: "2026-10-12" })).status).toBe(200);
+    expect(await rowOf(a.candidateId!)).toMatchObject({ fase: "EM_REMESSA", etapa: { chegouMiamiEm: "2026-10-10T00:00:00.000Z", remessa: "Remessa Rafa 1", enviadaEm: "2026-10-12T00:00:00.000Z", chegouBrasilEm: null } });
+    expect((await stage(dedicated.token, [a.candidateId!], "NO_BRASIL", { ocorreuEm: "2026-10-20" })).status).toBe(200);
+    expect(await rowOf(a.candidateId!)).toMatchObject({ fase: "NO_BRASIL", etapa: { remessa: "Remessa Rafa 1", chegouBrasilEm: "2026-10-20T00:00:00.000Z" } });
+    expect((await feed(dedicated, `?fases=NO_BRASIL,EM_REMESSA&limit=300`)).items.map((item) => item.candidateId)).toContain(a.candidateId);
+    expect((await feed(dedicated, `?fases=EM_MIAMI&limit=300`)).items.map((item) => item.candidateId)).toEqual([b.candidateId]);
+
+    // desfazer volta um passo e mantém as datas anteriores
+    expect((await stage(dedicated.token, [a.candidateId!], "EM_REMESSA")).status).toBe(200);
+    expect(await rowOf(a.candidateId!)).toMatchObject({ fase: "EM_REMESSA", etapa: { remessa: "Remessa Rafa 1", enviadaEm: "2026-10-12T00:00:00.000Z", chegouBrasilEm: null } });
+    expect((await stage(dedicated.token, [a.candidateId!], "EM_MIAMI")).status).toBe(200);
+    expect(await rowOf(a.candidateId!)).toMatchObject({ fase: "EM_MIAMI", etapa: { chegouMiamiEm: "2026-10-10T00:00:00.000Z", remessa: null, enviadaEm: null } });
+    expect((await stage(dedicated.token, [a.candidateId!], "COMPRADO")).status).toBe(200);
+    expect(await rowOf(a.candidateId!)).toMatchObject({ fase: "A_CAMINHO_MIAMI", etapa: null });
+    expect(await prisma.auditLog.count({ where: { action: "PURCHASE_STAGE_CHANGED", correlationId: a.candidateId! } })).toBe(6);
+
+    // permissões: quem confirma Miami não confirma o Brasil, e quem não é da loja não enxerga a compra
+    const profile = await prisma.perfil.create({ data: { code: `TEST_${randomUUID()}`, name: "etapas" } });
+    for (const code of ["BUYER_INGESTION_VISUALIZAR", "MIAMI_RECEBIMENTO_CONFIRMAR"])
+      await prisma.perfilPermissao.create({ data: { perfilId: profile.id, permissaoId: (await prisma.permissao.findUniqueOrThrow({ where: { code } })).id } });
+    const email = `etapas-${randomUUID()}@example.com`;
+    const limited = await prisma.usuario.create({
+      data: { name: "Etapas", email, passwordHash: await bcrypt.hash("change-me", 12), lojas: { create: { lojaId: dedicated.gooder.id } }, perfis: { create: { perfilId: profile.id } } }
+    });
+    const login = await request(dedicated.app).post("/auth/login").send({ email, password: "change-me" });
+    expect(login.status).toBe(200);
+    expect((await stage(login.body.accessToken, [a.candidateId!], "EM_MIAMI")).status).toBe(200);
+    expect((await stage(login.body.accessToken, [a.candidateId!], "EM_REMESSA")).status).toBe(200);
+    expect((await stage(login.body.accessToken, [a.candidateId!], "NO_BRASIL")).body.error).toBe("insufficient_permission");
+    expect((await stage(dedicated.token, [a.candidateId!], "NO_BRASIL")).status).toBe(200);
+    expect((await stage(login.body.accessToken, [a.candidateId!], "EM_REMESSA")).body.error).toBe("insufficient_permission"); // voltar do Brasil também é do Brasil
+    await prisma.refreshToken.deleteMany({ where: { usuarioId: limited.id } });
+    await prisma.usuarioPerfil.deleteMany({ where: { usuarioId: limited.id } });
+    await prisma.usuarioLoja.deleteMany({ where: { usuarioId: limited.id } });
+    await prisma.usuario.delete({ where: { id: limited.id } });
+    await prisma.perfilPermissao.deleteMany({ where: { perfilId: profile.id } });
+    await prisma.perfil.delete({ where: { id: profile.id } });
   });
 
   it("busca a foto principal de cada anúncio no eBay, guarda uma vez e não deixa a falha de um derrubar os outros", async () => {

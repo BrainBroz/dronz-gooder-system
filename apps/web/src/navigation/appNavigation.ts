@@ -51,8 +51,11 @@ export const appNavigation: readonly AppNavGroup[] = [
     key: "inventory",
     label: "Estoque",
     icon: "warehouse",
-    path: "/estoque",
-    permissions: ["ESTOQUE_VISUALIZAR", "RECEBIMENTO_VISUALIZAR"]
+    children: [
+      { label: "Estoque Miami", path: "/estoque/miami", permissions: ["BUYER_INGESTION_VISUALIZAR"] },
+      { label: "Estoque Brasil", path: "/estoque/brasil", permissions: ["BUYER_INGESTION_VISUALIZAR"] },
+      { label: "Saldos e recebimentos", path: "/estoque", permissions: ["ESTOQUE_VISUALIZAR", "RECEBIMENTO_VISUALIZAR"] }
+    ]
   },
   {
     key: "products",

@@ -292,6 +292,31 @@ model ImagemAnuncioExterno {
   @@unique([provider, anuncioId])
 }
 
+/// Etapa da compra depois que o vendedor envia: sem linha = comprada ou a caminho de Miami (derivado do rastreio do vendedor).
+enum EtapaLogistica {
+  EM_MIAMI
+  EM_REMESSA
+  NO_BRASIL
+}
+
+/// Etapa logística simplificada de uma compra importada inteira (o pacote do eBay chega junto). Não substitui a materialização por loja.
+model EtapaCompra {
+  id                String         @id @default(cuid())
+  compraImportadaId String         @unique
+  etapa             EtapaLogistica
+  chegouMiamiEm     DateTime?
+  remessa           String?
+  enviadaEm         DateTime?
+  chegouBrasilEm    DateTime?
+  atualizadoPorId   String
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  compraImportada CompraImportada @relation(fields: [compraImportadaId], references: [id], onDelete: Cascade)
+
+  @@index([etapa])
+}
+
 model Categoria {
   id        String   @id @default(cuid())
   lojaId    String
@@ -855,6 +880,7 @@ model CompraImportada {
   conexaoMarketplace  ConexaoMarketplace?     @relation(fields: [conexaoMarketplaceId], references: [id], onDelete: Restrict)
   enviosExternos      EnvioExterno[]
   buyerCandidate      BuyerPurchaseCandidate?
+  etapa               EtapaCompra?
 
   @@unique([fornecedorId, numeroPedido])
   @@unique([plataforma, contaExternaId, externalOrderIdNormalizado])
