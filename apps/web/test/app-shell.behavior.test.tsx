@@ -14,7 +14,7 @@ import { renderWithProviders, testStores } from "./render";
 const routesInApp = [
   "/", "/operacao", "/checkpoints", "/categorias", "/produtos", "/fornecedores", "/compras", "/pedidos",
   "/logistica", "/estoque", "/financeiro", "/relatorios", "/vendas", "/compras/painel-mensal", "/integracoes",
-  "/compras/revisao", "/posicoes", "/compras/simulador", "/configuracoes"
+  "/compras/revisao", "/compras/fila", "/posicoes", "/compras/simulador", "/configuracoes"
 ];
 
 beforeEach(() => vi.restoreAllMocks());
@@ -34,8 +34,8 @@ describe("navegação agrupada", () => {
   });
 
   it("identifica a página atual pela rota mais específica", () => {
-    expect(currentPageLabel("/compras/revisao")).toEqual({ group: "Compras", label: "Revisão de compras" });
-    expect(currentPageLabel("/compras")).toEqual({ group: "Compras", label: "Fila de compras" });
+    expect(currentPageLabel("/compras/revisao")).toEqual({ group: "Compras", label: "Avançado: divergências" });
+    expect(currentPageLabel("/compras")).toEqual({ group: "Compras", label: "Compras" });
     expect(currentPageLabel("/")).toEqual({ group: "Dashboard", label: "Dashboard" });
   });
 
@@ -48,7 +48,7 @@ describe("navegação agrupada", () => {
   });
 
   it.each(["/compras/revisao", "/compras/painel-mensal"])(
-    "em %s só o submenu específico fica ativo, não a Fila de compras",
+    "em %s só o submenu específico fica ativo, não o item Compras",
     async (route) => {
       const user = userEvent.setup();
       renderWithProviders(<Shell>Conteúdo</Shell>, { route, permissions: ["SYSTEM_ADMIN"] });
@@ -274,14 +274,14 @@ describe("lateral no desktop", () => {
 
     await user.click(screen.getByRole("button", { name: "Recolher menu lateral" }));
     expect(screen.getByRole("button", { name: "Expandir menu lateral" })).toBeTruthy();
-    expect(screen.queryByText("Fila de compras")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Compras" })).toBeNull();
     // Recolhida, cada grupo continua identificável pelo nome acessível.
     const compras = screen.getByRole("button", { name: "Compras" });
     expect(compras.getAttribute("aria-expanded")).toBe("false");
 
     await user.click(compras);
     expect(screen.getByRole("button", { name: "Recolher menu lateral" })).toBeTruthy();
-    expect(await screen.findByRole("link", { name: "Fila de compras" })).toBeTruthy();
+    expect(await screen.findByRole("link", { name: "Compras" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Compras" }).getAttribute("aria-expanded")).toBe("true");
   });
 });

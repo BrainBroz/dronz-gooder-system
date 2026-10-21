@@ -18,6 +18,7 @@ import {
 } from "./marketplace-integrations.schemas";
 import * as service from "./marketplace-integrations.service";
 import * as ebayOAuth from "./ebay-oauth.service";
+import * as purchasesFeed from "./purchases-feed.service";
 
 export const marketplaceIntegrationsRouter = Router();
 marketplaceIntegrationsRouter.use(requireAuth);
@@ -48,6 +49,23 @@ const identity = (request: AuthenticatedRequest) => {
 
 const idempotencyKey = (request: AuthenticatedRequest) =>
   z.string().min(8).max(200).parse(request.headers["idempotency-key"]);
+
+// Lista de compras para a tela (foto, itens, loja, rastreio e status do eBay), uma linha por pedido.
+marketplaceIntegrationsRouter.get(
+  "/purchases",
+  requirePermission("BUYER_INGESTION_VISUALIZAR"),
+  wrap(async (request, response) => {
+    response.json(await purchasesFeed.purchasesFeed(identity(request), purchasesFeed.feedQuerySchema.parse(request.query)));
+  })
+);
+
+marketplaceIntegrationsRouter.put(
+  "/purchases/:candidateId/store",
+  requirePermission("COMPRAS_IMPORTADAS_ATRIBUIR"),
+  wrap(async (request, response) => {
+    response.json(await purchasesFeed.setPurchaseStore(identity(request), z.string().cuid().parse(request.params.candidateId), purchasesFeed.storeSchema.parse(request.body)));
+  })
+);
 
 marketplaceIntegrationsRouter.get(
   "/buyer-candidates",

@@ -15,6 +15,7 @@ type Connection = {
   provider: string;
   name: string;
   purpose: "LOJA" | "PESSOAL";
+  scope: "SHARED" | "STORE_DEDICATED";
   account: { name: string; externalIdentifier: string };
   allowedStore: { id: string; name: string } | null;
   status: "NOT_CONFIGURED" | "ACTIVE" | "INACTIVE" | "AUTHORIZATION_EXPIRED" | "ERROR";
@@ -50,14 +51,17 @@ const rememberedState = () => {
 const when = (value: string | null) => (value ? new Date(value).toLocaleString("pt-BR") : "—");
 export const callbackAddress = () => `${window.location.origin}/integracoes/ebay/callback`;
 
-function StoreConnections({ store, connections, canManage }: { store: { id: string; nome: string }; connections: Connection[]; canManage: boolean }) {
+/** Bloco de uma loja; sem `store`, é o bloco das contas compartilhadas entre lojas (a loja de cada compra é escolhida na lista de Compras). */
+function ConnectionsBlock({ store, connections, canManage }: { store: { id: string; nome: string } | null; connections: Connection[]; canManage: boolean }) {
   const client = useQueryClient();
   const headers = authHeader();
   const [label, setLabel] = useState("");
   const [personal, setPersonal] = useState(false);
   const [pasted, setPasted] = useState("");
+  const [since, setSince] = useState("");
   const start = useMutation({
-    mutationFn: async () => (await api.post(`${BASE}/ebay/connect-intents`, { lojaId: store.id, nome: label.trim() || undefined, finalidade: personal ? "PESSOAL" : "LOJA" }, { headers })).data as { url: string },
+    mutationFn: async () =>
+      (await api.post(`${BASE}/ebay/connect-intents`, { ...(store ? { lojaId: store.id, finalidade: personal ? "PESSOAL" : "LOJA" } : { compartilhada: true }), nome: label.trim() || undefined }, { headers })).data as { url: string },
     onSuccess: (data) => {
       rememberState(data.url);
       window.location.assign(data.url);
@@ -71,40 +75,54 @@ function StoreConnections({ store, connections, canManage }: { store: { id: stri
     }
   });
   const sync = useMutation({
-    mutationFn: async (id: string) => (await api.post(`${BASE}/connections/${id}/sync-runs`, {}, { headers: { ...headers, "Idempotency-Key": crypto.randomUUID() } })).data,
+    mutationFn: async ({ id, from }: { id: string; from?: string }) =>
+      (await api.post(`${BASE}/connections/${id}/sync-runs`, from ? { replay: true, from: new Date(`${from}T00:00:00`).toISOString(), to: new Date().toISOString() } : {}, { headers: { ...headers, "Idempotency-Key": crypto.randomUUID() } })).data,
     onSuccess: () => client.invalidateQueries({ queryKey: ["marketplace-connections"] })
   });
   return (
     <ContentCard>
       <Stack gap={1.5}>
-        <Typography variant="h6" component="h2">{store.nome}</Typography>
-        {connections.length === 0 && <Typography variant="body2" color="text.secondary">Nenhuma conta do eBay conectada a esta loja.</Typography>}
+        <Typography variant="h6" component="h2">{store ? store.nome : "Contas compartilhadas (várias lojas)"}</Typography>
+        {!store && (
+          <Typography variant="body2" color="text.secondary">
+            Para uma conta do eBay que compra para mais de uma loja (como a Existence). As compras entram confirmadas e sem loja; você escolhe a loja de cada uma, com um clique, na lista de Compras.
+          </Typography>
+        )}
+        {connections.length === 0 && <Typography variant="body2" color="text.secondary">{store ? "Nenhuma conta do eBay conectada a esta loja." : "Nenhuma conta compartilhada conectada."}</Typography>}
         {connections.map((connection) => {
           const [text, color] = statusLabel[connection.status];
+          const canSync = connection.allowedActions.includes("SYNC_CONNECTION");
           return (
-            <Stack key={connection.id} direction={{ xs: "column", sm: "row" }} gap={1.5} alignItems={{ sm: "center" }} justifyContent="space-between" sx={{ borderTop: 1, borderColor: "divider", pt: 1.5 }}>
-              <Box>
-                <Typography component="div">{connection.name} {connection.purpose === "PESSOAL" && <Chip size="small" label="Pessoal" sx={{ mr: 0.5 }} />}<Typography component="span" variant="body2" color="text.secondary">· conta eBay {connection.account.externalIdentifier}</Typography></Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Autorização vale até {when(connection.authorizationExpiresAt)} · última sincronização {when(connection.lastSyncAt)}
-                </Typography>
-                {connection.lastError && <Typography variant="body2" color="error">{connection.lastError}</Typography>}
-              </Box>
-              <Stack direction="row" gap={1} alignItems="center">
-                <Chip size="small" color={color} label={text} />
-                {connection.allowedActions.includes("SYNC_CONNECTION") && (
-                  <Button size="small" variant="outlined" disabled={sync.isPending} onClick={() => sync.mutate(connection.id)}>Sincronizar agora</Button>
-                )}
+            <Stack key={connection.id} gap={1} sx={{ borderTop: 1, borderColor: "divider", pt: 1.5 }}>
+              <Stack direction={{ xs: "column", sm: "row" }} gap={1.5} alignItems={{ sm: "center" }} justifyContent="space-between">
+                <Box>
+                  <Typography component="div">{connection.name} {connection.purpose === "PESSOAL" && <Chip size="small" label="Pessoal" sx={{ mr: 0.5 }} />}<Typography component="span" variant="body2" color="text.secondary">· conta eBay {connection.account.externalIdentifier}</Typography></Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Autorização vale até {when(connection.authorizationExpiresAt)} · última sincronização {when(connection.lastSyncAt)}
+                  </Typography>
+                  {connection.lastError && <Typography variant="body2" color="error">{connection.lastError}</Typography>}
+                </Box>
+                <Stack direction="row" gap={1} alignItems="center">
+                  <Chip size="small" color={color} label={text} />
+                  {canSync && <Button size="small" variant="outlined" disabled={sync.isPending} onClick={() => sync.mutate({ id: connection.id })}>Sincronizar agora</Button>}
+                </Stack>
               </Stack>
+              {canSync && (
+                <Stack direction={{ xs: "column", sm: "row" }} gap={1} alignItems={{ sm: "center" }}>
+                  <TextField size="small" type="date" label="Importar histórico desde" value={since} onChange={(event) => setSince(event.target.value)} InputLabelProps={{ shrink: true }} />
+                  <Button size="small" variant="outlined" disabled={!since || sync.isPending} onClick={() => sync.mutate({ id: connection.id, from: since })}>Importar histórico</Button>
+                  <Typography variant="caption" color="text.secondary">O eBay só informa pedidos dos últimos 90 dias.</Typography>
+                </Stack>
+              )}
             </Stack>
           );
         })}
-        <MutationStatus mutation={sync} loadingMessage="Sincronizando com o eBay…" successMessage="Sincronização concluída. As compras aparecem na revisão de compras." />
+        <MutationStatus mutation={sync} loadingMessage="Sincronizando com o eBay…" successMessage="Sincronização concluída. As compras aparecem na lista de Compras." />
         {canManage && (
           <Stack gap={1.5} sx={{ borderTop: 1, borderColor: "divider", pt: 1.5 }}>
             <Stack direction={{ xs: "column", sm: "row" }} gap={1.5}>
               <TextField size="small" label="Nome da conta (opcional)" value={label} onChange={(event) => setLabel(event.target.value)} sx={{ minWidth: 240 }} />
-              <FormControlLabel control={<Checkbox checked={personal} onChange={(event) => setPersonal(event.target.checked)} />} label="Conta pessoal (compras pessoais)" />
+              {store && <FormControlLabel control={<Checkbox checked={personal} onChange={(event) => setPersonal(event.target.checked)} />} label="Conta pessoal (compras pessoais)" />}
               <Button variant="contained" disabled={start.isPending} onClick={() => start.mutate()}>Conectar conta eBay</Button>
             </Stack>
             <MutationStatus mutation={start} loadingMessage="Abrindo o eBay…" successMessage="Redirecionando para o eBay…" />
@@ -136,19 +154,23 @@ export function MarketplaceConnectionsPage() {
       <Stack gap={2.5}>
         <PageHeader
           title="Integrações"
-          description="Conecte uma conta do eBay para cada loja. As compras entram para revisão; nada vira estoque sem aprovação."
+          description="Conecte as contas do eBay: uma para cada loja ou uma compartilhada entre lojas. As compras do eBay entram já confirmadas na lista de Compras."
         />
         <ContentCard>
           <Typography variant="body2" color="text.secondary">
-            No portal de desenvolvedor do eBay, o endereço de retorno (accepted URL) do RuName usado aqui deve ser <strong>{callbackAddress()}</strong>.
-            Se o eBay devolver você para outro endereço, copie o endereço completo da página e use "Concluir conexão".
+            Ao conectar, entre no eBay com o seu navegador de sempre (o Chrome), autorize e copie o endereço completo da página que o eBay mostrar. Cole esse endereço em "Concluir conexão" aqui embaixo, em até cerca de 5 minutos.
           </Typography>
         </ContentCard>
         {list.isLoading && <Typography role="status">Carregando…</Typography>}
         {list.isError && <Typography color="error" role="alert">Não foi possível carregar as conexões.</Typography>}
-        {list.data && stores.map((store) => (
-          <StoreConnections key={store.id} store={store} canManage={canManage} connections={list.data.filter((connection) => connection.allowedStore?.id === store.id)} />
-        ))}
+        {list.data && (
+          <>
+            <ConnectionsBlock store={null} canManage={canManage} connections={list.data.filter((connection) => connection.scope === "SHARED")} />
+            {stores.map((store) => (
+              <ConnectionsBlock key={store.id} store={store} canManage={canManage} connections={list.data.filter((connection) => connection.allowedStore?.id === store.id)} />
+            ))}
+          </>
+        )}
       </Stack>
     </PageContainer>
   );
