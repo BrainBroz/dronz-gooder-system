@@ -317,6 +317,21 @@ model EtapaCompra {
   @@index([etapa])
 }
 
+/// Último status conhecido de um código de rastreio, lido do Parcel (só leitura): não altera a compra nem a etapa.
+model StatusRastreio {
+  id                String   @id @default(cuid())
+  codigo            String   @unique
+  transportadora    String?
+  statusCodigo      Int
+  ultimoEvento      String?
+  ultimoEventoLocal String?
+  ultimoEventoData  String?
+  previstaEm        String?
+  consultadoEm      DateTime
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
 model Categoria {
   id        String   @id @default(cuid())
   lojaId    String
