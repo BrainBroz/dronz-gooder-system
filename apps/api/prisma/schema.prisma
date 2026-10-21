@@ -8,12 +8,13 @@ datasource db {
 }
 
 model Loja {
-  id        String   @id @default(cuid())
-  slug      String   @unique
-  nome      String
-  ativa     Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  projecoesCompra ProjecaoCompraItem[]
+  id              String               @id @default(cuid())
+  slug            String               @unique
+  nome            String
+  ativa           Boolean              @default(true)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
 
   usuarios                      UsuarioLoja[]
   categorias                    Categoria[]
@@ -66,13 +67,14 @@ model Loja {
 }
 
 model Usuario {
-  id           String   @id @default(cuid())
-  name         String
-  email        String   @unique
-  passwordHash String
-  active       Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  projecoesCompra ProjecaoCompraItem[]
+  id              String               @id @default(cuid())
+  name            String
+  email           String               @unique
+  passwordHash    String
+  active          Boolean              @default(true)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
 
   lojas                          UsuarioLoja[]
   perfis                         UsuarioPerfil[]
@@ -270,15 +272,40 @@ model ProjecaoOperacional {
 /// Cadastro geral de produtos que já trabalhamos, compartilhado pelas lojas (exceção deliberada ao lojaId:
 /// não é estoque nem preço). Guarda o histórico de peso para estimar frete e reconhecer produtos nas compras.
 model ProdutoBase {
-  id        String   @id @default(cuid())
+  projecoes ProjecaoCompraItem[]
+  id        String               @id @default(cuid())
   nome      String
-  slug      String   @unique
+  slug      String               @unique
   categoria String?
-  pesoKg    Decimal? @db.Decimal(10, 3)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  pesoKg    Decimal?             @db.Decimal(10, 3)
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
 
   @@index([categoria])
+}
+
+/// Projeção econômica digitada por linha de compra importada e por loja (estimativa, nunca realizado):
+/// venda projetada, peso e frete realmente pago. O vínculo com a base de produtos dá o peso reaproveitável.
+model ProjecaoCompraItem {
+  id               String   @id @default(cuid())
+  itemExternoId    String
+  lojaId           String
+  produtoBaseId    String?
+  vendaUnitariaBrl Decimal? @db.Decimal(14, 2)
+  pesoKg           Decimal? @db.Decimal(10, 3)
+  freteRealUsd     Decimal? @db.Decimal(14, 2)
+  atualizadoPorId  String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  itemExterno   CompraImportadaItem @relation(fields: [itemExternoId], references: [id], onDelete: Cascade)
+  loja          Loja                @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  produtoBase   ProdutoBase?        @relation(fields: [produtoBaseId], references: [id], onDelete: SetNull)
+  atualizadoPor Usuario             @relation(fields: [atualizadoPorId], references: [id], onDelete: Restrict)
+
+  @@unique([itemExternoId, lojaId])
+  @@index([lojaId])
+  @@index([produtoBaseId])
 }
 
 /// Foto de um anúncio externo (ex.: item do eBay), guardada à parte da evidência para não alterar o histórico de versões dos pedidos.
@@ -896,6 +923,7 @@ model CompraImportada {
 }
 
 model CompraImportadaItem {
+  projecoes                 ProjecaoCompraItem[]
   id                        String                    @id @default(cuid())
   compraImportadaId         String
   quantidade                Int

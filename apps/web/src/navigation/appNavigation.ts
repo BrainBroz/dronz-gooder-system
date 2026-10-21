@@ -30,6 +30,7 @@ export const appNavigation: readonly AppNavGroup[] = [
     icon: "cart",
     children: [
       { label: "Compras", path: "/compras", permissions: ["BUYER_INGESTION_VISUALIZAR", "COMPRAS_IMPORTADAS_VISUALIZAR"] },
+      { label: "Controle de compras", path: "/compras/controle", permissions: ["COMPRAS_IMPORTADAS_VISUALIZAR"] },
       { label: "Painel mensal", path: "/compras/painel-mensal", permissions: ["COMPRAS_IMPORTADAS_VISUALIZAR"] },
       { label: "Simulador de compra", path: "/compras/simulador", permissions: ["SIMULACAO_VISUALIZAR", "SIMULACAO_GERENCIAR"] },
       { label: "Avançado: divergências", path: "/compras/revisao", permissions: ["BUYER_INGESTION_VISUALIZAR"] },
