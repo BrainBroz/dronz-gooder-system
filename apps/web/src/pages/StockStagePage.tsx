@@ -36,6 +36,12 @@ import {
   type PurchaseRow
 } from "../components/purchases/purchaseParts";
 import { TrackingEditDialog } from "../components/purchases/ManualPurchase";
+import { brl, percent } from "../api/economic";
+import {
+  monthOf,
+  projectionKey,
+  usePurchaseProjections
+} from "../hooks/usePurchaseProjections";
 import { extractErrorMessage } from "../utils/errors";
 
 type Mode = "MIAMI" | "BRASIL";
@@ -155,6 +161,27 @@ const cost = (row: PurchaseRow) =>
       0
     );
 
+const sum = (values: (string | null | undefined)[]) =>
+  values.reduce((total, value) => total + (value ? Number(value) : 0), 0);
+
+/** Compras do Brasil por remessa (a mais recente primeiro); sem nome de remessa vão para "Sem remessa". */
+function groupByShipment(rows: PurchaseRow[]) {
+  const groups = new Map<string, PurchaseRow[]>();
+  for (const row of rows) {
+    const name = row.etapa?.remessa ?? "Sem remessa";
+    groups.set(name, [...(groups.get(name) ?? []), row]);
+  }
+  const latest = (list: PurchaseRow[]) =>
+    list.reduce(
+      (max, row) =>
+        Math.max(max, Date.parse(row.etapa?.chegouBrasilEm ?? "") || 0),
+      0
+    );
+  return [...groups.entries()]
+    .sort(([, a], [, b]) => latest(b) - latest(a))
+    .map(([name, list]) => ({ name: name as string | null, rows: list }));
+}
+
 export function StockStagePage({ mode }: { mode: Mode }) {
   const screen = screens[mode];
   const client = useQueryClient();
@@ -214,6 +241,21 @@ export function StockStagePage({ mode }: { mode: Mode }) {
     (row) => row.fase === "A_CAMINHO_MIAMI" && row.entregue
   );
 
+  // Estoque Brasil detalhado: custo e venda projetada do Controle de compras e uma seção por remessa.
+  const detail = mode === "BRASIL";
+  const projections = usePurchaseProjections({
+    months: detail
+      ? [...new Set(rows.map((row) => monthOf(row.orderedAt)))]
+      : [],
+    stores: stores.filter((store) =>
+      rows.some((row) => row.store?.id === store.id)
+    ),
+    enabled: detail && can("COMPRAS_IMPORTADAS_VISUALIZAR")
+  });
+  const groups = detail
+    ? groupByShipment(rows)
+    : [{ name: null as string | null, rows }];
+
   const change = useMutation({
     mutationFn: async (action: Action) =>
       (
@@ -252,7 +294,6 @@ export function StockStagePage({ mode }: { mode: Mode }) {
             : [...current, id]
         )
     );
-  const allChosen = rows.length > 0 && chosen.length === rows.length;
   const summary = screen.phases.map((phase) => {
     const group = all.filter((row) => row.fase === phase);
     return {
@@ -435,120 +476,223 @@ export function StockStagePage({ mode }: { mode: Mode }) {
             busca para achar as outras.
           </Alert>
         )}
-        {rows.length > 0 && (
-          <Box sx={{ overflowX: "auto" }}>
-            <Table size="small" aria-label={screen.title}>
-              <TableHead>
-                <TableRow>
-                  <TableCell padding="checkbox">
-                    <Checkbox
-                      size="small"
-                      checked={allChosen}
-                      indeterminate={chosen.length > 0 && !allChosen}
-                      onChange={() =>
-                        setSelected(
-                          allChosen
-                            ? new Set()
-                            : new Set(rows.map((row) => row.candidateId))
-                        )
-                      }
-                      slotProps={{
-                        input: { "aria-label": "Selecionar todas" }
-                      }}
-                    />
-                  </TableCell>
-                  {[
-                    "Produto",
-                    "Empresa",
-                    "Tracking",
-                    "Data",
-                    "Qtd",
-                    "Valor",
-                    "Status"
-                  ].map((name) => (
-                    <TableCell
-                      key={name}
-                      sx={{
-                        whiteSpace: "nowrap",
-                        fontSize: 11,
-                        letterSpacing: 0.5,
-                        textTransform: "uppercase"
-                      }}
-                    >
-                      {name}
+        {groups.map((group) => {
+          if (group.rows.length === 0) return null;
+          const groupChosen = group.rows.filter((row) =>
+            selected.has(row.candidateId)
+          );
+          const groupAll = groupChosen.length === group.rows.length;
+          const lines = group.rows.flatMap((row) =>
+            row.items.map((item) =>
+              projections.get(projectionKey(row.orderId, item.title))
+            )
+          );
+          const header = [
+            "Produto",
+            "Empresa",
+            "Tracking",
+            "Data",
+            "Qtd",
+            "Valor",
+            ...(detail ? ["Custo total", "Venda proj.", "Markup"] : []),
+            "Status"
+          ];
+          const sent = group.rows
+            .map((row) => row.etapa?.enviadaEm)
+            .filter((value): value is string => Boolean(value))
+            .sort();
+          const arrived = group.rows
+            .map((row) => row.etapa?.chegouBrasilEm)
+            .filter((value): value is string => Boolean(value))
+            .sort();
+          return (
+            <Box key={group.name ?? "todas"} sx={{ overflowX: "auto" }}>
+              {group.name !== null && (
+                <ContentCard>
+                  <Stack
+                    direction={{ xs: "column", md: "row" }}
+                    gap={{ xs: 0.5, md: 3 }}
+                    alignItems={{ md: "center" }}
+                    flexWrap="wrap"
+                  >
+                    <Typography variant="h6" component="h2">
+                      {group.name}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {sent.length
+                        ? `Enviada ${day(sent[0]!)}`
+                        : "Sem data de envio"}
+                      {arrived.length
+                        ? ` · chegou ${day(arrived.at(-1)!)}`
+                        : ""}
+                    </Typography>
+                    <Typography variant="body2">
+                      {group.rows.length}{" "}
+                      {group.rows.length === 1 ? "pedido" : "pedidos"} ·{" "}
+                      {group.rows.reduce((total, row) => total + units(row), 0)}{" "}
+                      unidades ·{" "}
+                      {money(
+                        group.rows.reduce((total, row) => total + cost(row), 0)
+                      )}
+                    </Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      Custo total{" "}
+                      {brl(
+                        String(sum(lines.map((line) => line?.custoTotalBrl)))
+                      )}{" "}
+                      · Venda projetada{" "}
+                      {brl(
+                        String(sum(lines.map((line) => line?.vendaTotalBrl)))
+                      )}
+                    </Typography>
+                    {lines.some(
+                      (line) => !line || line.custoTotalBrl === null
+                    ) && (
+                      <Typography variant="caption" color="warning.main">
+                        {
+                          lines.filter(
+                            (line) => !line || line.custoTotalBrl === null
+                          ).length
+                        }{" "}
+                        linhas sem custo calculado ficam fora da soma
+                      </Typography>
+                    )}
+                  </Stack>
+                </ContentCard>
+              )}
+              <Table
+                size="small"
+                aria-label={
+                  group.name ? `${screen.title}: ${group.name}` : screen.title
+                }
+              >
+                <TableHead>
+                  <TableRow>
+                    <TableCell padding="checkbox">
+                      <Checkbox
+                        size="small"
+                        checked={groupAll}
+                        indeterminate={groupChosen.length > 0 && !groupAll}
+                        onChange={() =>
+                          setSelected((current) => {
+                            const next = new Set(current);
+                            for (const row of group.rows) {
+                              if (groupAll) next.delete(row.candidateId);
+                              else next.add(row.candidateId);
+                            }
+                            return next;
+                          })
+                        }
+                        slotProps={{
+                          input: {
+                            "aria-label": group.name
+                              ? `Selecionar todas de ${group.name}`
+                              : "Selecionar todas"
+                          }
+                        }}
+                      />
                     </TableCell>
-                  ))}
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {rows.flatMap((row) =>
-                  row.items.map((item, index) => {
-                    const when = whenOf(row);
-                    const quantity = item.quantity - item.cancelledQuantity;
-                    return (
-                      <TableRow
-                        key={`${row.candidateId}-${index}`}
-                        hover
-                        selected={selected.has(row.candidateId)}
+                    {header.map((name) => (
+                      <TableCell
+                        key={name}
+                        sx={{
+                          whiteSpace: "nowrap",
+                          fontSize: 11,
+                          letterSpacing: 0.5,
+                          textTransform: "uppercase"
+                        }}
                       >
-                        <TableCell padding="checkbox">
-                          {index === 0 && (
-                            <Checkbox
-                              size="small"
-                              checked={selected.has(row.candidateId)}
-                              onChange={() => toggle(row.candidateId)}
-                              slotProps={{
-                                input: {
-                                  "aria-label": `Selecionar pedido ${row.orderId}`
-                                }
-                              }}
-                            />
-                          )}
-                        </TableCell>
-                        <TableCell sx={{ minWidth: 240 }}>
-                          <ProductCell row={row} item={item} />
-                        </TableCell>
-                        <TableCell>
-                          <StoreTag row={row} />
-                        </TableCell>
-                        <TableCell>
-                          {index === 0 ? (
-                            <TrackingCell row={row} onEdit={setTrackingRow} />
-                          ) : null}
-                        </TableCell>
-                        <TableCell sx={{ whiteSpace: "nowrap" }}>
-                          <Typography variant="body2">
-                            {when.date ?? "—"}
-                          </Typography>
-                          {when.note && (
-                            <Typography
-                              variant="caption"
-                              color="text.secondary"
-                            >
-                              {when.note}
+                        {name}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {group.rows.flatMap((row) =>
+                    row.items.map((item, index) => {
+                      const when = whenOf(row);
+                      const quantity = item.quantity - item.cancelledQuantity;
+                      const projection = projections.get(
+                        projectionKey(row.orderId, item.title)
+                      );
+                      return (
+                        <TableRow
+                          key={`${row.candidateId}-${index}`}
+                          hover
+                          selected={selected.has(row.candidateId)}
+                        >
+                          <TableCell padding="checkbox">
+                            {index === 0 && (
+                              <Checkbox
+                                size="small"
+                                checked={selected.has(row.candidateId)}
+                                onChange={() => toggle(row.candidateId)}
+                                slotProps={{
+                                  input: {
+                                    "aria-label": `Selecionar pedido ${row.orderId}`
+                                  }
+                                }}
+                              />
+                            )}
+                          </TableCell>
+                          <TableCell sx={{ minWidth: 240 }}>
+                            <ProductCell row={row} item={item} />
+                          </TableCell>
+                          <TableCell>
+                            <StoreTag row={row} />
+                          </TableCell>
+                          <TableCell>
+                            {index === 0 ? (
+                              <TrackingCell row={row} onEdit={setTrackingRow} />
+                            ) : null}
+                          </TableCell>
+                          <TableCell sx={{ whiteSpace: "nowrap" }}>
+                            <Typography variant="body2">
+                              {when.date ?? "—"}
                             </Typography>
+                            {when.note && (
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                              >
+                                {when.note}
+                              </Typography>
+                            )}
+                          </TableCell>
+                          <TableCell>{quantity}</TableCell>
+                          <TableCell sx={{ whiteSpace: "nowrap" }}>
+                            {money(quantity * item.unitPrice, item.currency)}
+                          </TableCell>
+                          {detail && (
+                            <>
+                              <TableCell sx={{ whiteSpace: "nowrap" }}>
+                                {brl(projection?.custoTotalBrl)}
+                              </TableCell>
+                              <TableCell sx={{ whiteSpace: "nowrap" }}>
+                                {brl(projection?.vendaUnitariaBrl)}
+                              </TableCell>
+                              <TableCell sx={{ whiteSpace: "nowrap" }}>
+                                {percent(projection?.markup ?? null)}
+                              </TableCell>
+                            </>
                           )}
-                        </TableCell>
-                        <TableCell>{quantity}</TableCell>
-                        <TableCell sx={{ whiteSpace: "nowrap" }}>
-                          {money(quantity * item.unitPrice, item.currency)}
-                        </TableCell>
-                        <TableCell>
-                          <Chip
-                            size="small"
-                            color={phaseInfo[row.fase].color}
-                            label={phaseInfo[row.fase].label.toUpperCase()}
-                            sx={{ fontWeight: 700, fontSize: 11 }}
-                          />
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })
-                )}
-              </TableBody>
-            </Table>
-          </Box>
-        )}
+                          <TableCell>
+                            <Chip
+                              size="small"
+                              color={phaseInfo[row.fase].color}
+                              label={phaseInfo[row.fase].label.toUpperCase()}
+                              sx={{ fontWeight: 700, fontSize: 11 }}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </Box>
+          );
+        })}
       </Stack>
       {trackingRow && (
         <TrackingEditDialog
