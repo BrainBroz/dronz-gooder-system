@@ -15,6 +15,7 @@ import type { Product } from "../types/catalog";
 import { useCategories, useProducts } from "../hooks/useCatalog";
 import { Link as RouterLink } from "react-router-dom";
 import { formatSalePrice } from "../utils/formatting";
+import { ProductImportDialog } from "../components/ProductImportDialog";
 
 const productSchema = z.object({
   codigo: z.coerce.number().int().min(1, "Código obrigatório"),
@@ -228,6 +229,8 @@ export function ProductsPage() {
   const error =
     categoriesError || productsError ? "Falha ao carregar dados" : null;
   const activeStoreId = useAuthStore((s) => s.activeStoreId);
+  const canManage = useAuthStore((s) => s.permissions.some((code) => code === "SYSTEM_ADMIN" || code === "CATALOGO_GERENCIAR"));
+  const [importing, setImporting] = React.useState(false);
 
   return (
     <PageContainer>
@@ -240,6 +243,13 @@ export function ProductsPage() {
             </Button>
           }
         />
+        {canManage && (
+          <Box>
+            <Button variant="outlined" onClick={() => setImporting(true)}>Importar produtos</Button>
+            {/* key: reabrir começa sem arquivo nem resultado da importação anterior */}
+            {importing && <ProductImportDialog key={activeStoreId} open onClose={() => setImporting(false)} />}
+          </Box>
+        )}
         {loading && <Typography>Carregando...</Typography>}
         {error && <Typography color="error.main">{error}</Typography>}
         <Stack direction="row" gap={2} flexWrap="wrap">
