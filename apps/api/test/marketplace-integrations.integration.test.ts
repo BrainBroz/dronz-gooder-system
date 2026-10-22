@@ -3345,7 +3345,7 @@ describe("Compras: lista com foto, loja da conta e atribuição automática", ()
     const update = await recordMarketplaceEvidence({ provider: "EBAY", accountId: connection.contaExternaId, connectionId: fixture.connectionId, order: delivered, actorId: fixture.userId, correlationId: randomUUID(), autoApplyPostApproval: true });
     expect(update).toMatchObject({ postApprovalUpdate: true });
     const row = await rowOf();
-    expect(row).toMatchObject({ status: "APROVADA", entregue: true, fase: "A_CAMINHO_MIAMI" }); // só avisa: não muda a fase sozinho
+    expect(row).toMatchObject({ status: "APROVADA", entregue: true, fase: "ENTREGUE" }); // aparece como Entregue, mas só a equipe confirma a chegada em Miami
     expect(row.trackings[0]!.entrega).toMatchObject({ status: 0, rotulo: "Entregue", evento: "Entregue (informado pelo eBay)", data: "2026-07-18T15:00:00.000Z" });
 
     // Se o Parcel já tem status para o código, ele aparece no lugar do aviso do eBay.
@@ -3355,6 +3355,52 @@ describe("Compras: lista com foto, loja da conta e atribuição automática", ()
     } finally {
       await prisma.statusRastreio.deleteMany({ where: { codigo: "9400111" } });
     }
+  });
+
+  it("entrega nova vence o empate de horário em qualquer pedido; divergência só de envio volta sozinha para Aprovada e as outras não", async () => {
+    const { healShipmentDivergences } = await import("../src/modules/marketplace-integrations/shipment-divergence.service");
+    const fixture = await connectionFixture("EBAY", "STORE_DEDICATED", `heal-${randomUUID().slice(0, 6)}`, "gooder");
+    const connection = await prisma.conexaoMarketplace.findUniqueOrThrow({ where: { id: fixture.connectionId } });
+    const evidence = (order: Order, autoApplyPostApproval: boolean) =>
+      recordMarketplaceEvidence({ provider: "EBAY", accountId: connection.contaExternaId, connectionId: fixture.connectionId, order, actorId: fixture.userId, correlationId: randomUUID(), autoApplyPostApproval });
+    const withDelivery = (order: Order) => ({ ...order, shipments: [{ ...order.shipments[0]!, status: "DELIVERED", deliveredAt: "2026-07-12T09:00:00.000Z" }] });
+    const statusOf = async (candidateId: string) => (await prisma.buyerPurchaseCandidate.findUniqueOrThrow({ where: { id: candidateId } })).status;
+    const confirm = async (order: Order) => {
+      const recorded = await record(fixture, order);
+      const row = (await feed(fixture, "?limit=300")).items.find((item) => item.candidateId === recorded.candidateId)!;
+      expect((await approve(fixture, recorded.candidateId!, row.version)).status).toBe(200);
+      return recorded.candidateId!;
+    };
+
+    // Mesmo horário do pedido (o eBay não mexeu no LastModifiedTime): a entrega precisa ser aplicada em todos, não em metade ao acaso.
+    for (let i = 0; i < 8; i += 1) {
+      const order = ebayOrder(`batch8-HEALA-${i}-${randomUUID().slice(0, 6)}`);
+      const candidateId = await confirm(order);
+      expect(await evidence(withDelivery(order), true)).toMatchObject({ postApprovalUpdate: true });
+      expect(await statusOf(candidateId)).toBe("APROVADA");
+    }
+
+    // Divergência antiga só de envio (criada sem a atualização automática): a rotina aplica a evidência nova e fecha o conflito.
+    const stuck = ebayOrder(`batch8-HEALB-${randomUUID().slice(0, 6)}`);
+    const stuckId = await confirm(stuck);
+    await evidence(withDelivery(stuck), false);
+    expect(await statusOf(stuckId)).toBe("COM_DIVERGENCIA");
+    const divergent = () => ((feed(fixture, "?limit=300") as unknown) as Promise<{ items: { candidateId: string; divergencias: string[]; entregue: boolean; fase: string }[] }>).then((page) => page.items.find((item) => item.candidateId === stuckId)!);
+    expect(await divergent()).toMatchObject({ divergencias: ["SHIPMENTS"] });
+
+    // Divergência de preço não é resolvida sozinha.
+    const priced = ebayOrder(`batch8-HEALC-${randomUUID().slice(0, 6)}`);
+    const pricedId = await confirm(priced);
+    await evidence({ ...withDelivery(priced), total: 999, items: priced.items.map((item) => ({ ...item, unitPrice: 999 })) }, false);
+    expect(await statusOf(pricedId)).toBe("COM_DIVERGENCIA");
+
+    expect(await healShipmentDivergences()).toBeGreaterThanOrEqual(1);
+    expect(await statusOf(stuckId)).toBe("APROVADA");
+    expect(await divergent()).toMatchObject({ divergencias: [], entregue: true, fase: "ENTREGUE" });
+    expect(await prisma.buyerReconciliationConflict.count({ where: { candidateId: stuckId, status: "ABERTO" } })).toBe(0);
+    expect(await prisma.auditLog.count({ where: { action: "BUYER_SHIPMENT_DIVERGENCE_AUTO_RESOLVED", entityId: stuckId } })).toBe(1);
+    expect(await statusOf(pricedId)).toBe("COM_DIVERGENCIA");
+    expect(await healShipmentDivergences()).toBe(0); // nada mais só de envio para resolver
   });
 
   it("manda ao Parcel os rastreios novos, do mais recente ao mais antigo, até o limite diário, sem repetir nem insistir", async () => {

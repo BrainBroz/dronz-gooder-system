@@ -5,6 +5,7 @@ import { getAuthenticatedUser } from "../auth/auth.service";
 import { marketplaceAdapterRegistry } from "./marketplace-integrations.adapters";
 import { syncConnection } from "./marketplace-integrations.service";
 import { pushTrackingsToParcel } from "./parcel-push.service";
+import { healShipmentDivergences } from "./shipment-divergence.service";
 import { syncParcelStatuses } from "./parcel-tracking.service";
 import type { MarketplaceAdapterRegistry } from "./marketplace-integrations.types";
 
@@ -66,17 +67,30 @@ async function refreshTracking(): Promise<RefreshResult[]> {
   return results;
 }
 
+/** Divergências que são só mudança de envio voltam sozinhas para "Aprovada" (o resto segue para revisão). */
+async function healDivergences(): Promise<RefreshResult[]> {
+  const conexao = "Divergências só de envio";
+  try {
+    const healed = await healShipmentDivergences();
+    return healed ? [{ conexao, status: "SUCCEEDED", detalhe: `${healed} ${healed === 1 ? "resolvida" : "resolvidas"} automaticamente` }] : [];
+  } catch (error) {
+    return [{ conexao, status: "FALHOU", erro: error instanceof AppError ? error.code : "erro_inesperado" }];
+  }
+}
+
 /** Botão "Atualizar agora": só as conexões que o usuário pode ver (compartilhadas ou das suas lojas). */
 export const refreshForUser = async (identity: AuthIdentity) => [
   ...(await refreshActiveConnections(async (connection) =>
     connection.escopo === "SHARED" || (connection.lojaPermitidaId && identity.lojas.some((store) => store.id === connection.lojaPermitidaId)) ? identity : null
   )),
+  ...(await healDivergences()),
   ...(await refreshTracking())
 ];
 
 /** Atualização agendada: roda como o usuário que criou a conexão (a quem a sincronização já pertence). */
 export const refreshAsOwners = async () => [
   ...(await refreshActiveConnections(async (connection) => getAuthenticatedUser(connection.criadoPorId).catch(() => null))),
+  ...(await healDivergences()),
   ...(await refreshTracking())
 ];
 

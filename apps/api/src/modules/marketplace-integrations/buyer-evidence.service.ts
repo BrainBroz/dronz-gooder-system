@@ -277,12 +277,18 @@ export async function recordMarketplaceEvidence(input: {
         const currentShipmentTime = previous?.success
           ? shipmentEventTime(previous.data) : -Infinity;
         // Fonte parcial nunca substitui a evidência de API; API sempre substitui a provisória.
+        // Entrega real que acaba de aparecer vence o empate de horário (senão o desempate por hash decidiria ao acaso).
+        const hasDelivery = (order: NormalizedMarketplaceOrder) => order.shipments.some((shipment) => Boolean(shipment.deliveredAt));
+        const incomingDelivered = hasDelivery(normalized);
+        const currentDelivered = previous?.success ? hasDelivery(previous.data) : false;
         const promote = prior && currentIsApi && !incomingIsApi ? false
           : prior && incomingIsApi && !currentIsApi ? true
           : incomingTime > currentTime ||
           (sameTime && (normalized.cancelled !== currentCancelled
             ? normalized.cancelled
-            : incomingShipmentTime !== currentShipmentTime
+            : incomingDelivered !== currentDelivered
+              ? incomingDelivered
+              : incomingShipmentTime !== currentShipmentTime
               ? incomingShipmentTime > currentShipmentTime
               : payloadHash > (prior?.currentEvidence.payloadHash ?? "")));
         // Compra já confirmada que recebe da própria API só rastreio, status ou cancelamento (e as quantidades que o

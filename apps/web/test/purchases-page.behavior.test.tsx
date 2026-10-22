@@ -127,6 +127,18 @@ describe("Compras: resumo do lote", () => {
     expect(call[1]).toMatchObject({ params: { ano: 2026, mes: 10 }, headers: { "x-store-id": "store-dronz" } });
   });
 
+  it("compra com divergência explica o motivo e leva à revisão; entregue aparece como status", async () => {
+    mock([
+      { ...rows[0], status: "COM_DIVERGENCIA", canApprove: false, divergencias: ["SHIPMENTS"] },
+      { ...rows[1], fase: "ENTREGUE", entregue: true, divergencias: [] }
+    ]);
+    renderWithProviders(<PurchasesPage />, MONTH);
+    const chip = (await screen.findByText("Com divergência")).closest("a")!;
+    expect(chip.getAttribute("href")).toBe("/compras/revisao");
+    expect(chip.getAttribute("aria-label")).toContain("envio ou rastreio");
+    expect(screen.getByText("ENTREGUE")).toBeTruthy();
+  });
+
   it("copia o rastreio", async () => {
     const user = userEvent.setup();
     mock();

@@ -23,6 +23,7 @@ type RefreshResult = { conexao: string; status: string; criados?: number; atuali
 const BASE = "/integrations/marketplaces";
 export const monthLabel = (mes: string) => new Date(`${mes}-15T12:00:00`).toLocaleDateString("pt-BR", { month: "long", year: "numeric" }).replace(" de ", " ").toUpperCase();
 
+const divergenceLabel: Record<string, string> = { SHIPMENTS: "envio ou rastreio", ITEMS: "itens", QUANTITY: "quantidade", TOTAL: "valor", CURRENCY: "moeda", MERCHANT: "vendedor", ORDER_DATE: "data do pedido", EXTERNAL_STATUS: "status no eBay", CANCELLATION_CHANGED: "cancelamento" };
 const refreshProblem: Record<string, string> = {
   marketplace_authorization_expired: "autorização do eBay expirada: reconecte em Integrações",
   marketplace_provider_not_configured: "leitura do eBay desligada neste servidor",
@@ -62,7 +63,11 @@ function StatusCell({ row, onConfirm, busy }: { row: PurchaseRow; onConfirm: () 
       <Chip size="small" color={phase.color} label={phase.label.toUpperCase()} sx={{ fontWeight: 700, fontSize: 11 }} />
       {row.canApprove && <Button size="small" variant="contained" disabled={busy} onClick={onConfirm} sx={{ py: 0.1, fontSize: 11 }}>Confirmar compra</Button>}
       {!row.canApprove && row.status === "AGUARDANDO_APROVACAO" && <Chip size="small" variant="outlined" label="A confirmar" />}
-      {row.status === "COM_DIVERGENCIA" && <Chip size="small" variant="outlined" color="warning" label="Com divergência" />}
+      {row.status === "COM_DIVERGENCIA" && (
+        <Tooltip title={`Os dados do eBay mudaram depois da confirmação${row.divergencias.length ? ` (${row.divergencias.map((type) => divergenceLabel[type] ?? type.toLowerCase()).join(", ")})` : ""}. Clique para ver e decidir.`}>
+          <Chip component={RouterLink} to="/compras/revisao" clickable size="small" variant="outlined" color="warning" label="Com divergência" />
+        </Tooltip>
+      )}
     </Stack>
   );
 }
