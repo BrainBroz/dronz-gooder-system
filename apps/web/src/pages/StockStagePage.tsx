@@ -207,6 +207,10 @@ export function StockStagePage({ mode }: { mode: Mode }) {
     chosenPhases.length === 1 ? (actionsFor[chosenPhases[0]!] ?? []) : []
   ).filter((action) => can(action.permission));
   const sending = chosenPhases[0] === "EM_MIAMI";
+  // Compras a caminho cujo rastreio já consta como entregue: candidatas a "Chegou em Miami" (a equipe confirma).
+  const delivered = rows.filter(
+    (row) => row.fase === "A_CAMINHO_MIAMI" && row.entregue
+  );
 
   const change = useMutation({
     mutationFn: async (action: Action) =>
@@ -347,6 +351,16 @@ export function StockStagePage({ mode }: { mode: Mode }) {
                 </MenuItem>
               ))}
             </TextField>
+          )}
+          {delivered.length > 0 && can(MIAMI_PERMISSION) && (
+            <Button
+              variant="outlined"
+              onClick={() =>
+                setSelected(new Set(delivered.map((row) => row.candidateId)))
+              }
+            >
+              Selecionar entregues ({delivered.length})
+            </Button>
           )}
         </Stack>
 

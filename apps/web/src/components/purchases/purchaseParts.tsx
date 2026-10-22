@@ -17,6 +17,15 @@ export type Phase =
   | "EM_MIAMI"
   | "EM_REMESSA"
   | "NO_BRASIL";
+/** Último status de entrega de um rastreio (Parcel): 0 entregue, 2 em trânsito, 4 saiu para entrega, 7 exceção etc. */
+export type Delivery = {
+  status: number;
+  rotulo: string;
+  evento: string | null;
+  local: string | null;
+  data: string | null;
+  consultadoEm: string;
+};
 export type StoreRef = { id: string; slug: string; nome: string };
 export type PurchaseRow = {
   candidateId: string;
@@ -42,7 +51,13 @@ export type PurchaseRow = {
     enviadaEm: string | null;
     chegouBrasilEm: string | null;
   } | null;
-  trackings: { carrier: string | null; code: string }[];
+  trackings: {
+    carrier: string | null;
+    code: string;
+    entrega: Delivery | null;
+  }[];
+  /** Todos os rastreios da compra constam como entregues no Parcel. */
+  entregue: boolean;
   items: {
     title: string;
     quantity: number;
@@ -120,6 +135,37 @@ export function CopyTracking({ code }: { code: string }) {
   );
 }
 
+const deliveryColor: Record<
+  number,
+  "success" | "info" | "warning" | "error" | "default"
+> = {
+  0: "success",
+  2: "info",
+  3: "warning",
+  4: "info",
+  6: "warning",
+  7: "error",
+  8: "info"
+};
+
+/** Situação da entrega vinda do Parcel; o evento mais recente aparece ao passar o mouse. */
+function DeliveryChip({ entrega }: { entrega: Delivery }) {
+  const detail = [entrega.evento, entrega.local, entrega.data]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <Tooltip title={detail || entrega.rotulo}>
+      <Chip
+        size="small"
+        variant="outlined"
+        color={deliveryColor[entrega.status] ?? "default"}
+        label={entrega.rotulo}
+        sx={{ fontSize: 10, height: 20 }}
+      />
+    </Tooltip>
+  );
+}
+
 export function TrackingCell({ row }: { row: PurchaseRow }) {
   if (!row.trackings.length)
     return (
@@ -155,6 +201,7 @@ export function TrackingCell({ row }: { row: PurchaseRow }) {
             {tracking.code}
           </Typography>
           <CopyTracking code={tracking.code} />
+          {tracking.entrega && <DeliveryChip entrega={tracking.entrega} />}
         </Stack>
       ))}
     </Stack>

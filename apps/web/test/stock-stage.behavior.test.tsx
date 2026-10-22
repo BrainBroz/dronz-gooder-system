@@ -12,8 +12,8 @@ const base = {
   account: "existence01", purpose: "LOJA", canApprove: false, canChangeStore: false, store: { id: "store-gooder", slug: "gooder", nome: "Gooder" }
 };
 const row = (id: string, fase: string, title: string, over: Record<string, unknown> = {}) => ({
-  ...base, candidateId: id, orderId: `ORD-${id}`, fase, shippedAt: "2026-10-06T10:00:00.000Z", etapa: null,
-  trackings: [{ carrier: "USPS", code: `94001${id}` }],
+  ...base, candidateId: id, orderId: `ORD-${id}`, fase, shippedAt: "2026-10-06T10:00:00.000Z", etapa: null, entregue: false,
+  trackings: [{ carrier: "USPS", code: `94001${id}`, entrega: null }],
   items: [{ title, quantity: 2, cancelledQuantity: 0, unitPrice: 100, currency: "USD", imageUrl: null }], ...over
 });
 const miamiRows = [
@@ -124,6 +124,39 @@ describe("Estoque Miami", () => {
     expect(params(get)[0]).not.toHaveProperty("lojaId");
     await user.type(screen.getByRole("textbox", { name: "Buscar produto, pedido ou rastreio" }), "watch");
     await waitFor(() => expect(params(get).at(-1)).toMatchObject({ busca: "watch" }));
+  });
+});
+
+describe("Estoque Miami: entrega do Parcel", () => {
+  const delivered = (id: string, title: string) =>
+    row(id, "A_CAMINHO_MIAMI", title, {
+      entregue: true,
+      trackings: [{ carrier: "UPS", code: `1Z${id}`, entrega: { status: 0, rotulo: "Entregue", evento: "Delivered", local: "Doral, FL", data: "2026-10-12 09:00", consultadoEm: "2026-10-21T12:00:00.000Z" } }]
+    });
+  const moving = row("m1", "A_CAMINHO_MIAMI", "Pixel 10", {
+    trackings: [{ carrier: "FEDEX", code: "FDX-m1", entrega: { status: 4, rotulo: "Saiu para entrega", evento: null, local: null, data: null, consultadoEm: "2026-10-21T12:00:00.000Z" } }]
+  });
+
+  it("mostra a situação da entrega ao lado do rastreio e seleciona de uma vez as já entregues", async () => {
+    const user = userEvent.setup();
+    mock([delivered("d1", "Galaxy S26"), delivered("d2", "Echo Show"), moving, ...miamiRows.slice(1)]);
+    const put = vi.spyOn(api, "put").mockResolvedValue({ data: { alteradas: 2, iguais: 0 } });
+    renderWithProviders(<StockStagePage mode="MIAMI" />, { permissions: perms });
+    await screen.findByText("Galaxy S26");
+    expect(screen.getAllByText("Entregue")).toHaveLength(2);
+    expect(screen.getByText("Saiu para entrega")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Selecionar entregues (2)" }));
+    expect(screen.getByText("2 selecionadas")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Chegou em Miami" }));
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
+    expect(put.mock.calls[0]![1]).toMatchObject({ candidateIds: ["d1", "d2"], etapa: "EM_MIAMI" });
+  });
+
+  it("sem entregas conhecidas ou sem permissão, não oferece 'Selecionar entregues'", async () => {
+    mock([moving, delivered("d1", "Galaxy S26")]);
+    renderWithProviders(<StockStagePage mode="MIAMI" />, { permissions: ["BUYER_INGESTION_VISUALIZAR"] });
+    await screen.findByText("Galaxy S26");
+    expect(screen.queryByRole("button", { name: /Selecionar entregues/ })).toBeNull();
   });
 });
 

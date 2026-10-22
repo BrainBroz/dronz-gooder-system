@@ -3062,7 +3062,7 @@ describe("Compras: lista com foto, loja da conta e atribuição automática", ()
     const before = await feed(fixture, "?limit=100");
     const row = before.items.find((item) => item.candidateId === recorded.candidateId)!;
     expect(row).toMatchObject({ status: "AGUARDANDO_APROVACAO", store: { slug: "gooder" }, purpose: "LOJA", externalStatus: "Completed", shippedAt: "2026-07-14T10:00:00.000Z", canApprove: true });
-    expect(row.trackings).toEqual([{ carrier: "USPS", code: "9400111" }]);
+    expect(row.trackings).toEqual([{ carrier: "USPS", code: "9400111", entrega: null }]);
     expect(row.items).toEqual([expect.objectContaining({ title: "Apple iPhone 17 Pro Max 1 TB", quantity: 2, unitPrice: 900, imageUrl: "https://i.ebayimg.com/images/g/abc/s-l500.jpg" })]);
     // filtros: por loja e por status
     expect((await feed(fixture, `?lojaId=${fixture.dronz.id}&limit=100`)).items.some((item) => item.candidateId === recorded.candidateId)).toBe(false);
@@ -3232,6 +3232,42 @@ describe("Compras: lista com foto, loja da conta e atribuição automática", ()
     await prisma.usuario.delete({ where: { id: limited.id } });
     await prisma.perfilPermissao.deleteMany({ where: { perfilId: profile.id } });
     await prisma.perfil.delete({ where: { id: profile.id } });
+  });
+
+  it("o status de entrega do Parcel aparece em cada rastreio e só marca 'entregue' quando todos chegaram", async () => {
+    const dedicated = await connectionFixture("EBAY", "STORE_DEDICATED", `parcel-${randomUUID().slice(0, 6)}`, "gooder");
+    const tag = randomUUID().slice(0, 6).toUpperCase();
+    const twoPackages = (id: string) => ({
+      ...ebayOrder(id),
+      shipments: [{
+        externalShipmentId: id, status: "SHIPPED", shippedAt: "2026-07-14T10:00:00.000Z", updatedAt: "2026-07-14T10:00:00.000Z",
+        packages: [
+          { externalPackageId: `USPS:PCL${tag}A`, carrier: "USPS", trackings: [{ code: `pcl${tag}a`, carrier: "USPS", updatedAt: "2026-07-14T10:00:00.000Z" }] },
+          { externalPackageId: `UPS:PCL${tag}B`, carrier: "UPS", trackings: [{ code: `PCL${tag}B`, carrier: "UPS", updatedAt: "2026-07-14T10:00:00.000Z" }] }
+        ]
+      }]
+    });
+    const recorded = await record(dedicated, twoPackages(`batch8-PCL-${tag}`));
+    type Tracked = { candidateId: string; entregue: boolean; trackings: { code: string; entrega: { status: number; rotulo: string; evento: string | null; local: string | null } | null }[] };
+    const rowOf = async () => ((await feed(dedicated, "?limit=300")).items as unknown as Tracked[]).find((item) => item.candidateId === recorded.candidateId)!;
+
+    const byCode = (row: Tracked, code: string) => row.trackings.find((tracking) => tracking.code.toUpperCase() === code)!;
+    const first = await rowOf();
+    expect(first.entregue).toBe(false);
+    expect(first.trackings.map((tracking) => tracking.entrega)).toEqual([null, null]);
+    await prisma.statusRastreio.create({ data: { codigo: `PCL${tag}A`, transportadora: "usps", statusCodigo: 0, ultimoEvento: "Delivered", ultimoEventoLocal: "Doral, FL", ultimoEventoData: "2026-07-20 10:00", consultadoEm: new Date() } });
+    const partial = await rowOf();
+    expect(partial.entregue).toBe(false); // um pacote entregue e o outro sem informação não é "tudo entregue"
+    expect(byCode(partial, `PCL${tag}A`).entrega).toMatchObject({ status: 0, rotulo: "Entregue", evento: "Delivered", local: "Doral, FL" });
+    expect(byCode(partial, `PCL${tag}B`).entrega).toBeNull();
+    await prisma.statusRastreio.create({ data: { codigo: `PCL${tag}B`, transportadora: "ups", statusCodigo: 0, consultadoEm: new Date() } });
+    expect((await rowOf()).entregue).toBe(true);
+    await prisma.statusRastreio.update({ where: { codigo: `PCL${tag}B` }, data: { statusCodigo: 4 } });
+    const moving = await rowOf();
+    expect(moving.entregue).toBe(false);
+    expect(byCode(moving, `PCL${tag}A`).entrega).toMatchObject({ status: 0 });
+    expect(byCode(moving, `PCL${tag}B`).entrega).toMatchObject({ status: 4, rotulo: "Saiu para entrega" });
+    await prisma.statusRastreio.deleteMany({ where: { codigo: { in: [`PCL${tag}A`, `PCL${tag}B`] } } });
   });
 
   it("busca a foto principal de cada anúncio no eBay, guarda uma vez e não deixa a falha de um derrubar os outros", async () => {
