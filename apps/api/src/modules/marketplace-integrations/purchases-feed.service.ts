@@ -94,14 +94,19 @@ const stageOf = (stage: { chegouMiamiEm: Date | null; remessa: string | null; en
   enviadaEm: stage.enviadaEm?.toISOString() ?? null,
   chegouBrasilEm: stage.chegouBrasilEm?.toISOString() ?? null
 });
-const deliveryOf = (delivery: { statusCodigo: number; ultimoEvento: string | null; ultimoEventoLocal: string | null; ultimoEventoData: string | null; consultadoEm: Date }) => ({
-  status: delivery.statusCodigo,
-  rotulo: statusLabel(delivery.statusCodigo),
-  evento: delivery.ultimoEvento,
-  local: delivery.ultimoEventoLocal,
-  data: delivery.ultimoEventoData,
-  consultadoEm: delivery.consultadoEm.toISOString()
-});
+// O Parcel marca como "entregue" (0) o pacote devolvido ao remetente; isso não é chegada: vira exceção e não conta como entrega.
+const returnedToSender = /return(ed)?\s+to\s+(the\s+)?sender/i;
+const deliveryOf = (delivery: { statusCodigo: number; ultimoEvento: string | null; ultimoEventoLocal: string | null; ultimoEventoData: string | null; consultadoEm: Date }) => {
+  const returned = delivery.statusCodigo === DELIVERED && returnedToSender.test(delivery.ultimoEvento ?? "");
+  return {
+    status: returned ? 7 : delivery.statusCodigo,
+    rotulo: returned ? "Devolvido ao remetente" : statusLabel(delivery.statusCodigo),
+    evento: delivery.ultimoEvento,
+    local: delivery.ultimoEventoLocal,
+    data: delivery.ultimoEventoData,
+    consultadoEm: delivery.consultadoEm.toISOString()
+  };
+};
 
 /** Carrega os pedidos visíveis ao usuário (eBay e cadastrados à mão), já com loja efetiva e fase. Sem fotos do eBay. */
 export async function loadRows(identity: AuthIdentity, input: { status?: string; finalidade?: string }): Promise<FeedRow[]> {

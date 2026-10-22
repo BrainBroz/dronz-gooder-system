@@ -3348,6 +3348,14 @@ describe("Compras: lista com foto, loja da conta e atribuição automática", ()
     expect(row).toMatchObject({ status: "APROVADA", entregue: true, fase: "ENTREGUE" }); // aparece como Entregue, mas só a equipe confirma a chegada em Miami
     expect(row.trackings[0]!.entrega).toMatchObject({ status: 0, rotulo: "Entregue", evento: "Entregue (informado pelo eBay)", data: "2026-07-18T15:00:00.000Z" });
 
+    // Pacote devolvido ao remetente vem do Parcel como "entregue", mas não é chegada: aparece como devolvido.
+    await prisma.statusRastreio.create({ data: { codigo: "9400111", statusCodigo: 0, ultimoEvento: "Package was returned to the sender. Received By: SULLIVAN", consultadoEm: new Date() } });
+    try {
+      expect((await rowOf()).trackings[0]!.entrega).toMatchObject({ status: 7, rotulo: "Devolvido ao remetente" });
+    } finally {
+      await prisma.statusRastreio.deleteMany({ where: { codigo: "9400111" } });
+    }
+
     // Se o Parcel já tem status para o código, ele aparece no lugar do aviso do eBay.
     await prisma.statusRastreio.create({ data: { codigo: "9400111", statusCodigo: 4, ultimoEvento: "Out for delivery", consultadoEm: new Date() } });
     try {
