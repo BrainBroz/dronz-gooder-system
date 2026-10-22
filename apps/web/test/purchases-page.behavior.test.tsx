@@ -194,6 +194,17 @@ describe("Compras: atualizar agora", () => {
     await waitFor(() => expect(callsTo(get, LOTS).length).toBeGreaterThan(before));
   });
 
+  it("mostra o resultado do Parcel e explica quando ele recusa a chave", async () => {
+    const user = userEvent.setup();
+    mock();
+    vi.spyOn(api, "post").mockResolvedValue({
+      data: { resultados: [{ conexao: "Existence", status: "SUCCEEDED", criados: 0, atualizados: 3 }, { conexao: "Parcel (rastreio)", status: "FALHOU", erro: "parcel_rejected" }] }
+    });
+    renderWithProviders(<PurchasesPage />, { permissions: [...perms, "INTEGRACAO_MARKETPLACE_SINCRONIZAR"] });
+    await user.click(await screen.findByRole("button", { name: "Atualizar agora" }));
+    expect(await screen.findByText(/Parcel \(rastreio\): o Parcel recusou a chave/)).toBeTruthy();
+  });
+
   it("explica quando a autorização do eBay expirou", async () => {
     const user = userEvent.setup();
     mock();

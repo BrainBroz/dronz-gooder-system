@@ -5,6 +5,7 @@ import { prisma } from "../../lib/prisma";
 import type { AuthIdentity } from "../../middlewares/auth";
 import { itemImages } from "./item-images";
 import { normalizedMarketplaceOrderSchema } from "./marketplace-integrations.schemas";
+import { DELIVERED, normalizeTracking, statusLabel } from "./parcel-tracking.service";
 
 const filtersShape = {
   status: z.enum(["AGUARDANDO_APROVACAO", "COM_DIVERGENCIA", "APROVADA", "REJEITADA", "CANCELADA"]).optional(),
@@ -78,6 +79,9 @@ export async function loadRows(identity: AuthIdentity, input: { status?: string;
       ])
     : [[], [], []];
   const stageByPurchase = new Map(stages.map((stage) => [stage.compraImportadaId, stage]));
+  // Status de entrega dos rastreios (vindo do Parcel, quando configurado): só informa, não muda a fase.
+  const codes = parsed.flatMap(({ order }) => order.shipments.flatMap((shipment) => shipment.packages.flatMap((pack) => pack.trackings.map((tracking) => normalizeTracking(tracking.code)))));
+  const deliveries = new Map((codes.length ? await prisma.statusRastreio.findMany({ where: { codigo: { in: codes } } }) : []).map((entry) => [entry.codigo, entry]));
   const storesByPurchase = new Map<string, Map<string, { id: string; slug: string; nome: string }>>();
   for (const assignment of assignments) {
     const bucket = storesByPurchase.get(assignment.itemExterno.compraImportadaId) ?? new Map();
@@ -93,7 +97,20 @@ export async function loadRows(identity: AuthIdentity, input: { status?: string;
       ? { id: connection.lojaPermitida.id, slug: connection.lojaPermitida.slug, nome: connection.lojaPermitida.nome }
       : null;
     const shipments = order.shipments;
-    const trackings = shipments.flatMap((shipment) => shipment.packages.flatMap((pack) => pack.trackings.map((tracking) => ({ carrier: tracking.carrier ?? pack.carrier ?? null, code: tracking.code }))));
+    const trackings = shipments.flatMap((shipment) =>
+      shipment.packages.flatMap((pack) =>
+        pack.trackings.map((tracking) => {
+          const delivery = deliveries.get(normalizeTracking(tracking.code));
+          return {
+            carrier: tracking.carrier ?? pack.carrier ?? null,
+            code: tracking.code,
+            entrega: delivery
+              ? { status: delivery.statusCodigo, rotulo: statusLabel(delivery.statusCodigo), evento: delivery.ultimoEvento, local: delivery.ultimoEventoLocal, data: delivery.ultimoEventoData, consultadoEm: delivery.consultadoEm.toISOString() }
+              : null
+          };
+        })
+      )
+    );
     const stage = candidate.compraImportadaId ? (stageByPurchase.get(candidate.compraImportadaId) ?? null) : null;
     const phase: PurchasePhase = order.cancelled ? "CANCELADO" : stage ? stage.etapa : trackings.length ? "A_CAMINHO_MIAMI" : "COMPRADO";
     return {
@@ -118,6 +135,7 @@ export async function loadRows(identity: AuthIdentity, input: { status?: string;
         ? { chegouMiamiEm: stage.chegouMiamiEm?.toISOString() ?? null, remessa: stage.remessa, enviadaEm: stage.enviadaEm?.toISOString() ?? null, chegouBrasilEm: stage.chegouBrasilEm?.toISOString() ?? null }
         : null,
       trackings,
+      entregue: trackings.length > 0 && trackings.every((tracking) => tracking.entrega?.status === DELIVERED),
       rawItems: order.items,
       canApprove: candidate.status === "AGUARDANDO_APROVACAO" && !candidate.compraImportadaId && can(identity, "BUYER_INGESTION_APROVAR")
     };

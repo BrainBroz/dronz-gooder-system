@@ -23,6 +23,8 @@ export const monthLabel = (mes: string) => new Date(`${mes}-15T12:00:00`).toLoca
 const refreshProblem: Record<string, string> = {
   marketplace_authorization_expired: "autorização do eBay expirada: reconecte em Integrações",
   marketplace_provider_not_configured: "leitura do eBay desligada neste servidor",
+  parcel_rejected: "o Parcel recusou a chave: confira PARCEL_API_KEY",
+  parcel_unavailable: "o Parcel não respondeu agora",
   marketplace_sync_in_progress: "já estava atualizando"
 };
 
