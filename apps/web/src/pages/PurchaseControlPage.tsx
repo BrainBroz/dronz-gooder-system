@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Autocomplete, Box, Chip, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, ToggleButton, ToggleButtonGroup, Tooltip, Typography } from "@mui/material";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
@@ -82,7 +83,10 @@ export function PurchaseControlPage() {
   const store = useAuthStore((s) => s.activeStoreId);
   const canEdit = useAuthStore((s) => s.permissions.some((code) => code === "SYSTEM_ADMIN" || code === "SIMULACAO_GERENCIAR"));
   const client = useQueryClient();
-  const [month, setMonth] = useState(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`);
+  const [params] = useSearchParams();
+  // O mês pode vir da tela de Compras (?mes=AAAA-MM).
+  const requested = params.get("mes");
+  const [month, setMonth] = useState(requested && /^\d{4}-(0[1-9]|1[0-2])$/.test(requested) ? requested : `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`);
   const [view, setView] = useState<"resumido" | "detalhado">("resumido");
   const headers = { ...authHeader(), "x-store-id": store };
   const [ano, mes] = month.split("-").map(Number);
