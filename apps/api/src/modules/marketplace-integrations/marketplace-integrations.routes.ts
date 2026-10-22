@@ -20,6 +20,7 @@ import * as service from "./marketplace-integrations.service";
 import * as ebayOAuth from "./ebay-oauth.service";
 import * as purchasesFeed from "./purchases-feed.service";
 import * as purchaseStage from "./purchase-stage.service";
+import * as manualPurchase from "./manual-purchase.service";
 import { refreshForUser } from "./marketplace-refresh";
 
 export const marketplaceIntegrationsRouter = Router();
@@ -78,6 +79,23 @@ marketplaceIntegrationsRouter.post(
   })
 );
 
+marketplaceIntegrationsRouter.post(
+  "/purchases/manual",
+  requirePermission("COMPRAS_IMPORTADAS_IMPORTAR"),
+  wrap(async (request, response) => {
+    const key = request.header("idempotency-key") || undefined;
+    response.status(201).json(await manualPurchase.registerManualPurchase(identity(request), manualPurchase.manualPurchaseSchema.parse(request.body), key));
+  })
+);
+
+marketplaceIntegrationsRouter.put(
+  "/purchases/:rowId/tracking",
+  requirePermission("COMPRAS_IMPORTADAS_IMPORTAR"),
+  wrap(async (request, response) => {
+    response.json(await manualPurchase.setManualTracking(identity(request), purchasesFeed.rowIdSchema.parse(request.params.rowId), manualPurchase.manualTrackingSchema.parse(request.body)));
+  })
+);
+
 marketplaceIntegrationsRouter.put(
   "/purchases/stage",
   requirePermission("BUYER_INGESTION_VISUALIZAR"),
@@ -90,7 +108,7 @@ marketplaceIntegrationsRouter.put(
   "/purchases/:candidateId/store",
   requirePermission("COMPRAS_IMPORTADAS_ATRIBUIR"),
   wrap(async (request, response) => {
-    response.json(await purchasesFeed.setPurchaseStore(identity(request), z.string().cuid().parse(request.params.candidateId), purchasesFeed.storeSchema.parse(request.body)));
+    response.json(await purchasesFeed.setPurchaseStore(identity(request), purchasesFeed.rowIdSchema.parse(request.params.candidateId), purchasesFeed.storeSchema.parse(request.body)));
   })
 );
 

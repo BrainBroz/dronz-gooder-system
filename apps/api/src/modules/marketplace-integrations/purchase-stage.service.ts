@@ -3,7 +3,7 @@ import { AppError } from "../../lib/app-error";
 import { prisma } from "../../lib/prisma";
 import type { AuthIdentity } from "../../middlewares/auth";
 import { audit } from "../operations/operations.persistence";
-import { loadRows } from "./purchases-feed.service";
+import { loadRows, rowIdSchema } from "./purchases-feed.service";
 
 // COMPRADO = antes de Miami (o "a caminho de Miami" vem do rastreio do vendedor, não de uma etapa gravada).
 const ORDER = ["COMPRADO", "EM_MIAMI", "EM_REMESSA", "NO_BRASIL"] as const;
@@ -11,7 +11,7 @@ type Target = (typeof ORDER)[number];
 
 export const stageSchema = z
   .object({
-    candidateIds: z.array(z.string().cuid()).min(1).max(300),
+    candidateIds: z.array(rowIdSchema).min(1).max(300),
     etapa: z.enum(ORDER),
     // Dia em que aconteceu (padrão: agora); serve para registrar o que já chegou antes de usar o sistema.
     ocorreuEm: z.coerce.date().refine((date) => date.getTime() <= Date.now() + 24 * 60 * 60 * 1000, "future_date").optional(),
@@ -48,8 +48,7 @@ export async function setPurchaseStage(identity: AuthIdentity, input: z.infer<ty
   await prisma.$transaction(async (tx) => {
     for (const entry of plan) {
       if (entry.skip) continue;
-      const candidate = await tx.buyerPurchaseCandidate.findUniqueOrThrow({ where: { id: entry.row.candidateId }, select: { compraImportadaId: true } });
-      const purchaseId = candidate.compraImportadaId;
+      const purchaseId = entry.row.purchaseId;
       if (!purchaseId) throw new AppError(409, "purchase_not_confirmed");
       const before = await tx.etapaCompra.findUnique({ where: { compraImportadaId: purchaseId } });
       if (input.etapa === "COMPRADO") await tx.etapaCompra.deleteMany({ where: { compraImportadaId: purchaseId } });

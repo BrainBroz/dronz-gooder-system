@@ -7,8 +7,7 @@ import { authHeader, useAuthStore } from "../stores/auth";
 import { ContentCard } from "../components/ui/ContentCard";
 import { PageContainer } from "../components/ui/PageContainer";
 import { PageHeader } from "../components/ui/PageHeader";
-import { NewPurchaseDrawer } from "../components/purchases/NewPurchaseDrawer";
-import { useUnifiedPurchases } from "../hooks/useUnifiedPurchases";
+import { ManualPurchaseDrawer, TrackingEditDialog } from "../components/purchases/ManualPurchase";
 import { extractErrorMessage } from "../utils/errors";
 import { storeColor, storeTextColor } from "../theme";
 import { brl, percent } from "../api/economic";
@@ -109,6 +108,8 @@ export function PurchasesPage() {
   const [fase, setFase] = useState<"" | Phase>("");
   const [busca, setBusca] = useState("");
   const [newOpen, setNewOpen] = useState(false);
+  const [registered, setRegistered] = useState<string | null>(null);
+  const [trackingRow, setTrackingRow] = useState<PurchaseRow | null>(null);
   const [refreshed, setRefreshed] = useState<RefreshResult[] | null>(null);
 
   const lots = useQuery<Lots>({
@@ -135,7 +136,6 @@ export function PurchasesPage() {
   });
   const projections = new Map<string, Projection>();
   controls.forEach((query) => query.data?.forEach((line) => projections.set(`${line.numeroPedido}|${line.titulo}`, { vendaUnitariaBrl: line.entrada.vendaUnitariaBrl, markup: line.calculo.indicadores.resultadoSobreCustoPercentual })));
-  const legacy = useUnifiedPurchases({ page: 1, limit: 100 }, can("COMPRAS_IMPORTADAS_VISUALIZAR"));
   const invalidate = () => Promise.all([client.invalidateQueries({ queryKey: ["purchases-feed"] }), client.invalidateQueries({ queryKey: ["purchase-lots"] })]);
   const refresh = useMutation({
     mutationFn: async () => (await api.post(`${BASE}/purchases/refresh`, {}, { headers: authHeader() })).data as { resultados: RefreshResult[] },
@@ -198,6 +198,7 @@ export function PurchasesPage() {
               : refreshed.map((entry) => (entry.erro ? `${entry.conexao}: ${refreshProblem[entry.erro] ?? entry.erro}` : `${entry.conexao}: ${entry.criados ?? 0} com novidades, ${entry.atualizados ?? 0} sem mudança`)).join(" · ")}
           </Alert>
         )}
+        {registered && <Alert severity="success" onClose={() => setRegistered(null)}>Compra {registered} cadastrada e confirmada.</Alert>}
         {confirm.isError && <Alert severity="error">{extractErrorMessage(confirm.error)}</Alert>}
         {changeStore.isError && <Alert severity="error">{extractErrorMessage(changeStore.error)}</Alert>}
 
@@ -271,7 +272,7 @@ export function PurchasesPage() {
                           <TableCell sx={{ whiteSpace: "nowrap" }}>{brl(projections.get(`${row.orderId}|${item.title}`)?.vendaUnitariaBrl)}</TableCell>
                           <TableCell sx={{ whiteSpace: "nowrap" }}>{percent(projections.get(`${row.orderId}|${item.title}`)?.markup ?? null)}</TableCell>
                           <TableCell><StatusCell row={row} busy={busy} onConfirm={() => confirm.mutate([row])} /></TableCell>
-                          <TableCell><TrackingCell row={row} /></TableCell>
+                          <TableCell><TrackingCell row={row} onEdit={setTrackingRow} /></TableCell>
                         </TableRow>
                       ))
                     )}
@@ -282,7 +283,8 @@ export function PurchasesPage() {
           </>
         )}
       </Stack>
-      <NewPurchaseDrawer open={newOpen} onClose={() => setNewOpen(false)} listItems={legacy.list.data?.items ?? []} />
+      <ManualPurchaseDrawer open={newOpen} onClose={() => setNewOpen(false)} onCreated={setRegistered} />
+      {trackingRow && <TrackingEditDialog key={trackingRow.candidateId} row={trackingRow} onClose={() => setTrackingRow(null)} />}
     </PageContainer>
   );
 }

@@ -35,6 +35,7 @@ import {
   type Phase,
   type PurchaseRow
 } from "../components/purchases/purchaseParts";
+import { TrackingEditDialog } from "../components/purchases/ManualPurchase";
 import { extractErrorMessage } from "../utils/errors";
 
 type Mode = "MIAMI" | "BRASIL";
@@ -174,6 +175,7 @@ export function StockStagePage({ mode }: { mode: Mode }) {
   const [date, setDate] = useState(today);
   const [remessa, setRemessa] = useState("");
   const [done, setDone] = useState<string | null>(null);
+  const [trackingRow, setTrackingRow] = useState<PurchaseRow | null>(null);
 
   const feed = useQuery<Feed>({
     queryKey: [
@@ -510,7 +512,9 @@ export function StockStagePage({ mode }: { mode: Mode }) {
                           <StoreTag row={row} />
                         </TableCell>
                         <TableCell>
-                          {index === 0 ? <TrackingCell row={row} /> : null}
+                          {index === 0 ? (
+                            <TrackingCell row={row} onEdit={setTrackingRow} />
+                          ) : null}
                         </TableCell>
                         <TableCell sx={{ whiteSpace: "nowrap" }}>
                           <Typography variant="body2">
@@ -546,6 +550,13 @@ export function StockStagePage({ mode }: { mode: Mode }) {
           </Box>
         )}
       </Stack>
+      {trackingRow && (
+        <TrackingEditDialog
+          key={trackingRow.candidateId}
+          row={trackingRow}
+          onClose={() => setTrackingRow(null)}
+        />
+      )}
     </PageContainer>
   );
 }

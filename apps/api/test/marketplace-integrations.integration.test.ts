@@ -3270,6 +3270,68 @@ describe("Compras: lista com foto, loja da conta e atribuição automática", ()
     await prisma.statusRastreio.deleteMany({ where: { codigo: { in: [`PCL${tag}A`, `PCL${tag}B`] } } });
   });
 
+  it("compra cadastrada à mão entra confirmada na lista, com rastreio, troca de loja, etapa e lote; respeita loja e permissão", async () => {
+    const current = await session();
+    const tag = randomUUID().slice(0, 6).toUpperCase();
+    const post = (token: string, body: object, key?: string) => {
+      const call = request(current.app).post("/integrations/marketplaces/purchases/manual").set(bearer(token));
+      return (key ? call.set("idempotency-key", key) : call).send(body);
+    };
+    const body = {
+      lojaId: current.gooder.id, referencia: `SHOP-${tag}`, vendedor: "Shop.com", dataPedido: "2026-10-18",
+      itens: [{ titulo: `Aspirador Dyson ${tag}`, quantidade: 2, precoUnitario: 349.99, fotoUrl: "https://img.example.com/dyson.jpg" }, { titulo: `Filtro ${tag}`, quantidade: 1, precoUnitario: 19.9 }],
+      rastreio: { codigo: `1Z${tag}`, transportadora: "UPS" }
+    };
+    const key = `manual-${tag}-chave-1`;
+    const created = await post(current.token, body, key);
+    expect(created.status).toBe(201);
+    const id = created.body.id as string;
+    expect(id).toMatch(/^m_c/);
+    expect((await post(current.token, body, key)).body.id).toBe(id); // repetir com a mesma chave não duplica
+    expect(await prisma.compraImportada.count({ where: { numeroPedido: `SHOP-${tag}` } })).toBe(1);
+
+    type Row = { candidateId: string; status: string; fase: string; orderId: string; account: string; manual: boolean; canApprove: boolean; canChangeStore: boolean; canEditTracking: boolean; store: { slug: string } | null; trackings: { carrier: string; code: string }[]; items: { title: string; quantity: number; unitPrice: number; imageUrl: string | null }[] };
+    const rowOf = async (token = current.token) => ((await request(current.app).get("/integrations/marketplaces/purchases?limit=300").set(bearer(token))).body.items as Row[]).find((item) => item.candidateId === id);
+    expect(await rowOf()).toMatchObject({
+      status: "APROVADA", fase: "A_CAMINHO_MIAMI", orderId: `SHOP-${tag}`, account: "Shop.com", manual: true, canApprove: false, canChangeStore: true, canEditTracking: true,
+      store: { slug: "gooder" }, trackings: [{ carrier: "UPS", code: `1Z${tag}` }],
+      items: [{ title: `Aspirador Dyson ${tag}`, quantity: 2, unitPrice: 349.99, imageUrl: "https://img.example.com/dyson.jpg" }, { title: `Filtro ${tag}`, quantity: 1, unitPrice: 19.9, imageUrl: null }]
+    });
+    // aparece no lote do mês e nos filtros de loja, e não na origem "pessoal"
+    const lots = (await request(current.app).get(`/integrations/marketplaces/purchases/lots?lojaId=${current.gooder.id}`).set(bearer(current.token))).body as { lotes: { mes: string; pedidos: number }[] };
+    expect(lots.lotes.find((lot) => lot.mes === "2026-10")!.pedidos).toBeGreaterThanOrEqual(1);
+    const personal = (await request(current.app).get("/integrations/marketplaces/purchases?finalidade=PESSOAL&limit=300").set(bearer(current.token))).body.items as Row[];
+    expect(personal.some((item) => item.candidateId === id)).toBe(false);
+
+    // rastreio: tirar volta para "Comprado"; incluir de novo volta para "A caminho de Miami"
+    const tracking = (token: string, rastreio: object | null) => request(current.app).put(`/integrations/marketplaces/purchases/${id}/tracking`).set(bearer(token)).send({ rastreio });
+    expect((await tracking(current.token, null)).status).toBe(200);
+    expect(await rowOf()).toMatchObject({ fase: "COMPRADO", trackings: [] });
+    expect((await tracking(current.token, { codigo: `9400${tag}`, transportadora: "USPS" })).body.rastreios).toEqual([{ codigo: `9400${tag}`, transportadora: "USPS" }]);
+    expect(await rowOf()).toMatchObject({ fase: "A_CAMINHO_MIAMI", trackings: [{ carrier: "USPS", code: `9400${tag}` }] });
+
+    // trocar a loja com um clique e andar uma etapa
+    expect((await request(current.app).put(`/integrations/marketplaces/purchases/${id}/store`).set(bearer(current.token)).send({ lojaId: current.dronz.id })).status).toBe(200);
+    expect(await rowOf()).toMatchObject({ store: { slug: "dronz" } });
+    const staged = await request(current.app).put("/integrations/marketplaces/purchases/stage").set(bearer(current.token)).send({ candidateIds: [id], etapa: "EM_MIAMI" });
+    expect(staged.body).toEqual({ alteradas: 1, iguais: 0 });
+    expect(await rowOf()).toMatchObject({ fase: "EM_MIAMI" });
+
+    // regras: só as lojas do usuário, data no futuro e permissão
+    const otherStore = await scopedUser(current, ["BUYER_INGESTION_VISUALIZAR", "COMPRAS_IMPORTADAS_IMPORTAR", "COMPRAS_IMPORTADAS_ATRIBUIR", "MIAMI_RECEBIMENTO_CONFIRMAR"], [current.gooder.id]);
+    expect(await rowOf(otherStore)).toBeUndefined(); // a compra agora é da Dronz
+    expect((await request(current.app).put(`/integrations/marketplaces/purchases/${id}/tracking`).set(bearer(otherStore)).send({ rastreio: null })).status).toBe(404);
+    expect((await post(otherStore, { ...body, referencia: `OUT-${tag}`, lojaId: current.dronz.id })).body.error).toBe("cross_store_access");
+    expect((await post(current.token, { ...body, referencia: `FUT-${tag}`, dataPedido: "2999-01-01" })).status).toBe(400);
+    expect((await post(current.token, { ...body, referencia: `VAZ-${tag}`, itens: [] })).status).toBe(400);
+    const viewer = await scopedUser(current, ["BUYER_INGESTION_VISUALIZAR"], [current.dronz.id]);
+    expect((await post(viewer, { ...body, referencia: `NOP-${tag}`, lojaId: current.dronz.id })).status).toBe(403);
+    expect((await tracking(viewer, null)).status).toBe(403);
+    // compra do eBay não aceita rastreio manual
+    expect((await request(current.app).put(`/integrations/marketplaces/purchases/c${randomUUID().replace(/-/g, "").slice(0, 24)}/tracking`).set(bearer(current.token)).send({ rastreio: null })).body.error).toBe("purchase_not_manual");
+    expect(await prisma.auditLog.count({ where: { action: "MANUAL_PURCHASE_REGISTERED", entityId: id.slice(2) } })).toBe(1);
+  });
+
   it("busca a foto principal de cada anúncio no eBay, guarda uma vez e não deixa a falha de um derrubar os outros", async () => {
     await import("../src/modules/marketplace-integrations/marketplace-integrations.adapters");
     const { EbayBuyerAdapter } = await import("../src/modules/marketplace-integrations/ebay-buyer.adapter");

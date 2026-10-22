@@ -1,3 +1,4 @@
+import type { MarketplaceProvider } from "@prisma/client";
 import { z } from "zod";
 import { AppError } from "../../lib/app-error";
 import { audit } from "../operations/operations.persistence";
@@ -43,8 +44,68 @@ const LOAD_LIMIT = 2000;
  */
 export type PurchasePhase = (typeof purchasePhases)[number];
 
-/** Carrega os pedidos visíveis ao usuário, já com loja efetiva (da conta dedicada ou da atribuição) e fase. Sem fotos. */
-export async function loadRows(identity: AuthIdentity, input: { status?: string; finalidade?: string }) {
+/** O que a compra manual guarda no próprio registro: vendedor e rastreios; a foto vai na linha do item. */
+export const manualSnapshotSchema = z.object({
+  vendedor: z.string().optional(),
+  rastreios: z.array(z.object({ codigo: z.string().min(1), transportadora: z.string().optional() })).default([])
+});
+export const manualItemSnapshotSchema = z.object({ fotoUrl: z.string().url().optional() });
+
+/** Identificador de uma linha da lista: o candidato do eBay (cuid) ou, nas compras cadastradas à mão, `m_` + id da compra. */
+export const rowIdSchema = z.string().regex(/^(m_)?c[0-9a-z]{8,}$/);
+export const MANUAL_PREFIX = "m_";
+
+type RawItem = { title: string; quantity: number; cancelledQuantity: number; refundedQuantity: number; unitPrice: number; currency: string; offerId?: string | null; imageUrl?: string | null };
+type Tracking = { carrier: string | null; code: string; entrega: { status: number; rotulo: string; evento: string | null; local: string | null; data: string | null; consultadoEm: string } | null };
+type Store = { id: string; slug: string; nome: string };
+export type FeedRow = {
+  provider: string;
+  candidateId: string;
+  purchaseId: string | null;
+  manual: boolean;
+  version: number;
+  status: "AGUARDANDO_APROVACAO" | "COM_DIVERGENCIA" | "APROVADA" | "REJEITADA" | "CANCELADA";
+  fase: PurchasePhase;
+  orderId: string;
+  orderedAt: string;
+  currency: string;
+  total: number | null;
+  externalStatus: string | null;
+  cancelled: boolean;
+  account: string;
+  purpose: "LOJA" | "PESSOAL";
+  store: Store | null;
+  canChangeStore: boolean;
+  canEditTracking: boolean;
+  shippedAt: string | null;
+  etapa: { chegouMiamiEm: string | null; remessa: string | null; enviadaEm: string | null; chegouBrasilEm: string | null } | null;
+  trackings: Tracking[];
+  entregue: boolean;
+  rawItems: RawItem[];
+  canApprove: boolean;
+};
+
+const stageOf = (stage: { chegouMiamiEm: Date | null; remessa: string | null; enviadaEm: Date | null; chegouBrasilEm: Date | null }) => ({
+  chegouMiamiEm: stage.chegouMiamiEm?.toISOString() ?? null,
+  remessa: stage.remessa,
+  enviadaEm: stage.enviadaEm?.toISOString() ?? null,
+  chegouBrasilEm: stage.chegouBrasilEm?.toISOString() ?? null
+});
+const deliveryOf = (delivery: { statusCodigo: number; ultimoEvento: string | null; ultimoEventoLocal: string | null; ultimoEventoData: string | null; consultadoEm: Date }) => ({
+  status: delivery.statusCodigo,
+  rotulo: statusLabel(delivery.statusCodigo),
+  evento: delivery.ultimoEvento,
+  local: delivery.ultimoEventoLocal,
+  data: delivery.ultimoEventoData,
+  consultadoEm: delivery.consultadoEm.toISOString()
+});
+
+/** Carrega os pedidos visíveis ao usuário (eBay e cadastrados à mão), já com loja efetiva e fase. Sem fotos do eBay. */
+export async function loadRows(identity: AuthIdentity, input: { status?: string; finalidade?: string }): Promise<FeedRow[]> {
+  return [...(await loadCandidateRows(identity, input)), ...(await loadManualRows(identity, input))];
+}
+
+async function loadCandidateRows(identity: AuthIdentity, input: { status?: string; finalidade?: string }): Promise<FeedRow[]> {
   const allowedStores = identity.lojas.map((store) => store.id);
   const where = {
     ...(input.status ? { status: input.status as "APROVADA" } : {}),
@@ -101,21 +162,17 @@ export async function loadRows(identity: AuthIdentity, input: { status?: string;
       shipment.packages.flatMap((pack) =>
         pack.trackings.map((tracking) => {
           const delivery = deliveries.get(normalizeTracking(tracking.code));
-          return {
-            carrier: tracking.carrier ?? pack.carrier ?? null,
-            code: tracking.code,
-            entrega: delivery
-              ? { status: delivery.statusCodigo, rotulo: statusLabel(delivery.statusCodigo), evento: delivery.ultimoEvento, local: delivery.ultimoEventoLocal, data: delivery.ultimoEventoData, consultadoEm: delivery.consultadoEm.toISOString() }
-              : null
-          };
+          return { carrier: tracking.carrier ?? pack.carrier ?? null, code: tracking.code, entrega: delivery ? deliveryOf(delivery) : null };
         })
       )
     );
     const stage = candidate.compraImportadaId ? (stageByPurchase.get(candidate.compraImportadaId) ?? null) : null;
     const phase: PurchasePhase = order.cancelled ? "CANCELADO" : stage ? stage.etapa : trackings.length ? "A_CAMINHO_MIAMI" : "COMPRADO";
     return {
-      provider: candidate.provider,
+      provider: candidate.provider as string,
       candidateId: candidate.id,
+      purchaseId: candidate.compraImportadaId,
+      manual: false,
       version: candidate.version,
       status: candidate.status,
       fase: phase,
@@ -131,13 +188,70 @@ export async function loadRows(identity: AuthIdentity, input: { status?: string;
       // Troca de loja: só em compra confirmada de conta compartilhada e antes de virar estoque.
       canChangeStore: Boolean(candidate.compraImportadaId) && !dedicated && !lockedPurchases.has(candidate.compraImportadaId!) && can(identity, "COMPRAS_IMPORTADAS_ATRIBUIR"),
       shippedAt: shipments.map((shipment) => shipment.shippedAt).find(Boolean) ?? null,
-      etapa: stage
-        ? { chegouMiamiEm: stage.chegouMiamiEm?.toISOString() ?? null, remessa: stage.remessa, enviadaEm: stage.enviadaEm?.toISOString() ?? null, chegouBrasilEm: stage.chegouBrasilEm?.toISOString() ?? null }
-        : null,
+      etapa: stage ? stageOf(stage) : null,
+      canEditTracking: false,
       trackings,
       entregue: trackings.length > 0 && trackings.every((tracking) => tracking.entrega?.status === DELIVERED),
       rawItems: order.items,
       canApprove: candidate.status === "AGUARDANDO_APROVACAO" && !candidate.compraImportadaId && can(identity, "BUYER_INGESTION_APROVAR")
+    };
+  });
+}
+
+/** Compras cadastradas à mão (sem candidato do eBay): sempre confirmadas, da loja escolhida, com rastreio e foto guardados na própria compra. */
+async function loadManualRows(identity: AuthIdentity, input: { status?: string; finalidade?: string }): Promise<FeedRow[]> {
+  if ((input.status && input.status !== "APROVADA") || input.finalidade === "PESSOAL") return [];
+  const allowedStores = identity.lojas.map((store) => store.id);
+  const purchases = await prisma.compraImportada.findMany({
+    where: { plataforma: "MANUAL", itens: { some: { atribuicoes: { some: { lojaId: { in: allowedStores } } } } } },
+    include: { itens: { orderBy: { identityDiscriminator: "asc" }, include: { atribuicoes: { include: { loja: true } } } }, etapa: true, materializacoes: { select: { id: true }, take: 1 } },
+    orderBy: [{ importadaEm: "desc" }, { id: "desc" }],
+    take: LOAD_LIMIT
+  });
+  const snapshots = purchases.map((purchase) => ({ purchase, snapshot: manualSnapshotSchema.safeParse(purchase.payloadSnapshot ?? {}).data ?? { rastreios: [] } }));
+  const codes = snapshots.flatMap(({ snapshot }) => snapshot.rastreios.map((tracking) => normalizeTracking(tracking.codigo)));
+  const deliveries = new Map((codes.length ? await prisma.statusRastreio.findMany({ where: { codigo: { in: codes } } }) : []).map((entry) => [entry.codigo, entry]));
+  return snapshots.map(({ purchase, snapshot }) => {
+    const stores = new Map<string, Store>();
+    for (const item of purchase.itens) for (const assignment of item.atribuicoes) stores.set(assignment.loja.id, { id: assignment.loja.id, slug: assignment.loja.slug, nome: assignment.loja.nome });
+    const trackings: Tracking[] = snapshot.rastreios.map((tracking) => {
+      const delivery = deliveries.get(normalizeTracking(tracking.codigo));
+      return { carrier: tracking.transportadora ?? null, code: tracking.codigo, entrega: delivery ? deliveryOf(delivery) : null };
+    });
+    const stage = purchase.etapa;
+    return {
+      provider: "MANUAL",
+      candidateId: `${MANUAL_PREFIX}${purchase.id}`,
+      purchaseId: purchase.id,
+      manual: true,
+      version: purchase.version,
+      status: "APROVADA" as const,
+      fase: stage ? stage.etapa : trackings.length ? "A_CAMINHO_MIAMI" : "COMPRADO",
+      orderId: purchase.numeroPedido,
+      orderedAt: (purchase.dataPedido ?? purchase.importadaEm).toISOString(),
+      currency: "USD",
+      total: purchase.totalExterno === null ? null : Number(purchase.totalExterno),
+      externalStatus: null,
+      cancelled: false,
+      account: snapshot.vendedor ?? "Manual",
+      purpose: "LOJA" as const,
+      store: stores.size === 1 ? [...stores.values()][0]! : null,
+      canChangeStore: purchase.materializacoes.length === 0 && can(identity, "COMPRAS_IMPORTADAS_ATRIBUIR"),
+      canEditTracking: can(identity, "COMPRAS_IMPORTADAS_IMPORTAR"),
+      shippedAt: null,
+      etapa: stage ? stageOf(stage) : null,
+      trackings,
+      entregue: trackings.length > 0 && trackings.every((tracking) => tracking.entrega?.status === DELIVERED),
+      rawItems: purchase.itens.map((item) => ({
+        title: item.titulo,
+        quantity: item.quantidade,
+        cancelledQuantity: item.quantidadeCancelada,
+        refundedQuantity: item.quantidadeReembolsada,
+        unitPrice: Number(item.precoUnitario),
+        currency: item.moeda,
+        imageUrl: manualItemSnapshotSchema.safeParse(item.payloadSnapshot ?? {}).data?.fotoUrl ?? null
+      })),
+      canApprove: false
     };
   });
 }
@@ -174,10 +288,10 @@ export async function purchasesFeed(identity: AuthIdentity, input: z.infer<typeo
     .sort((a, b) => b.orderedAt.localeCompare(a.orderedAt));
   const page = filtered.slice((input.page - 1) * input.limit, input.page * input.limit);
   const images = new Map<string, Map<string, string>>();
-  for (const provider of new Set(page.map((row) => row.provider)))
+  for (const provider of new Set(page.filter((row) => !row.manual).map((row) => row.provider)))
     images.set(
       provider,
-      await itemImages(provider, page.filter((row) => row.provider === provider).flatMap((row) => row.rawItems.map((item) => item.offerId).filter((id): id is string => Boolean(id))))
+      await itemImages(provider as MarketplaceProvider, page.filter((row) => row.provider === provider).flatMap((row) => row.rawItems.map((item) => item.offerId).filter((id): id is string => Boolean(id))))
     );
   const items = page.map(({ rawItems, provider, ...row }) => ({
     ...row,
@@ -187,7 +301,7 @@ export async function purchasesFeed(identity: AuthIdentity, input: z.infer<typeo
       cancelledQuantity: item.cancelledQuantity,
       unitPrice: item.unitPrice,
       currency: item.currency,
-      imageUrl: (item.offerId && images.get(provider)?.get(item.offerId)) || null
+      imageUrl: item.imageUrl ?? ((item.offerId && images.get(provider)?.get(item.offerId)) || null)
     }))
   }));
   return { items, page: input.page, limit: input.limit, total: filtered.length, atualizadoEm: await lastUpdate(identity) };
@@ -234,16 +348,27 @@ export async function setPurchaseStore(identity: AuthIdentity, candidateId: stri
   if (!can(identity, "COMPRAS_IMPORTADAS_ATRIBUIR")) throw new AppError(403, "insufficient_permission");
   if (!identity.lojas.some((store) => store.id === input.lojaId)) throw new AppError(403, "marketplace_connection_store_mismatch");
   return prisma.$transaction(async (tx) => {
-    const candidate = await tx.buyerPurchaseCandidate.findUnique({
-      where: { id: candidateId },
-      include: { contaExterna: { include: { conexoes: true } } }
-    });
-    if (!candidate) throw new AppError(404, "not_found");
-    if (!candidate.compraImportadaId) throw new AppError(409, "purchase_not_confirmed");
-    const connection = candidate.contaExterna.conexoes[0];
-    if (connection?.escopo === "STORE_DEDICATED" && connection.lojaPermitidaId !== input.lojaId)
-      throw new AppError(403, "marketplace_connection_store_mismatch");
-    const purchaseId = candidate.compraImportadaId;
+    let purchaseId: string;
+    if (candidateId.startsWith(MANUAL_PREFIX)) {
+      // Compra cadastrada à mão: vale para quem enxerga a loja atual dela; não há conta dedicada a conferir.
+      purchaseId = candidateId.slice(MANUAL_PREFIX.length);
+      const visible = await tx.compraImportada.findFirst({
+        where: { id: purchaseId, plataforma: "MANUAL", itens: { some: { atribuicoes: { some: { lojaId: { in: identity.lojas.map((store) => store.id) } } } } } },
+        select: { id: true }
+      });
+      if (!visible) throw new AppError(404, "not_found");
+    } else {
+      const candidate = await tx.buyerPurchaseCandidate.findUnique({
+        where: { id: candidateId },
+        include: { contaExterna: { include: { conexoes: true } } }
+      });
+      if (!candidate) throw new AppError(404, "not_found");
+      if (!candidate.compraImportadaId) throw new AppError(409, "purchase_not_confirmed");
+      const connection = candidate.contaExterna.conexoes[0];
+      if (connection?.escopo === "STORE_DEDICATED" && connection.lojaPermitidaId !== input.lojaId)
+        throw new AppError(403, "marketplace_connection_store_mismatch");
+      purchaseId = candidate.compraImportadaId;
+    }
     if (await tx.materializacaoCompra.findFirst({ where: { compraImportadaId: purchaseId }, select: { id: true } }))
       throw new AppError(409, "already_materialized");
     const lines = await tx.compraImportadaItem.findMany({ where: { compraImportadaId: purchaseId }, include: { atribuicoes: true } });
