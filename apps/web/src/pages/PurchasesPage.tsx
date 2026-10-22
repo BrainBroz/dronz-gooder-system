@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link as RouterLink, useSearchParams } from "react-router-dom";
 import { Alert, Box, Button, Chip, MenuItem, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, ToggleButton, ToggleButtonGroup, Tooltip, Typography } from "@mui/material";
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { authHeader, useAuthStore } from "../stores/auth";
 import { ContentCard } from "../components/ui/ContentCard";
@@ -11,13 +11,11 @@ import { ManualPurchaseDrawer, TrackingEditDialog } from "../components/purchase
 import { extractErrorMessage } from "../utils/errors";
 import { storeColor, storeTextColor } from "../theme";
 import { brl, percent } from "../api/economic";
+import { projectionKey, usePurchaseProjections } from "../hooks/usePurchaseProjections";
 import { ProductCell, StoreTag, TrackingCell, ago, money, phaseInfo, type Feed, type Phase, type PurchaseRow, type StoreRef } from "../components/purchases/purchaseParts";
 
 type Lot = { mes: string; pedidos: number; unidades: number; custoUsd: number; cancelados: number; aConfirmar: number; semLoja: number; porLoja: Record<string, number> };
 type Lots = { lotes: Lot[]; semLojaTotal: number; atualizadoEm: string | null };
-/** Venda projetada e markup de uma linha, vindos do Controle de compras (por loja e mês). */
-type Projection = { vendaUnitariaBrl: string | null; markup: string | null };
-type ControlLine = { numeroPedido: string; titulo: string; entrada: { vendaUnitariaBrl: string | null }; calculo: { indicadores: { resultadoSobreCustoPercentual: string | null } } };
 type RefreshResult = { conexao: string; status: string; criados?: number; atualizados?: number; erro?: string };
 
 const BASE = "/integrations/marketplaces";
@@ -124,18 +122,8 @@ export function PurchasesPage() {
     queryFn: async () =>
       (await api.get(`${BASE}/purchases`, { headers: authHeader(), params: { finalidade: origem, mes, limit: 300, ...(lojaId ? { lojaId } : {}), ...(busca.trim() ? { busca: busca.trim() } : {}) } })).data
   });
-  // shortcut: junta pelo número do pedido e título (iguais nas duas telas); vira um campo da própria listagem se aparecer linha repetida no mesmo pedido.
-  const [ano, mesNumero] = (mes ?? "").split("-").map(Number);
   const scopeStores = lojaId ? stores.filter((store) => store.id === lojaId) : stores;
-  const controls = useQueries({
-    queries: scopeStores.map((store) => ({
-      queryKey: ["purchase-control", store.id, mes],
-      enabled: Boolean(mes) && can("COMPRAS_IMPORTADAS_VISUALIZAR"),
-      queryFn: async () => ((await api.get("/purchase-control", { headers: { ...authHeader(), "x-store-id": store.id }, params: { ano, mes: mesNumero } })).data as { linhas: ControlLine[] }).linhas
-    }))
-  });
-  const projections = new Map<string, Projection>();
-  controls.forEach((query) => query.data?.forEach((line) => projections.set(`${line.numeroPedido}|${line.titulo}`, { vendaUnitariaBrl: line.entrada.vendaUnitariaBrl, markup: line.calculo.indicadores.resultadoSobreCustoPercentual })));
+  const projections = usePurchaseProjections({ months: mes ? [mes] : [], stores: scopeStores, enabled: can("COMPRAS_IMPORTADAS_VISUALIZAR") });
   const invalidate = () => Promise.all([client.invalidateQueries({ queryKey: ["purchases-feed"] }), client.invalidateQueries({ queryKey: ["purchase-lots"] })]);
   const refresh = useMutation({
     mutationFn: async () => (await api.post(`${BASE}/purchases/refresh`, {}, { headers: authHeader() })).data as { resultados: RefreshResult[] },
@@ -269,8 +257,8 @@ export function PurchasesPage() {
                           <TableCell><StoreCell row={row} stores={stores} busy={busy} onPick={(target) => changeStore.mutate({ candidateId: row.candidateId, lojaId: target })} /></TableCell>
                           <TableCell>{item.quantity - item.cancelledQuantity || item.quantity}</TableCell>
                           <TableCell sx={{ whiteSpace: "nowrap" }}>{money(item.unitPrice, item.currency)}</TableCell>
-                          <TableCell sx={{ whiteSpace: "nowrap" }}>{brl(projections.get(`${row.orderId}|${item.title}`)?.vendaUnitariaBrl)}</TableCell>
-                          <TableCell sx={{ whiteSpace: "nowrap" }}>{percent(projections.get(`${row.orderId}|${item.title}`)?.markup ?? null)}</TableCell>
+                          <TableCell sx={{ whiteSpace: "nowrap" }}>{brl(projections.get(projectionKey(row.orderId, item.title))?.vendaUnitariaBrl)}</TableCell>
+                          <TableCell sx={{ whiteSpace: "nowrap" }}>{percent(projections.get(projectionKey(row.orderId, item.title))?.markup ?? null)}</TableCell>
                           <TableCell><StatusCell row={row} busy={busy} onConfirm={() => confirm.mutate([row])} /></TableCell>
                           <TableCell><TrackingCell row={row} onEdit={setTrackingRow} /></TableCell>
                         </TableRow>

@@ -24,12 +24,15 @@ const miamiRows = [
 const brasilRows = [
   row("b1", "NO_BRASIL", "iPad Pro", { etapa: { chegouMiamiEm: "2026-10-10T12:00:00.000Z", remessa: "Remessa Rafa 1", enviadaEm: "2026-10-12T12:00:00.000Z", chegouBrasilEm: "2026-10-20T12:00:00.000Z" } })
 ];
+// Controle de compras: custo total e venda projetada só da linha do iPad (a do Kindle fica sem cálculo).
+const control = [{ numeroPedido: "ORD-b1", titulo: "iPad Pro", entrada: { vendaUnitariaBrl: "7000" }, calculo: { total: { custo: "12000.50", vendaBruta: "14000" }, indicadores: { resultadoSobreCustoPercentual: "16.66" } } }];
 const FEED = "/integrations/marketplaces/purchases";
 const STAGE = "/integrations/marketplaces/purchases/stage";
 const perms = ["BUYER_INGESTION_VISUALIZAR", "MIAMI_RECEBIMENTO_CONFIRMAR", "RECEBIMENTO_CONFIRMAR"];
 const mock = (items: unknown[]) =>
   vi.spyOn(api, "get").mockImplementation(async (url) => {
     if (url === FEED) return { data: { items, total: items.length, atualizadoEm: new Date(Date.now() - 3 * 60_000).toISOString() } };
+    if (url === "/purchase-control") return { data: { linhas: control } };
     throw new Error(`GET inesperado: ${url}`);
   });
 const params = (get: ReturnType<typeof mock>) => get.mock.calls.filter(([url]) => url === FEED).map(([, config]) => (config as { params: Record<string, unknown> }).params);
@@ -161,6 +164,40 @@ describe("Estoque Miami: entrega do Parcel", () => {
 });
 
 describe("Estoque Brasil", () => {
+  it("agrupa por remessa (a mais recente primeiro) com custo total e venda projetada do Controle de compras", async () => {
+    const get = mock([
+      brasilRows[0],
+      row("b2", "NO_BRASIL", "Kindle", { etapa: { chegouMiamiEm: "2026-10-14T12:00:00.000Z", remessa: "Remessa Rafa 2", enviadaEm: "2026-10-18T12:00:00.000Z", chegouBrasilEm: "2026-10-25T12:00:00.000Z" }, orderedAt: "2026-09-30T12:00:00.000Z" })
+    ]);
+    renderWithProviders(<StockStagePage mode="BRASIL" />, { permissions: [...perms, "COMPRAS_IMPORTADAS_VISUALIZAR"] });
+    await screen.findByText("iPad Pro");
+    const headings = screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent);
+    expect(headings).toEqual(["Remessa Rafa 2", "Remessa Rafa 1"]); // chegou em 25/10 antes de 20/10
+    const first = screen.getByRole("table", { name: "Estoque Brasil: Remessa Rafa 1" });
+    const columns = within(first).getAllByRole("columnheader").map((header) => header.textContent).filter(Boolean);
+    expect(columns).toEqual(["Produto", "Empresa", "Tracking", "Data", "Qtd", "Valor", "Custo total", "Venda proj.", "Markup", "Status"]);
+    expect(await within(first).findByText(/12\.000,50/)).toBeTruthy();
+    expect(within(first).getByText(/7\.000,00/)).toBeTruthy();
+    expect(within(first).getByText("16,66%")).toBeTruthy();
+    expect(screen.getByText(/Custo total R\$\s*12\.000,50 · Venda projetada R\$\s*14\.000,00/)).toBeTruthy();
+    expect(screen.getByText("1 linhas sem custo calculado ficam fora da soma")).toBeTruthy(); // a do Kindle
+    expect(screen.getByText("Enviada 12/10/2026 · chegou 20/10/2026")).toBeTruthy();
+    // uma consulta de controle por loja e mês dos pedidos mostrados
+    const months = get.mock.calls.filter(([url]) => url === "/purchase-control").map(([, config]) => (config as { params: { ano: number; mes: number } }).params.mes).sort((a, b) => a - b);
+    expect(months).toEqual([9, 10]);
+  });
+
+  it("selecionar todas de uma remessa marca só as dela", async () => {
+    const user = userEvent.setup();
+    mock([brasilRows[0], row("b2", "NO_BRASIL", "Kindle", { etapa: { chegouMiamiEm: null, remessa: "Remessa Rafa 2", enviadaEm: null, chegouBrasilEm: "2026-10-25T12:00:00.000Z" } })]);
+    renderWithProviders(<StockStagePage mode="BRASIL" />, { permissions: perms });
+    await screen.findByText("Kindle");
+    await user.click(screen.getByRole("checkbox", { name: "Selecionar todas de Remessa Rafa 2" }));
+    expect(screen.getByText("1 selecionada")).toBeTruthy();
+    expect((screen.getByRole("checkbox", { name: "Selecionar pedido ORD-b2" }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole("checkbox", { name: "Selecionar pedido ORD-b1" }) as HTMLInputElement).checked).toBe(false);
+  });
+
   it("lista só o que chegou ao Brasil, com a remessa, e deixa voltar para a remessa", async () => {
     const user = userEvent.setup();
     const get = mock(brasilRows);
@@ -170,7 +207,7 @@ describe("Estoque Brasil", () => {
     expect(params(get)[0]).toMatchObject({ fases: "NO_BRASIL" });
     expect(screen.getByRole("heading", { name: "Estoque Brasil" })).toBeTruthy();
     expect(screen.getByText("Chegou 20/10/2026")).toBeTruthy();
-    expect(screen.getByText("Remessa Rafa 1")).toBeTruthy();
+    expect(screen.getAllByText("Remessa Rafa 1")).toHaveLength(2); // título da seção e nota da linha
     expect(screen.getByText("ESTOQUE BRASIL")).toBeTruthy();
     expect(screen.queryByRole("combobox", { name: "Status" })).toBeNull(); // uma fase só
     await user.click(screen.getByRole("checkbox", { name: "Selecionar pedido ORD-b1" }));

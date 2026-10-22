@@ -26,8 +26,8 @@ const FEED = "/integrations/marketplaces/purchases";
 const LOTS = "/integrations/marketplaces/purchases/lots";
 // Controle de compras (venda projetada e markup) das linhas que já têm preço de venda informado.
 const control = [
-  { numeroPedido: "13-15311-66647", titulo: "Apple iPhone 17 Pro Max 1 TB", entrada: { vendaUnitariaBrl: "7500" }, calculo: { indicadores: { resultadoSobreCustoPercentual: "21.5" } } },
-  { numeroPedido: "19-15300-00124", titulo: "Nintendo Switch 2", entrada: { vendaUnitariaBrl: null }, calculo: { indicadores: { resultadoSobreCustoPercentual: null } } }
+  { numeroPedido: "13-15311-66647", titulo: "Apple iPhone 17 Pro Max 1 TB", entrada: { vendaUnitariaBrl: "7500" }, calculo: { total: { custo: "9000", vendaBruta: "15000" }, indicadores: { resultadoSobreCustoPercentual: "21.5" } } },
+  { numeroPedido: "19-15300-00124", titulo: "Nintendo Switch 2", entrada: { vendaUnitariaBrl: null }, calculo: { total: { custo: null, vendaBruta: null }, indicadores: { resultadoSobreCustoPercentual: null } } }
 ];
 const mock = (feedRows: unknown[] = rows) =>
   vi.spyOn(api, "get").mockImplementation(async (url) => {
