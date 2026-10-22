@@ -24,10 +24,16 @@ const lot = { mes: "2026-10", pedidos: 3, unidades: 3, custoUsd: 1350, cancelado
 const perms = ["BUYER_INGESTION_VISUALIZAR", "BUYER_INGESTION_APROVAR", "COMPRAS_IMPORTADAS_VISUALIZAR", "COMPRAS_IMPORTADAS_IMPORTAR"];
 const FEED = "/integrations/marketplaces/purchases";
 const LOTS = "/integrations/marketplaces/purchases/lots";
+// Controle de compras (venda projetada e markup) das linhas que já têm preço de venda informado.
+const control = [
+  { numeroPedido: "13-15311-66647", titulo: "Apple iPhone 17 Pro Max 1 TB", entrada: { vendaUnitariaBrl: "7500" }, calculo: { indicadores: { resultadoSobreCustoPercentual: "21.5" } } },
+  { numeroPedido: "19-15300-00124", titulo: "Nintendo Switch 2", entrada: { vendaUnitariaBrl: null }, calculo: { indicadores: { resultadoSobreCustoPercentual: null } } }
+];
 const mock = (feedRows: unknown[] = rows) =>
   vi.spyOn(api, "get").mockImplementation(async (url) => {
     if (url === LOTS) return { data: { lotes: [lot], semLojaTotal: 1, atualizadoEm: new Date().toISOString() } };
     if (url === FEED) return { data: { items: feedRows, total: feedRows.length, atualizadoEm: new Date(Date.now() - 5 * 60_000).toISOString() } };
+    if (url === "/purchase-control") return { data: { linhas: control } };
     if (String(url).startsWith("/imported-purchases")) return { data: { items: [], page: 1, limit: 100, total: 0 } };
     throw new Error(`GET inesperado: ${url}`);
   });
@@ -104,6 +110,21 @@ describe("Compras: resumo do lote", () => {
     expect(screen.queryByText(/Merchant|Progresso|Idade/)).toBeNull();
     // totais do lote ignoram a compra cancelada
     expect(screen.getByText("US$ 2.250,00")).toBeTruthy();
+  });
+
+  it("mostra a venda projetada e o markup do Controle de compras, e o link para o controle detalhado do mês", async () => {
+    const get = mock();
+    renderWithProviders(<PurchasesPage />, MONTH);
+    const table = await screen.findByRole("table", { name: "Compras do lote" });
+    const iphone = within(table).getByText("Apple iPhone 17 Pro Max 1 TB").closest("tr")!;
+    expect(within(iphone).getByText(/7\.500,00/)).toBeTruthy();
+    expect(within(iphone).getByText("21,50%")).toBeTruthy();
+    // sem preço de venda informado, continua "—"
+    const switchRow = within(table).getByText("Nintendo Switch 2").closest("tr")!;
+    expect(within(switchRow).getAllByText("—").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByRole("link", { name: "Controle detalhado" }).getAttribute("href")).toBe("/compras/controle?mes=2026-10");
+    const call = get.mock.calls.find(([url]) => url === "/purchase-control")!;
+    expect(call[1]).toMatchObject({ params: { ano: 2026, mes: 10 }, headers: { "x-store-id": "store-dronz" } });
   });
 
   it("copia o rastreio", async () => {
