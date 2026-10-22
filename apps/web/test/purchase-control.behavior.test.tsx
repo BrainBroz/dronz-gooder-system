@@ -31,6 +31,22 @@ const mock = () =>
 const perms = ["COMPRAS_IMPORTADAS_VISUALIZAR", "SIMULACAO_GERENCIAR", "SIMULACAO_VISUALIZAR"];
 
 describe("Controle de compras", () => {
+  it("abre no mês pedido pela tela de Compras (?mes=AAAA-MM) e ignora mês inválido", async () => {
+    const get = mock();
+    renderWithProviders(<PurchaseControlPage />, { permissions: perms, route: "/compras/controle?mes=2026-08" });
+    await screen.findByRole("table", { name: "Controle de compras" });
+    expect(get.mock.calls.find(([url]) => url === "/purchase-control")![1]).toMatchObject({ params: { ano: 2026, mes: 8 } });
+    expect((screen.getByLabelText("Mês do pedido") as HTMLInputElement).value).toBe("2026-08");
+  });
+
+  it("mês inválido na URL cai no mês atual", async () => {
+    const get = mock();
+    renderWithProviders(<PurchaseControlPage />, { permissions: perms, route: "/compras/controle?mes=2026-13" });
+    await screen.findByRole("table", { name: "Controle de compras" });
+    const today = new Date();
+    expect(get.mock.calls.find(([url]) => url === "/purchase-control")![1]).toMatchObject({ params: { ano: today.getFullYear(), mes: today.getMonth() + 1 } });
+  });
+
   it("mostra a visão resumida, marca linhas incompletas (sem alerta de markup na compra), e grava a venda digitada", async () => {
     const user = userEvent.setup();
     const get = mock();
