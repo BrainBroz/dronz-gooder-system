@@ -170,6 +170,13 @@ export interface MarketplaceAdapter {
     connection: MarketplaceConnectionContext,
     externalOrderId: string
   ): Promise<NormalizedMarketplaceOrder>;
+  /** Decisão do PO: compras desta fonte entram já confirmadas (quando elegíveis e o usuário pode aprovar). */
+  readonly autoConfirmPurchases?: boolean;
+  /** Foto principal por anúncio (id do anúncio → URL https). Melhor esforço: o que falhar fica de fora. */
+  fetchItemImages?(
+    connection: MarketplaceConnectionContext,
+    itemIds: string[]
+  ): Promise<Record<string, string>>;
 }
 
 export type MarketplaceAdapterRegistry = Readonly<
@@ -185,6 +192,7 @@ export type MarketplaceConnectionReadModel = {
   region: string | null;
   marketplace: string | null;
   scope: "SHARED" | "STORE_DEDICATED";
+  purpose: "LOJA" | "PESSOAL";
   allowedStore: { id: string; slug: string; name: string } | null;
   status:
     | "NOT_CONFIGURED"

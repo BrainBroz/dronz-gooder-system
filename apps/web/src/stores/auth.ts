@@ -13,6 +13,9 @@ export type AuthState = {
   stores: Store[];
   permissions: string[];
   activeStoreId: string | null;
+  /** "Todos" no topo: telas que aceitam visão de todas as lojas mostram tudo; as demais usam activeStoreId. */
+  viewAll: boolean;
+  setViewAll: (viewAll: boolean) => void;
   setSession: (payload: {
     accessToken: string;
     user: AuthUser;
@@ -29,6 +32,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   stores: [],
   permissions: [],
   activeStoreId: null,
+  viewAll: false,
+  setViewAll: (viewAll) => set({ viewAll }),
   setSession: (payload) => {
     const current = get();
     const isValidStore = payload.stores.some((s) => s.id === current.activeStoreId);
@@ -40,9 +45,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       activeStoreId: isValidStore ? current.activeStoreId : payload.stores[0]?.id ?? null
     });
   },
-  setActiveStoreId: (activeStoreId) => set({ activeStoreId }),
+  setActiveStoreId: (activeStoreId) => set({ activeStoreId, viewAll: false }),
   clear: () =>
-    set({ accessToken: null, user: null, stores: [], permissions: [], activeStoreId: null })
+    set({ accessToken: null, user: null, stores: [], permissions: [], activeStoreId: null, viewAll: false })
 }));
 
 export function authHeader() {

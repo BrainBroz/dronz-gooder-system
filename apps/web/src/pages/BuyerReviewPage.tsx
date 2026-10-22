@@ -6,6 +6,8 @@ import {
   MenuItem,
   Stack,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Typography
 } from "@mui/material";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -18,7 +20,7 @@ import { PageHeader } from "../components/ui/PageHeader";
 
 const BASE = "/integrations/marketplaces";
 const keys = {
-  candidates: (status: string) => ["buyer-candidates", status] as const,
+  candidates: (status: string, finalidade: string) => ["buyer-candidates", status, finalidade] as const,
   conflicts: (id: string) => ["buyer-conflicts", id] as const,
   unidentified: ["buyer-unidentified"] as const,
   accounts: ["external-accounts"] as const
@@ -552,13 +554,14 @@ export function BuyerReviewPage() {
   const can = (code: string) =>
     permissions.includes("SYSTEM_ADMIN") || permissions.includes(code);
   const [status, setStatus] = useState("AGUARDANDO_APROVACAO");
+  const [finalidade, setFinalidade] = useState<"LOJA" | "PESSOAL">("LOJA");
   const candidates = useQuery<{ items: Candidate[]; total: number }>({
-    queryKey: keys.candidates(status),
+    queryKey: keys.candidates(status, finalidade),
     queryFn: async () =>
       (
         await api.get(`${BASE}/buyer-candidates`, {
           headers: authHeader(),
-          params: { page: 1, limit: 50, ...(status ? { status } : {}) }
+          params: { page: 1, limit: 50, finalidade, ...(status ? { status } : {}) }
         })
       ).data
   });
@@ -575,6 +578,10 @@ export function BuyerReviewPage() {
           title="Revisão de compras detectadas"
           description="Evidências de API, e-mail e registros manuais. Toda compra exige aprovação humana antes de atribuição e materialização."
         />
+        <ToggleButtonGroup size="small" exclusive value={finalidade} onChange={(_event, next) => next && setFinalidade(next)} aria-label="Origem das compras">
+          <ToggleButton value="LOJA">Compras da loja</ToggleButton>
+          <ToggleButton value="PESSOAL">Compras pessoais</ToggleButton>
+        </ToggleButtonGroup>
         <TextField
           select
           label="Situação"

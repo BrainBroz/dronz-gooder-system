@@ -129,6 +129,8 @@ export async function recordMarketplaceEvidence(input: {
   source?: FonteEvidenciaCompra;
   sourceIdentity?: string;
   externalEvidenceId?: string;
+  /** API que já confirma compras sozinha também aplica sozinha o que muda depois (rastreio, status, cancelamento). */
+  autoApplyPostApproval?: boolean;
 }) {
   const normalized = canonicalOrder(input.order);
   if (hasDuplicateOfficialLineId(normalized))
@@ -281,7 +283,19 @@ export async function recordMarketplaceEvidence(input: {
             : incomingShipmentTime !== currentShipmentTime
               ? incomingShipmentTime > currentShipmentTime
               : payloadHash > (prior?.currentEvidence.payloadHash ?? "")));
-        if (prior?.compraImportadaId && promote && !conflictTypes.length)
+        // Compra já confirmada que recebe da própria API só rastreio, status ou cancelamento (e as quantidades que o
+        // cancelamento explica) é atualizada sem revisão. Preço, moeda, data, vendedor ou quantidade por outro motivo seguem pedindo revisão.
+        const cancelledNow = normalized.cancelled && !currentCancelled;
+        const autoApply = Boolean(
+          input.autoApplyPostApproval && prior?.compraImportadaId && incomingIsApi && currentIsApi && promote &&
+          (prior.status === "APROVADA" || prior.status === "CANCELADA") &&
+          !(currentCancelled && !normalized.cancelled) &&
+          conflictTypes.every((type) =>
+            ["SHIPMENTS", "EXTERNAL_STATUS", "CANCELLATION_CHANGED"].includes(type) ||
+            (cancelledNow && (type === "ITEMS" || type === "QUANTITY")))
+        );
+        if (autoApply) conflictTypes.length = 0;
+        else if (prior?.compraImportadaId && promote && !conflictTypes.length)
           conflictTypes.push("POST_APPROVAL_EVIDENCE");
         const materialChange = conflictTypes.length > 0;
         const conflict = materialChange || prior?.status === "COM_DIVERGENCIA";
@@ -294,6 +308,7 @@ export async function recordMarketplaceEvidence(input: {
                 ...(linkedPurchaseId ? { compraImportadaId: linkedPurchaseId } : {}),
                 status: prior.status === "REJEITADA" ? "REJEITADA"
                   : !promote && prior.status === "CANCELADA" ? "CANCELADA"
+                  : autoApply ? (normalized.cancelled ? "CANCELADA" : prior.status)
                   : prior.compraImportadaId
                   ? "COM_DIVERGENCIA"
                   : promote && input.order.cancelled ? "CANCELADA"
@@ -377,7 +392,7 @@ export async function recordMarketplaceEvidence(input: {
           },
           origin: "API_MARKETPLACE_INTEGRATIONS"
         });
-        return { ...evidence, candidateId: candidate.id, created: true };
+        return { ...evidence, candidateId: candidate.id, created: true, postApprovalUpdate: autoApply };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
     );

@@ -13,6 +13,7 @@ import { authHeader, useAuthStore } from "../stores/auth";
 import { catalogQueryKeys } from "../queryKeys";
 import type { Product } from "../types/catalog";
 import { useCategories, useProducts } from "../hooks/useCatalog";
+import { Link as RouterLink } from "react-router-dom";
 import { formatSalePrice } from "../utils/formatting";
 import { ProductImportDialog } from "../components/ProductImportDialog";
 
@@ -234,7 +235,14 @@ export function ProductsPage() {
   return (
     <PageContainer>
       <Stack gap={{ xs: 2.5, md: 3.5 }}>
-        <PageHeader title="Produtos" />
+        <PageHeader
+          title="Produtos"
+          actions={
+            <Button component={RouterLink} to="/produtos-base" variant="outlined">
+              Base de produtos
+            </Button>
+          }
+        />
         {canManage && (
           <Box>
             <Button variant="outlined" onClick={() => setImporting(true)}>Importar produtos</Button>

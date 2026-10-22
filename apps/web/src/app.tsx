@@ -51,9 +51,39 @@ const ProductsPage = React.lazy(() =>
     default: module.ProductsPage
   }))
 );
+const MarketplaceConnectionsPage = React.lazy(() =>
+  import("./pages/MarketplaceConnectionsPage").then((module) => ({
+    default: module.MarketplaceConnectionsPage
+  }))
+);
+const EbayCallbackPage = React.lazy(() =>
+  import("./pages/MarketplaceConnectionsPage").then((module) => ({
+    default: module.EbayCallbackPage
+  }))
+);
+const ProductBasePage = React.lazy(() =>
+  import("./pages/ProductBasePage").then((module) => ({
+    default: module.ProductBasePage
+  }))
+);
+const PurchaseControlPage = React.lazy(() =>
+  import("./pages/PurchaseControlPage").then((module) => ({
+    default: module.PurchaseControlPage
+  }))
+);
+const PurchasesPage = React.lazy(() =>
+  import("./pages/PurchasesPage").then((module) => ({
+    default: module.PurchasesPage
+  }))
+);
 const LogisticsPage = React.lazy(() =>
   import("./pages/LogisticsPage").then((module) => ({
     default: module.LogisticsPage
+  }))
+);
+const StockStagePage = React.lazy(() =>
+  import("./pages/StockStagePage").then((module) => ({
+    default: module.StockStagePage
   }))
 );
 const InventoryPage = React.lazy(() =>
@@ -310,6 +340,16 @@ export function AppRoutes() {
               }
             />
             <Route
+              path="/produtos-base"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <ProductBasePage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
               path="/fornecedores"
               element={
                 <AuthGate>
@@ -321,6 +361,16 @@ export function AppRoutes() {
             />
             <Route
               path="/compras"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <PurchasesPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/compras/fila"
               element={
                 <AuthGate>
                   <Shell>
@@ -345,6 +395,26 @@ export function AppRoutes() {
                 <AuthGate>
                   <Shell>
                     <LogisticsPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/estoque/miami"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <StockStagePage mode="MIAMI" />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/estoque/brasil"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <StockStagePage mode="BRASIL" />
                   </Shell>
                 </AuthGate>
               }
@@ -385,6 +455,36 @@ export function AppRoutes() {
                 <AuthGate>
                   <Shell>
                     <SalesPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/compras/controle"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <PurchaseControlPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/integracoes"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <MarketplaceConnectionsPage />
+                  </Shell>
+                </AuthGate>
+              }
+            />
+            <Route
+              path="/integracoes/ebay/callback"
+              element={
+                <AuthGate>
+                  <Shell>
+                    <EbayCallbackPage />
                   </Shell>
                 </AuthGate>
               }

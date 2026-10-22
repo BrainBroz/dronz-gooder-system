@@ -8,12 +8,13 @@ datasource db {
 }
 
 model Loja {
-  id        String   @id @default(cuid())
-  slug      String   @unique
-  nome      String
-  ativa     Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  projecoesCompra ProjecaoCompraItem[]
+  id              String               @id @default(cuid())
+  slug            String               @unique
+  nome            String
+  ativa           Boolean              @default(true)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
 
   usuarios                      UsuarioLoja[]
   categorias                    Categoria[]
@@ -66,13 +67,14 @@ model Loja {
 }
 
 model Usuario {
-  id           String   @id @default(cuid())
-  name         String
-  email        String   @unique
-  passwordHash String
-  active       Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  projecoesCompra ProjecaoCompraItem[]
+  id              String               @id @default(cuid())
+  name            String
+  email           String               @unique
+  passwordHash    String
+  active          Boolean              @default(true)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
 
   lojas                          UsuarioLoja[]
   perfis                         UsuarioPerfil[]
@@ -267,6 +269,96 @@ model ProjecaoOperacional {
   @@index([lojaId, entity, updatedAt])
 }
 
+/// Cadastro geral de produtos que já trabalhamos, compartilhado pelas lojas (exceção deliberada ao lojaId:
+/// não é estoque nem preço). Guarda o histórico de peso para estimar frete e reconhecer produtos nas compras.
+model ProdutoBase {
+  projecoes ProjecaoCompraItem[]
+  id        String               @id @default(cuid())
+  nome      String
+  slug      String               @unique
+  categoria String?
+  pesoKg    Decimal?             @db.Decimal(10, 3)
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+
+  @@index([categoria])
+}
+
+/// Projeção econômica digitada por linha de compra importada e por loja (estimativa, nunca realizado):
+/// venda projetada, peso e frete realmente pago. O vínculo com a base de produtos dá o peso reaproveitável.
+model ProjecaoCompraItem {
+  id               String   @id @default(cuid())
+  itemExternoId    String
+  lojaId           String
+  produtoBaseId    String?
+  vendaUnitariaBrl Decimal? @db.Decimal(14, 2)
+  pesoKg           Decimal? @db.Decimal(10, 3)
+  freteRealUsd     Decimal? @db.Decimal(14, 2)
+  atualizadoPorId  String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  itemExterno   CompraImportadaItem @relation(fields: [itemExternoId], references: [id], onDelete: Cascade)
+  loja          Loja                @relation(fields: [lojaId], references: [id], onDelete: Restrict)
+  produtoBase   ProdutoBase?        @relation(fields: [produtoBaseId], references: [id], onDelete: SetNull)
+  atualizadoPor Usuario             @relation(fields: [atualizadoPorId], references: [id], onDelete: Restrict)
+
+  @@unique([itemExternoId, lojaId])
+  @@index([lojaId])
+  @@index([produtoBaseId])
+}
+
+/// Foto de um anúncio externo (ex.: item do eBay), guardada à parte da evidência para não alterar o histórico de versões dos pedidos.
+model ImagemAnuncioExterno {
+  id        String              @id @default(cuid())
+  provider  MarketplaceProvider
+  anuncioId String
+  url       String
+  createdAt DateTime            @default(now())
+
+  @@unique([provider, anuncioId])
+}
+
+/// Etapa da compra depois que o vendedor envia: sem linha = comprada ou a caminho de Miami (derivado do rastreio do vendedor).
+enum EtapaLogistica {
+  EM_MIAMI
+  EM_REMESSA
+  NO_BRASIL
+}
+
+/// Etapa logística simplificada de uma compra importada inteira (o pacote do eBay chega junto). Não substitui a materialização por loja.
+model EtapaCompra {
+  id                String         @id @default(cuid())
+  compraImportadaId String         @unique
+  etapa             EtapaLogistica
+  chegouMiamiEm     DateTime?
+  remessa           String?
+  enviadaEm         DateTime?
+  chegouBrasilEm    DateTime?
+  atualizadoPorId   String
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  compraImportada CompraImportada @relation(fields: [compraImportadaId], references: [id], onDelete: Cascade)
+
+  @@index([etapa])
+}
+
+/// Último status conhecido de um código de rastreio, lido do Parcel (só leitura): não altera a compra nem a etapa.
+model StatusRastreio {
+  id                String   @id @default(cuid())
+  codigo            String   @unique
+  transportadora    String?
+  statusCodigo      Int
+  ultimoEvento      String?
+  ultimoEventoLocal String?
+  ultimoEventoData  String?
+  previstaEm        String?
+  consultadoEm      DateTime
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
 model Categoria {
   id        String   @id @default(cuid())
   lojaId    String
@@ -393,6 +485,12 @@ enum MarketplaceProvider {
 enum EscopoConexaoMarketplace {
   SHARED
   STORE_DEDICATED
+}
+
+/// Para que serve a conta conectada: compras da loja ou compras pessoais (revisadas à parte, mas atribuíveis à loja).
+enum FinalidadeConexao {
+  LOJA
+  PESSOAL
 }
 
 enum StatusConexaoMarketplace {
@@ -569,6 +667,7 @@ model ConexaoMarketplace {
   regiao                String?
   marketplace           String?
   escopo                EscopoConexaoMarketplace
+  finalidade            FinalidadeConexao        @default(LOJA)
   lojaPermitidaId       String?
   secretReference       String?
   status                StatusConexaoMarketplace @default(NOT_CONFIGURED)
@@ -823,6 +922,7 @@ model CompraImportada {
   conexaoMarketplace  ConexaoMarketplace?     @relation(fields: [conexaoMarketplaceId], references: [id], onDelete: Restrict)
   enviosExternos      EnvioExterno[]
   buyerCandidate      BuyerPurchaseCandidate?
+  etapa               EtapaCompra?
 
   @@unique([fornecedorId, numeroPedido])
   @@unique([plataforma, contaExternaId, externalOrderIdNormalizado])
@@ -838,6 +938,7 @@ model CompraImportada {
 }
 
 model CompraImportadaItem {
+  projecoes                 ProjecaoCompraItem[]
   id                        String                    @id @default(cuid())
   compraImportadaId         String
   quantidade                Int

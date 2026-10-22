@@ -13,8 +13,8 @@ import { renderWithProviders, testStores } from "./render";
 
 const routesInApp = [
   "/", "/operacao", "/checkpoints", "/categorias", "/produtos", "/fornecedores", "/compras", "/pedidos",
-  "/logistica", "/estoque", "/financeiro", "/relatorios", "/vendas", "/compras/painel-mensal",
-  "/compras/revisao", "/posicoes", "/compras/simulador", "/configuracoes"
+  "/logistica", "/estoque", "/financeiro", "/relatorios", "/vendas", "/compras/painel-mensal", "/compras/controle", "/integracoes",
+  "/compras/revisao", "/compras/fila", "/posicoes", "/compras/simulador", "/configuracoes", "/estoque/miami", "/estoque/brasil"
 ];
 
 beforeEach(() => vi.restoreAllMocks());
@@ -34,8 +34,8 @@ describe("navegação agrupada", () => {
   });
 
   it("identifica a página atual pela rota mais específica", () => {
-    expect(currentPageLabel("/compras/revisao")).toEqual({ group: "Compras", label: "Revisão de compras" });
-    expect(currentPageLabel("/compras")).toEqual({ group: "Compras", label: "Fila de compras" });
+    expect(currentPageLabel("/compras/revisao")).toEqual({ group: "Compras", label: "Avançado: divergências" });
+    expect(currentPageLabel("/compras")).toEqual({ group: "Compras", label: "Compras" });
     expect(currentPageLabel("/")).toEqual({ group: "Dashboard", label: "Dashboard" });
   });
 
@@ -48,7 +48,7 @@ describe("navegação agrupada", () => {
   });
 
   it.each(["/compras/revisao", "/compras/painel-mensal"])(
-    "em %s só o submenu específico fica ativo, não a Fila de compras",
+    "em %s só o submenu específico fica ativo, não o item Compras",
     async (route) => {
       const user = userEvent.setup();
       renderWithProviders(<Shell>Conteúdo</Shell>, { route, permissions: ["SYSTEM_ADMIN"] });
@@ -73,13 +73,19 @@ describe("navegação agrupada", () => {
     }
   });
 
-  it("troca a loja ativa pelos botões; \"Todos\" fica indisponível sem visão consolidada", async () => {
+  it("troca a loja ativa pelos botões; \"Todos\" liga a visão de todas as lojas sem perder a loja ativa", async () => {
     const user = userEvent.setup();
     renderWithProviders(<Shell>Conteúdo</Shell>);
-    expect((screen.getByRole("button", { name: "Todas as lojas (indisponível)" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("button", { name: "Todas as lojas" }).getAttribute("aria-pressed")).toBe("false");
     expect(screen.getByRole("button", { name: "Dronz" }).getAttribute("aria-pressed")).toBe("true");
+    await user.click(screen.getByRole("button", { name: "Todas as lojas" }));
+    expect(useAuthStore.getState().viewAll).toBe(true);
+    expect(useAuthStore.getState().activeStoreId).toBe(testStores[0]!.id);
+    expect(screen.getByRole("button", { name: "Todas as lojas" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Dronz" }).getAttribute("aria-pressed")).toBe("false");
     await user.click(screen.getByRole("button", { name: "Gooder" }));
     expect(useAuthStore.getState().activeStoreId).toBe(testStores[1]!.id);
+    expect(useAuthStore.getState().viewAll).toBe(false);
     expect(screen.getByRole("button", { name: "Gooder" }).getAttribute("aria-pressed")).toBe("true");
   });
 });
@@ -274,14 +280,14 @@ describe("lateral no desktop", () => {
 
     await user.click(screen.getByRole("button", { name: "Recolher menu lateral" }));
     expect(screen.getByRole("button", { name: "Expandir menu lateral" })).toBeTruthy();
-    expect(screen.queryByText("Fila de compras")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Compras" })).toBeNull();
     // Recolhida, cada grupo continua identificável pelo nome acessível.
     const compras = screen.getByRole("button", { name: "Compras" });
     expect(compras.getAttribute("aria-expanded")).toBe("false");
 
     await user.click(compras);
     expect(screen.getByRole("button", { name: "Recolher menu lateral" })).toBeTruthy();
-    expect(await screen.findByRole("link", { name: "Fila de compras" })).toBeTruthy();
+    expect(await screen.findByRole("link", { name: "Compras" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Compras" }).getAttribute("aria-expanded")).toBe("true");
   });
 });

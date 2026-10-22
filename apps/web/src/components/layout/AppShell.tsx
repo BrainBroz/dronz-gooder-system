@@ -226,7 +226,7 @@ function SidebarContent({
 }
 
 function StoreSwitcher() {
-  const { stores, activeStoreId, setActiveStoreId } = useAuthStore();
+  const { stores, activeStoreId, setActiveStoreId, viewAll, setViewAll } = useAuthStore();
   return (
     <Stack
       direction="row"
@@ -236,20 +236,24 @@ function StoreSwitcher() {
       gap={0.5}
       sx={{ p: 0.375, borderRadius: "10px", bgcolor: visualTokens.bg, border: `1px solid ${visualTokens.border}`, minWidth: 0, overflowX: "auto" }}
     >
-      <Tooltip title="Visão consolidada indisponível: o servidor só responde por loja.">
-        {/* span: Tooltip precisa de filho que receba eventos mesmo com o botão desabilitado. */}
-        <span>
-          <ButtonBase
-            disabled
-            aria-label="Todas as lojas (indisponível)"
-            sx={{ px: 1.25, py: 0.5, borderRadius: "7px", fontSize: "0.75rem", fontWeight: 600, color: visualTokens.textMuted, opacity: 0.6 }}
-          >
-            Todos
-          </ButtonBase>
-        </span>
+      <Tooltip title="Mostra todas as lojas nas telas que permitem (Compras). As outras telas continuam na última loja escolhida.">
+        <ButtonBase
+          onClick={() => setViewAll(true)}
+          aria-pressed={viewAll}
+          aria-label="Todas as lojas"
+          sx={{
+            px: 1.25, py: 0.5, borderRadius: "7px", fontSize: "0.75rem", fontWeight: 600, whiteSpace: "nowrap",
+            color: viewAll ? visualTokens.text : visualTokens.textSecondary,
+            bgcolor: viewAll ? visualTokens.bg3 : "transparent",
+            border: `1px solid ${viewAll ? visualTokens.borderStrong : "transparent"}`,
+            ...focusRing
+          }}
+        >
+          Todos
+        </ButtonBase>
       </Tooltip>
       {stores.map((store) => {
-        const active = store.id === activeStoreId;
+        const active = !viewAll && store.id === activeStoreId;
         const color = storeColor(store.slug);
         const textColor = storeTextColor(store.slug);
         return (

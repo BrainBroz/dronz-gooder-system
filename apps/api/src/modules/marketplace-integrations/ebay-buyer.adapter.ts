@@ -19,10 +19,10 @@ import {
 } from "./xml";
 
 // EBAY_BUYER_SPECIFICATION_V1: Trading API GetOrders com OrderRole=Buyer, nível 1423 validado no gate.
-const TRADING_URL = "https://api.ebay.com/ws/api.dll";
-const TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token";
-const COMPATIBILITY_LEVEL = "1423";
-const SCOPE = "https://api.ebay.com/oauth/api_scope";
+export const TRADING_URL = "https://api.ebay.com/ws/api.dll";
+export const TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token";
+export const COMPATIBILITY_LEVEL = "1423";
+export const SCOPE = "https://api.ebay.com/oauth/api_scope";
 const MAX_WINDOW_MS = 30 * 86_400_000;
 // Sobreposição ao abrir a próxima janela: capta mudanças gravadas com atraso no eBay.
 const OVERLAP_MS = 60 * 60_000;
@@ -81,6 +81,7 @@ const isoOf = (value: string | undefined) =>
 
 export class EbayBuyerAdapter implements MarketplaceAdapter {
   readonly provider = "EBAY" as const;
+  readonly autoConfirmPurchases = true;
   readonly capabilities = [
     "LIST_ORDERS",
     "GET_ORDER",
@@ -291,6 +292,39 @@ export class EbayBuyerAdapter implements MarketplaceAdapter {
       }
     }
     return { orders, ...(next ? { nextCursor: encodeCursor(next) } : {}) };
+  }
+
+  /** Foto principal de cada anúncio (Trading GetItem, só PictureDetails); falha de um item não derruba os demais. */
+  async fetchItemImages(
+    connection: MarketplaceConnectionContext,
+    itemIds: string[]
+  ): Promise<Record<string, string>> {
+    const token = await this.accessToken(connection);
+    const found: Record<string, string> = {};
+    for (let index = 0; index < itemIds.length; index += 5)
+      await Promise.all(
+        itemIds.slice(index, index + 5).map(async (id) => {
+          try {
+            const response = await this.fetchImpl(TRADING_URL, {
+              method: "POST",
+              headers: {
+                "X-EBAY-API-CALL-NAME": "GetItem",
+                "X-EBAY-API-COMPATIBILITY-LEVEL": COMPATIBILITY_LEVEL,
+                "X-EBAY-API-SITEID": "0",
+                "X-EBAY-API-IAF-TOKEN": token,
+                "Content-Type": "text/xml; charset=utf-8"
+              },
+              body: `<?xml version="1.0" encoding="utf-8"?><GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents"><ItemID>${xmlEscape(id)}</ItemID><DetailLevel>ReturnAll</DetailLevel><OutputSelector>PictureDetails</OutputSelector></GetItemRequest>`
+            });
+            if (response.status !== 200) return;
+            const url = textOf(child(child(parseXml(await response.text()), "Item"), "PictureDetails"), "PictureURL");
+            if (url?.startsWith("https://")) found[id] = url;
+          } catch {
+            // sem foto não bloqueia a compra
+          }
+        })
+      );
+    return found;
   }
 
   async getOrder(

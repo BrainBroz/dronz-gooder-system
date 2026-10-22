@@ -35,8 +35,10 @@ export type SettingsResponse = {
   referenciasPO: {
     acrescimoCambialBrl: string;
     notaFiscalPercentual: string;
+    notaFiscalBase: NotaFiscalBase;
     markupAlertaPercentual: string;
-    taxas: { modalidade: Modalidade; parcelas: number | null; percentual: string; observacao?: string }[];
+    frete: { valorPorKg: string; moeda: Moeda };
+    taxas: { canal: Canal; modalidade: Modalidade; parcelas: number | null; percentual: string; observacao?: string }[];
   };
 };
 

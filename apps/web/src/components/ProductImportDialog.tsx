@@ -18,7 +18,11 @@ export function ProductImportDialog({ open, onClose }: { open: boolean; onClose:
   const [readError, setReadError] = useState<string | null>(null);
   const [column, setColumn] = useState(0);
   const [titulos, setTitulos] = useState(true);
-  const itens = useMemo(() => (sheet ? extractItems(sheet, column, titulos) : []), [sheet, column, titulos]);
+  // A importação por loja só leva nome e categoria; o peso é da base global de produtos.
+  const itens = useMemo(
+    () => (sheet ? extractItems(sheet, { produto: column, categoria: titulos ? "titulos" : null, peso: null }).map(({ nome, categoria }) => ({ nome, categoria })) : []),
+    [sheet, column, titulos]
+  );
 
   const preview = useQuery<Resultado>({
     queryKey: ["product-import-preview", store, fileName, column, titulos, itens.length],

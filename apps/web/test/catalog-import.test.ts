@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Workbook } from "exceljs";
-import { extractItems, guessColumn, readSheet } from "../src/utils/catalogImport";
+import { extractItems, guessCategoryColumn, guessColumn, guessWeightColumn, readSheet } from "../src/utils/catalogImport";
 
 const csv = (text: string, name = "produtos.csv") => new File([text], name, { type: "text/csv" });
 
@@ -14,12 +14,12 @@ describe("importação de catálogo (leitura do arquivo)", () => {
   it("linhas só com título viram a categoria das seguintes; sem a opção, são produtos", async () => {
     const sheet = await readSheet(csv("Produtos,Quantidade\nArmazenamento,\nSSD A,2\nSSD B,5\nNotebooks,\nNote X,1\n,\n"));
     expect(guessColumn(sheet.headers)).toBe(0);
-    expect(extractItems(sheet, 0, true)).toEqual([
-      { nome: "SSD A", categoria: "Armazenamento" },
-      { nome: "SSD B", categoria: "Armazenamento" },
-      { nome: "Note X", categoria: "Notebooks" }
+    expect(extractItems(sheet, { produto: 0, categoria: "titulos", peso: null })).toEqual([
+      { nome: "SSD A", categoria: "Armazenamento", pesoKg: null },
+      { nome: "SSD B", categoria: "Armazenamento", pesoKg: null },
+      { nome: "Note X", categoria: "Notebooks", pesoKg: null }
     ]);
-    expect(extractItems(sheet, 0, false)).toHaveLength(5);
+    expect(extractItems(sheet, { produto: 0, categoria: null, peso: null })).toHaveLength(5);
   });
 
   it("acha a coluna pelo cabeçalho e lê a primeira aba de um .xlsx", async () => {
@@ -31,7 +31,18 @@ describe("importação de catálogo (leitura do arquivo)", () => {
     Object.defineProperty(file, "arrayBuffer", { value: async () => buffer });
     const sheet = await readSheet(file);
     expect(guessColumn(sheet.headers)).toBe(1);
-    expect(extractItems(sheet, 1, false).map((item) => item.nome)).toEqual(["Fone X", "Fone Y"]);
+    expect(extractItems(sheet, { produto: 1, categoria: null, peso: null }).map((item) => item.nome)).toEqual(["Fone X", "Fone Y"]);
+  });
+
+  it("lê categoria e peso por coluna, com vírgula decimal; peso vazio ou inválido fica sem peso", async () => {
+    const sheet = await readSheet(csv('Categoria,Produto,Peso (kg)\nFones,"Fone, Pro",0\nFones,Fone Max,"1,36"\nNotebooks,Note X,\nNotebooks,Note Y,abc\n'));
+    expect([guessCategoryColumn(sheet.headers), guessColumn(sheet.headers), guessWeightColumn(sheet.headers)]).toEqual([0, 1, 2]);
+    expect(extractItems(sheet, { produto: 1, categoria: 0, peso: 2 })).toEqual([
+      { nome: "Fone, Pro", categoria: "Fones", pesoKg: null },
+      { nome: "Fone Max", categoria: "Fones", pesoKg: 1.36 },
+      { nome: "Note X", categoria: "Notebooks", pesoKg: null },
+      { nome: "Note Y", categoria: "Notebooks", pesoKg: null }
+    ]);
   });
 
   it("explica quando o Excel não abre", async () => {
