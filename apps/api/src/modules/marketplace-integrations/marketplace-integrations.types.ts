@@ -75,6 +75,8 @@ export type NormalizedMarketplaceShipment = {
   externalShipmentId: string;
   status?: string;
   shippedAt?: string;
+  /** Entrega real informada pela plataforma, quando ela tem o dado da transportadora. */
+  deliveredAt?: string;
   updatedAt: string;
   packages: NormalizedMarketplacePackage[];
 };

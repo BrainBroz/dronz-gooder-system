@@ -3332,6 +3332,121 @@ describe("Compras: lista com foto, loja da conta e atribuição automática", ()
     expect(await prisma.auditLog.count({ where: { action: "MANUAL_PURCHASE_REGISTERED", entityId: id.slice(2) } })).toBe(1);
   });
 
+  it("entrega informada pelo eBay chega como atualização da compra confirmada, sem divergência, e o Parcel tem preferência no status", async () => {
+    const fixture = await connectionFixture("EBAY", "STORE_DEDICATED", `entrega-${randomUUID().slice(0, 6)}`, "gooder");
+    const saved = ebayOrder(`batch8-ENTREGA-${randomUUID().slice(0, 6)}`);
+    const recorded = await record(fixture, saved);
+    const rowOf = async () => (await feed(fixture, "?limit=300")).items.find((item) => item.candidateId === recorded.candidateId)! as unknown as { status: string; fase: string; entregue: boolean; trackings: { code: string; entrega: { status: number; rotulo: string; evento: string | null; data: string | null } | null }[] };
+    expect((await approve(fixture, recorded.candidateId!, (await rowOf() as unknown as { version: number }).version)).status).toBe(200);
+    expect(await rowOf()).toMatchObject({ status: "APROVADA", entregue: false });
+
+    const connection = await prisma.conexaoMarketplace.findUniqueOrThrow({ where: { id: fixture.connectionId } });
+    const delivered = { ...saved, updatedAt: "2026-07-20T10:00:00.000Z", shipments: [{ ...saved.shipments[0]!, status: "DELIVERED", deliveredAt: "2026-07-18T15:00:00.000Z", updatedAt: "2026-07-20T10:00:00.000Z" }] };
+    const update = await recordMarketplaceEvidence({ provider: "EBAY", accountId: connection.contaExternaId, connectionId: fixture.connectionId, order: delivered, actorId: fixture.userId, correlationId: randomUUID(), autoApplyPostApproval: true });
+    expect(update).toMatchObject({ postApprovalUpdate: true });
+    const row = await rowOf();
+    expect(row).toMatchObject({ status: "APROVADA", entregue: true, fase: "A_CAMINHO_MIAMI" }); // só avisa: não muda a fase sozinho
+    expect(row.trackings[0]!.entrega).toMatchObject({ status: 0, rotulo: "Entregue", evento: "Entregue (informado pelo eBay)", data: "2026-07-18T15:00:00.000Z" });
+
+    // Se o Parcel já tem status para o código, ele aparece no lugar do aviso do eBay.
+    await prisma.statusRastreio.create({ data: { codigo: "9400111", statusCodigo: 4, ultimoEvento: "Out for delivery", consultadoEm: new Date() } });
+    try {
+      expect((await rowOf()).trackings[0]!.entrega).toMatchObject({ status: 4, rotulo: "Saiu para entrega" });
+    } finally {
+      await prisma.statusRastreio.deleteMany({ where: { codigo: "9400111" } });
+    }
+  });
+
+  it("manda ao Parcel os rastreios novos, do mais recente ao mais antigo, até o limite diário, sem repetir nem insistir", async () => {
+    const { pushTrackingsToParcel, parcelCarrier, selectTrackingsToPush } = await import("../src/modules/marketplace-integrations/parcel-push.service");
+    vi.stubEnv("PARCEL_API_KEY", "chave-de-teste");
+    vi.stubEnv("PARCEL_DAILY_ADD_LIMIT", "2");
+    try {
+      await prisma.envioParcel.deleteMany({});
+      const fixture = await connectionFixture("EBAY", "STORE_DEDICATED", `push-${randomUUID().slice(0, 6)}`, "gooder");
+      const tag = randomUUID().slice(0, 6).toUpperCase();
+      // Datas relativas ao momento do teste: os pedidos mais recentes do banco de teste são sempre os daqui, mesmo se o teste rodar de novo.
+      const day = (offset: number) => new Date(Date.now() + (400 + offset) * 24 * 60 * 60_000).toISOString();
+      const make = (suffix: string, orderedAt: string, carrier: string, code: string) => {
+        const base = ebayOrder(`batch8-PUSH-${suffix}-${tag}`);
+        return { ...base, orderedAt, updatedAt: orderedAt, shipments: [{ ...base.shipments[0]!, packages: [{ externalPackageId: `${carrier}:${code}`, carrier, trackings: [{ code, carrier, updatedAt: orderedAt }] }] }] };
+      };
+      const orders = [
+        make("A", day(3), "USPS", `PA${tag}`),
+        make("B", day(2), "UPS", `PB${tag}`),
+        make("C", day(1), "FEDEX", `PC${tag}`),
+        make("D", day(0), "Transportadora X", `PD${tag}`)
+      ];
+      for (const order of orders) {
+        const recorded = await record(fixture, order);
+        const row = (await feed(fixture, "?limit=300")).items.find((item) => item.candidateId === recorded.candidateId)!;
+        expect((await approve(fixture, recorded.candidateId!, row.version)).status).toBe(200);
+      }
+      const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+      const sent: { tracking_number: string; carrier_code: string; description: string; send_push_confirmation: boolean }[] = [];
+      const fetchOk = (answers: Response[]) => vi.fn(async (_url: string, init?: RequestInit) => {
+        sent.push(JSON.parse(String(init!.body)));
+        return answers.shift() ?? reply({ success: true });
+      }) as unknown as typeof fetch;
+      const now = new Date("2027-01-02T12:00:00.000Z");
+
+      // limite 2: A e B (os dois mais recentes); a resposta de B é recusada e fica registrada como tal
+      const first = await pushTrackingsToParcel(fetchOk([reply({ success: true }), reply({ success: false, error_message: "Invalid tracking number" })]), now);
+      expect(first).toMatchObject({ adicionados: 1, recusados: 1, limite: 2 });
+      expect(sent.map((entry) => [entry.tracking_number, entry.carrier_code])).toEqual([[`PA${tag}`, "usps"], [`PB${tag}`, "ups"]]);
+      expect(sent[0]).toMatchObject({ send_push_confirmation: false });
+      expect(sent[0]!.description).toContain("[Gooder] Apple iPhone 17 Pro Max 1 TB");
+      expect(sent[0]!.description).toContain(`batch8-PUSH-A-${tag}`);
+      expect(await prisma.envioParcel.findMany({ where: { codigo: { in: [`PA${tag}`, `PB${tag}`] } }, orderBy: { codigo: "asc" } })).toMatchObject([
+        { codigo: `PA${tag}`, ok: true, erro: null, transportadora: "USPS" },
+        { codigo: `PB${tag}`, ok: false, erro: "Invalid tracking number" }
+      ]);
+
+      // mesma janela de 24 h: nada mais sai
+      sent.length = 0;
+      expect(await pushTrackingsToParcel(fetchOk([]), new Date(now.getTime() + 60 * 60_000))).toMatchObject({ adicionados: 0 });
+      expect(sent).toEqual([]);
+
+      // 25 h depois: segue por C (D tem transportadora sem código no Parcel e nunca é enviada); A e B não se repetem
+      const next = await pushTrackingsToParcel(fetchOk([reply({ success: true })]), new Date(now.getTime() + 25 * 60 * 60_000));
+      expect(next).toMatchObject({ adicionados: 1 });
+      expect(sent[0]).toMatchObject({ tracking_number: `PC${tag}`, carrier_code: "fedex" });
+      expect(sent.some((entry) => entry.tracking_number === `PD${tag}`)).toBe(false);
+      expect(await prisma.envioParcel.count({ where: { codigo: { in: [`PA${tag}`, `PB${tag}`] } } })).toBe(2);
+
+      // pedido de espera (429) interrompe sem registrar; chave recusada (401) vira erro claro
+      const busy = make("E", day(4), "USPS", `PE${tag}`);
+      const recordedBusy = await record(fixture, busy);
+      const busyRow = (await feed(fixture, "?limit=300")).items.find((item) => item.candidateId === recordedBusy.candidateId)!;
+      expect((await approve(fixture, recordedBusy.candidateId!, busyRow.version)).status).toBe(200);
+      const later = new Date(now.getTime() + 60 * 60 * 60_000);
+      expect(await pushTrackingsToParcel(fetchOk([reply({ success: false, error_message: "slow down" }, 429)]), later)).toMatchObject({ adicionados: 0, recusados: 0 });
+      expect(await prisma.envioParcel.count({ where: { codigo: `PE${tag}` } })).toBe(0);
+      await expect(pushTrackingsToParcel(fetchOk([reply({ success: false, error_message: "Account not found" }, 401)]), later)).rejects.toMatchObject({ code: "parcel_rejected" });
+
+      // sem chave, fica desligado
+      vi.stubEnv("PARCEL_API_KEY", "");
+      vi.stubEnv("MARKETPLACE_SECRET_DIR", await import("node:fs").then((fs) => fs.mkdtempSync(`${process.env.TMPDIR ?? "/tmp"}/sem-chave-`)));
+      expect(await pushTrackingsToParcel(fetchOk([]), later)).toBeNull();
+
+      // seleção pura: manual também entra; cancelada, entregue, já enviada e já no Parcel ficam de fora
+      const base = { status: "APROVADA", cancelled: false, entregue: false, fase: "COMPRADO", store: { nome: "Dronz" }, orderedAt: "2026-10-01T00:00:00.000Z", orderId: "SHOP-1", rawItems: [{ title: "Aspirador", quantity: 1, cancelledQuantity: 0, refundedQuantity: 0, unitPrice: 1, currency: "USD" }, { title: "Filtro", quantity: 1, cancelledQuantity: 0, refundedQuantity: 0, unitPrice: 1, currency: "USD" }] };
+      const trk = (code: string, carrier: string | null = "UPS") => ({ carrier, code, entrega: null });
+      const picked = selectTrackingsToPush([
+        { ...base, trackings: [trk("1z aa 11")] },
+        { ...base, orderId: "X2", cancelled: true, trackings: [trk("CANC")] },
+        { ...base, orderId: "X3", entregue: true, trackings: [trk("ENTR")] },
+        { ...base, orderId: "X4", fase: "EM_MIAMI", trackings: [trk("MIAMI")] },
+        { ...base, orderId: "X5", trackings: [trk("JAEXISTE")] },
+        { ...base, orderId: "X6", trackings: [trk("SEMCODIGO", null)] }
+      ] as never, new Set(["JAEXISTE"]));
+      expect(picked).toEqual([{ codigo: "1ZAA11", transportadora: "UPS", carrierCode: "ups", descricao: "[Dronz] Aspirador +1 · pedido SHOP-1" }]);
+      expect(["USPS", "ups", " FedEx ", "OnTrac", "Gofo Express", "Correios", null].map(parcelCarrier)).toEqual(["usps", "ups", "fedex", "ont", "gofous", null, null]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("busca a foto principal de cada anúncio no eBay, guarda uma vez e não deixa a falha de um derrubar os outros", async () => {
     await import("../src/modules/marketplace-integrations/marketplace-integrations.adapters");
     const { EbayBuyerAdapter } = await import("../src/modules/marketplace-integrations/ebay-buyer.adapter");

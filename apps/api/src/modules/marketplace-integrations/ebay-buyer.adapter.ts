@@ -421,6 +421,10 @@ export class EbayBuyerAdapter implements MarketplaceAdapter {
           });
       }
     const shippedAt = isoOf(textOf(order, "ShippedTime"));
+    // O eBay só preenche a entrega real quando tem o dado da transportadora; vem no pedido ou em cada transação.
+    const packageInfoDelivery = (node: XmlNode | undefined) =>
+      isoOf(textOf(child(child(node, "ShippingServiceSelected"), "ShippingPackageInfo"), "ActualDeliveryTime"));
+    const deliveredAt = [order, ...transactions].map(packageInfoDelivery).find(Boolean);
     const seller =
       textOf(order, "SellerUserID") ??
       textOf(child(transactions[0], "Item"), "Seller") ??
@@ -439,11 +443,15 @@ export class EbayBuyerAdapter implements MarketplaceAdapter {
         : {}),
       items,
       shipments:
-        packages.size || shippedAt
+        packages.size || shippedAt || deliveredAt
           ? [
               {
                 externalShipmentId: orderId,
-                ...(shippedAt ? { status: "SHIPPED", shippedAt } : {}),
+                ...(deliveredAt
+                  ? { status: "DELIVERED", ...(shippedAt ? { shippedAt } : {}), deliveredAt }
+                  : shippedAt
+                    ? { status: "SHIPPED", shippedAt }
+                    : {}),
                 updatedAt,
                 packages: [...packages.values()]
               }

@@ -18,7 +18,7 @@ type Lots = { lotes: Lot[]; semLojaTotal: number; atualizadoEm: string | null };
 /** Venda projetada e markup de uma linha, vindos do Controle de compras (por loja e mês). */
 type Projection = { vendaUnitariaBrl: string | null; markup: string | null };
 type ControlLine = { numeroPedido: string; titulo: string; entrada: { vendaUnitariaBrl: string | null }; calculo: { indicadores: { resultadoSobreCustoPercentual: string | null } } };
-type RefreshResult = { conexao: string; status: string; criados?: number; atualizados?: number; erro?: string };
+type RefreshResult = { conexao: string; status: string; criados?: number; atualizados?: number; erro?: string; detalhe?: string };
 
 const BASE = "/integrations/marketplaces";
 export const monthLabel = (mes: string) => new Date(`${mes}-15T12:00:00`).toLocaleDateString("pt-BR", { month: "long", year: "numeric" }).replace(" de ", " ").toUpperCase();
@@ -195,7 +195,7 @@ export function PurchasesPage() {
           <Alert severity={refreshed.some((entry) => entry.erro) ? "warning" : "success"} onClose={() => setRefreshed(null)}>
             {refreshed.length === 0
               ? "Nenhuma conta do eBay conectada para atualizar."
-              : refreshed.map((entry) => (entry.erro ? `${entry.conexao}: ${refreshProblem[entry.erro] ?? entry.erro}` : `${entry.conexao}: ${entry.criados ?? 0} com novidades, ${entry.atualizados ?? 0} sem mudança`)).join(" · ")}
+              : refreshed.map((entry) => (entry.erro ? `${entry.conexao}: ${refreshProblem[entry.erro] ?? entry.erro}` : `${entry.conexao}: ${entry.detalhe ?? `${entry.criados ?? 0} com novidades, ${entry.atualizados ?? 0} sem mudança`}`)).join(" · ")}
           </Alert>
         )}
         {registered && <Alert severity="success" onClose={() => setRegistered(null)}>Compra {registered} cadastrada e confirmada.</Alert>}

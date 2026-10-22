@@ -359,6 +359,18 @@ model StatusRastreio {
   updatedAt         DateTime @updatedAt
 }
 
+/// Rastreio que o sistema já tentou cadastrar no Parcel pela API (add-delivery): evita repetir e conta o limite diário.
+model EnvioParcel {
+  id             String   @id @default(cuid())
+  codigo         String   @unique
+  transportadora String
+  ok             Boolean
+  erro           String?
+  tentadoEm      DateTime @default(now())
+
+  @@index([tentadoEm])
+}
+
 model Categoria {
   id        String   @id @default(cuid())
   lojaId    String

@@ -38,6 +38,7 @@ function canonicalOrder(order: NormalizedMarketplaceOrder) {
       .map((shipment) => ({
         ...shipment,
         shippedAt: shipment.shippedAt ? iso(shipment.shippedAt) : undefined,
+        deliveredAt: shipment.deliveredAt ? iso(shipment.deliveredAt) : undefined,
         updatedAt: iso(shipment.updatedAt),
         packages: shipment.packages
           .map((externalPackage) => ({
@@ -58,6 +59,7 @@ function shipmentEventTime(order: NormalizedMarketplaceOrder) {
   let latest = -Infinity;
   for (const shipment of order.shipments) {
     latest = Math.max(latest, Date.parse(shipment.updatedAt));
+    if (shipment.deliveredAt) latest = Math.max(latest, Date.parse(shipment.deliveredAt));
     for (const externalPackage of shipment.packages)
       for (const tracking of externalPackage.trackings)
         latest = Math.max(latest, Date.parse(tracking.updatedAt));
