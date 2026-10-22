@@ -55,8 +55,9 @@ const screens: Record<Mode, { title: string; phases: Phase[]; empty: string }> =
   {
     MIAMI: {
       title: "Estoque Miami",
-      phases: ["A_CAMINHO_MIAMI", "EM_MIAMI", "EM_REMESSA"],
-      empty: "Nada a caminho de Miami, em Miami ou em remessa neste filtro."
+      phases: ["A_CAMINHO_MIAMI", "ENTREGUE", "EM_MIAMI", "EM_REMESSA"],
+      empty:
+        "Nada a caminho de Miami, entregue, em Miami ou em remessa neste filtro."
     },
     BRASIL: {
       title: "Estoque Brasil",
@@ -66,15 +67,17 @@ const screens: Record<Mode, { title: string; phases: Phase[]; empty: string }> =
   };
 
 /** O que se pode fazer com compras em cada fase: avançar uma etapa ou desfazer a última. */
+const arrivedInMiami: Action[] = [
+  {
+    label: "Chegou em Miami",
+    etapa: "EM_MIAMI",
+    permission: MIAMI_PERMISSION,
+    primary: true
+  }
+];
 const actionsFor: Partial<Record<Phase, Action[]>> = {
-  A_CAMINHO_MIAMI: [
-    {
-      label: "Chegou em Miami",
-      etapa: "EM_MIAMI",
-      permission: MIAMI_PERMISSION,
-      primary: true
-    }
-  ],
+  A_CAMINHO_MIAMI: arrivedInMiami,
+  ENTREGUE: arrivedInMiami,
   EM_MIAMI: [
     {
       label: "Enviar na remessa",
@@ -130,6 +133,18 @@ function whenOf(row: PurchaseRow): {
       date: stage?.enviadaEm ? `Enviada ${day(stage.enviadaEm)}` : null,
       note: stage?.remessa ?? null
     };
+  if (row.fase === "ENTREGUE") {
+    // Data da entrega informada pelo eBay ou pelo Parcel (pode vir com hora, sem fuso).
+    const raw = row.trackings.find((tracking) => tracking.entrega?.data)
+      ?.entrega?.data;
+    const parsed = raw ? new Date(raw) : null;
+    return {
+      date: raw
+        ? `Entregue ${parsed && !Number.isNaN(parsed.getTime()) ? day(parsed.toISOString()) : raw}`
+        : "Entregue",
+      note: null
+    };
+  }
   if (row.fase === "EM_MIAMI")
     return {
       date: stage?.chegouMiamiEm ? `Chegou ${day(stage.chegouMiamiEm)}` : null,
@@ -210,9 +225,7 @@ export function StockStagePage({ mode }: { mode: Mode }) {
   ).filter((action) => can(action.permission));
   const sending = chosenPhases[0] === "EM_MIAMI";
   // Compras a caminho cujo rastreio já consta como entregue: candidatas a "Chegou em Miami" (a equipe confirma).
-  const delivered = rows.filter(
-    (row) => row.fase === "A_CAMINHO_MIAMI" && row.entregue
-  );
+  const delivered = rows.filter((row) => row.fase === "ENTREGUE");
 
   const change = useMutation({
     mutationFn: async (action: Action) =>

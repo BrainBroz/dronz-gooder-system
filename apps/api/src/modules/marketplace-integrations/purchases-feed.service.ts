@@ -13,7 +13,7 @@ const filtersShape = {
   finalidade: z.enum(["LOJA", "PESSOAL"]).optional(),
   lojaId: z.string().cuid().optional()
 };
-export const purchasePhases = ["CANCELADO", "COMPRADO", "A_CAMINHO_MIAMI", "EM_MIAMI", "EM_REMESSA", "NO_BRASIL"] as const;
+export const purchasePhases = ["CANCELADO", "COMPRADO", "A_CAMINHO_MIAMI", "ENTREGUE", "EM_MIAMI", "EM_REMESSA", "NO_BRASIL"] as const;
 export const lotsQuerySchema = z.object(filtersShape).strict();
 export const feedQuerySchema = z
   .object({
@@ -40,6 +40,7 @@ const LOAD_LIMIT = 2000;
 
 /**
  * Fase da compra: cancelada; comprada (o vendedor ainda não enviou); a caminho de Miami (o vendedor enviou, com rastreio);
+ * entregue (a transportadora ou o eBay já deu a entrega, ainda sem confirmação da equipe em Miami);
  * e, depois de confirmadas pela equipe, em Miami, em remessa (a caminho do Brasil) e no Brasil.
  */
 export type PurchasePhase = (typeof purchasePhases)[number];
@@ -81,6 +82,8 @@ export type FeedRow = {
   etapa: { chegouMiamiEm: string | null; remessa: string | null; enviadaEm: string | null; chegouBrasilEm: string | null } | null;
   trackings: Tracking[];
   entregue: boolean;
+  /** Tipos de divergência em aberto (só em compra "Com divergência"): a tela explica e leva à revisão. */
+  divergencias: string[];
   rawItems: RawItem[];
   canApprove: boolean;
 };
@@ -91,14 +94,19 @@ const stageOf = (stage: { chegouMiamiEm: Date | null; remessa: string | null; en
   enviadaEm: stage.enviadaEm?.toISOString() ?? null,
   chegouBrasilEm: stage.chegouBrasilEm?.toISOString() ?? null
 });
-const deliveryOf = (delivery: { statusCodigo: number; ultimoEvento: string | null; ultimoEventoLocal: string | null; ultimoEventoData: string | null; consultadoEm: Date }) => ({
-  status: delivery.statusCodigo,
-  rotulo: statusLabel(delivery.statusCodigo),
-  evento: delivery.ultimoEvento,
-  local: delivery.ultimoEventoLocal,
-  data: delivery.ultimoEventoData,
-  consultadoEm: delivery.consultadoEm.toISOString()
-});
+// O Parcel marca como "entregue" (0) o pacote devolvido ao remetente; isso não é chegada: vira exceção e não conta como entrega.
+const returnedToSender = /return(ed)?\s+to\s+(the\s+)?sender/i;
+const deliveryOf = (delivery: { statusCodigo: number; ultimoEvento: string | null; ultimoEventoLocal: string | null; ultimoEventoData: string | null; consultadoEm: Date }) => {
+  const returned = delivery.statusCodigo === DELIVERED && returnedToSender.test(delivery.ultimoEvento ?? "");
+  return {
+    status: returned ? 7 : delivery.statusCodigo,
+    rotulo: returned ? "Devolvido ao remetente" : statusLabel(delivery.statusCodigo),
+    evento: delivery.ultimoEvento,
+    local: delivery.ultimoEventoLocal,
+    data: delivery.ultimoEventoData,
+    consultadoEm: delivery.consultadoEm.toISOString()
+  };
+};
 
 /** Carrega os pedidos visíveis ao usuário (eBay e cadastrados à mão), já com loja efetiva e fase. Sem fotos do eBay. */
 export async function loadRows(identity: AuthIdentity, input: { status?: string; finalidade?: string }): Promise<FeedRow[]> {
@@ -140,6 +148,11 @@ async function loadCandidateRows(identity: AuthIdentity, input: { status?: strin
       ])
     : [[], [], []];
   const stageByPurchase = new Map(stages.map((stage) => [stage.compraImportadaId, stage]));
+  const divergent = parsed.filter(({ candidate }) => candidate.status === "COM_DIVERGENCIA").map(({ candidate }) => candidate.id);
+  const conflictTypes = new Map<string, string[]>();
+  if (divergent.length)
+    for (const conflict of await prisma.buyerReconciliationConflict.findMany({ where: { candidateId: { in: divergent }, status: "ABERTO" }, select: { candidateId: true, type: true } }))
+      conflictTypes.set(conflict.candidateId, [...new Set([...(conflictTypes.get(conflict.candidateId) ?? []), conflict.type])]);
   // Status de entrega dos rastreios (vindo do Parcel, quando configurado): só informa, não muda a fase.
   const codes = parsed.flatMap(({ order }) => order.shipments.flatMap((shipment) => shipment.packages.flatMap((pack) => pack.trackings.map((tracking) => normalizeTracking(tracking.code)))));
   const deliveries = new Map((codes.length ? await prisma.statusRastreio.findMany({ where: { codigo: { in: codes } } }) : []).map((entry) => [entry.codigo, entry]));
@@ -172,7 +185,8 @@ async function loadCandidateRows(identity: AuthIdentity, input: { status?: strin
       )
     );
     const stage = candidate.compraImportadaId ? (stageByPurchase.get(candidate.compraImportadaId) ?? null) : null;
-    const phase: PurchasePhase = order.cancelled ? "CANCELADO" : stage ? stage.etapa : trackings.length ? "A_CAMINHO_MIAMI" : "COMPRADO";
+    const delivered = Boolean(deliveredAt) || (trackings.length > 0 && trackings.every((tracking) => tracking.entrega?.status === DELIVERED));
+    const phase: PurchasePhase = order.cancelled ? "CANCELADO" : stage ? stage.etapa : delivered ? "ENTREGUE" : trackings.length ? "A_CAMINHO_MIAMI" : "COMPRADO";
     return {
       provider: candidate.provider as string,
       candidateId: candidate.id,
@@ -196,7 +210,8 @@ async function loadCandidateRows(identity: AuthIdentity, input: { status?: strin
       etapa: stage ? stageOf(stage) : null,
       canEditTracking: false,
       trackings,
-      entregue: Boolean(deliveredAt) || (trackings.length > 0 && trackings.every((tracking) => tracking.entrega?.status === DELIVERED)),
+      entregue: delivered,
+      divergencias: candidate.status === "COM_DIVERGENCIA" ? (conflictTypes.get(candidate.id) ?? []) : [],
       rawItems: order.items,
       canApprove: candidate.status === "AGUARDANDO_APROVACAO" && !candidate.compraImportadaId && can(identity, "BUYER_INGESTION_APROVAR")
     };
@@ -224,6 +239,7 @@ async function loadManualRows(identity: AuthIdentity, input: { status?: string; 
       return { carrier: tracking.transportadora ?? null, code: tracking.codigo, entrega: delivery ? deliveryOf(delivery) : null };
     });
     const stage = purchase.etapa;
+    const delivered = trackings.length > 0 && trackings.every((tracking) => tracking.entrega?.status === DELIVERED);
     return {
       provider: "MANUAL",
       candidateId: `${MANUAL_PREFIX}${purchase.id}`,
@@ -231,7 +247,7 @@ async function loadManualRows(identity: AuthIdentity, input: { status?: string; 
       manual: true,
       version: purchase.version,
       status: "APROVADA" as const,
-      fase: stage ? stage.etapa : trackings.length ? "A_CAMINHO_MIAMI" : "COMPRADO",
+      fase: stage ? stage.etapa : delivered ? "ENTREGUE" : trackings.length ? "A_CAMINHO_MIAMI" : "COMPRADO",
       orderId: purchase.numeroPedido,
       orderedAt: (purchase.dataPedido ?? purchase.importadaEm).toISOString(),
       currency: "USD",
@@ -246,7 +262,8 @@ async function loadManualRows(identity: AuthIdentity, input: { status?: string; 
       shippedAt: null,
       etapa: stage ? stageOf(stage) : null,
       trackings,
-      entregue: trackings.length > 0 && trackings.every((tracking) => tracking.entrega?.status === DELIVERED),
+      entregue: delivered,
+      divergencias: [],
       rawItems: purchase.itens.map((item) => ({
         title: item.titulo,
         quantity: item.quantidade,

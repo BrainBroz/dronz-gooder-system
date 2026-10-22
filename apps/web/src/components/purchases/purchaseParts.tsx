@@ -14,6 +14,7 @@ export type Phase =
   | "CANCELADO"
   | "COMPRADO"
   | "A_CAMINHO_MIAMI"
+  | "ENTREGUE"
   | "EM_MIAMI"
   | "EM_REMESSA"
   | "NO_BRASIL";
@@ -61,6 +62,8 @@ export type PurchaseRow = {
   /** Compra cadastrada à mão: o rastreio dela é editado aqui. */
   manual: boolean;
   canEditTracking: boolean;
+  /** Tipos de divergência em aberto (compra "Com divergência"). */
+  divergencias: string[];
   items: {
     title: string;
     quantity: number;
@@ -95,6 +98,7 @@ export const phaseInfo: Record<
   CANCELADO: { label: "Cancelado", color: "error" },
   COMPRADO: { label: "Comprado", color: "warning" },
   A_CAMINHO_MIAMI: { label: "A caminho de Miami", color: "info" },
+  ENTREGUE: { label: "Entregue", color: "success" },
   EM_MIAMI: { label: "Em Miami", color: "primary" },
   EM_REMESSA: { label: "A caminho do Brasil", color: "secondary" },
   NO_BRASIL: { label: "Estoque Brasil", color: "success" }

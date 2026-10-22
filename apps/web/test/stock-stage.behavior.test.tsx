@@ -39,7 +39,7 @@ describe("Estoque Miami", () => {
     const get = mock(miamiRows);
     renderWithProviders(<StockStagePage mode="MIAMI" />, { permissions: perms });
     expect(await screen.findByText("iPhone 17 Pro")).toBeTruthy();
-    expect(params(get)[0]).toMatchObject({ finalidade: "LOJA", fases: "A_CAMINHO_MIAMI,EM_MIAMI,EM_REMESSA", lojaId: "store-dronz", limit: 300 });
+    expect(params(get)[0]).toMatchObject({ finalidade: "LOJA", fases: "A_CAMINHO_MIAMI,ENTREGUE,EM_MIAMI,EM_REMESSA", lojaId: "store-dronz", limit: 300 });
     const table = screen.getByRole("table", { name: "Estoque Miami" });
     expect(within(table).getAllByRole("columnheader").map((header) => header.textContent).filter(Boolean)).toEqual(["Produto", "Empresa", "Tracking", "Data", "Qtd", "Valor", "Status"]);
     expect(screen.queryByText(/Destino/)).toBeNull();
@@ -129,7 +129,7 @@ describe("Estoque Miami", () => {
 
 describe("Estoque Miami: entrega do Parcel", () => {
   const delivered = (id: string, title: string) =>
-    row(id, "A_CAMINHO_MIAMI", title, {
+    row(id, "ENTREGUE", title, {
       entregue: true,
       trackings: [{ carrier: "UPS", code: `1Z${id}`, entrega: { status: 0, rotulo: "Entregue", evento: "Delivered", local: "Doral, FL", data: "2026-10-12 09:00", consultadoEm: "2026-10-21T12:00:00.000Z" } }]
     });
@@ -143,7 +143,8 @@ describe("Estoque Miami: entrega do Parcel", () => {
     const put = vi.spyOn(api, "put").mockResolvedValue({ data: { alteradas: 2, iguais: 0 } });
     renderWithProviders(<StockStagePage mode="MIAMI" />, { permissions: perms });
     await screen.findByText("Galaxy S26");
-    expect(screen.getAllByText("Entregue")).toHaveLength(2);
+    expect(within(screen.getByRole("table", { name: "Estoque Miami" })).getAllByText("Entregue")).toHaveLength(2);
+    expect(within(screen.getByRole("table", { name: "Estoque Miami" })).getAllByText("ENTREGUE")).toHaveLength(2); // a situação da compra também passa a Entregue
     expect(screen.getByText("Saiu para entrega")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Selecionar entregues (2)" }));
     expect(screen.getByText("2 selecionadas")).toBeTruthy();
