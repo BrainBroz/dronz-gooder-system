@@ -226,6 +226,17 @@ describe("Compras: atualizar agora", () => {
     expect(await screen.findByText(/Parcel \(rastreio\): o Parcel recusou a chave/)).toBeTruthy();
   });
 
+  it("resume o cadastro de rastreios no Parcel (enviados, recusados e os que esperam o limite diário)", async () => {
+    const user = userEvent.setup();
+    mock();
+    vi.spyOn(api, "post").mockResolvedValue({
+      data: { resultados: [{ conexao: "Parcel (cadastro de rastreios)", status: "SUCCEEDED", detalhe: "15 enviados ao Parcel, 1 recusados; 63 aguardam o limite diário de 15" }] }
+    });
+    renderWithProviders(<PurchasesPage />, { permissions: [...perms, "INTEGRACAO_MARKETPLACE_SINCRONIZAR"] });
+    await user.click(await screen.findByRole("button", { name: "Atualizar agora" }));
+    expect(await screen.findByText("Parcel (cadastro de rastreios): 15 enviados ao Parcel, 1 recusados; 63 aguardam o limite diário de 15")).toBeTruthy();
+  });
+
   it("explica quando a autorização do eBay expirou", async () => {
     const user = userEvent.setup();
     mock();

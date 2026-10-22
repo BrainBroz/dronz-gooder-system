@@ -4,10 +4,11 @@ import type { AuthIdentity } from "../../middlewares/auth";
 import { getAuthenticatedUser } from "../auth/auth.service";
 import { marketplaceAdapterRegistry } from "./marketplace-integrations.adapters";
 import { syncConnection } from "./marketplace-integrations.service";
+import { pushTrackingsToParcel } from "./parcel-push.service";
 import { syncParcelStatuses } from "./parcel-tracking.service";
 import type { MarketplaceAdapterRegistry } from "./marketplace-integrations.types";
 
-export type RefreshResult = { conexao: string; status: string; criados?: number; atualizados?: number; erro?: string };
+export type RefreshResult = { conexao: string; status: string; criados?: number; atualizados?: number; erro?: string; detalhe?: string };
 
 /**
  * Atualiza com o marketplace todas as conexões ativas que `identityFor` autoriza (null = pula).
@@ -37,15 +38,32 @@ export async function refreshActiveConnections(
   return results;
 }
 
-/** Status de entrega dos rastreios no Parcel (só se houver chave configurada); falha dele não derruba o resto. */
+/**
+ * Parcel (só com chave configurada): manda os rastreios novos para ele cuidar do status e lê os status de entrega.
+ * Falha dele não derruba o resto nem a leitura do eBay.
+ */
 async function refreshTracking(): Promise<RefreshResult[]> {
-  const conexao = "Parcel (rastreio)";
+  const results: RefreshResult[] = [];
+  const failure = (conexao: string, error: unknown) =>
+    results.push({ conexao, status: "FALHOU", erro: error instanceof AppError ? error.code : "erro_inesperado" });
+  try {
+    const pushed = await pushTrackingsToParcel();
+    if (pushed && (pushed.adicionados || pushed.recusados || pushed.pendentes))
+      results.push({
+        conexao: "Parcel (cadastro de rastreios)",
+        status: "SUCCEEDED",
+        detalhe: `${pushed.adicionados} enviados ao Parcel${pushed.recusados ? `, ${pushed.recusados} recusados` : ""}${pushed.pendentes ? `; ${pushed.pendentes} aguardam o limite diário de ${pushed.limite}` : ""}`
+      });
+  } catch (error) {
+    failure("Parcel (cadastro de rastreios)", error);
+  }
   try {
     const counts = await syncParcelStatuses();
-    return !counts || counts.pulado ? [] : [{ conexao, status: "SUCCEEDED", criados: counts.novos + counts.mudaram, atualizados: counts.iguais }];
+    if (counts && !counts.pulado) results.push({ conexao: "Parcel (rastreio)", status: "SUCCEEDED", criados: counts.novos + counts.mudaram, atualizados: counts.iguais });
   } catch (error) {
-    return [{ conexao, status: "FALHOU", erro: error instanceof AppError ? error.code : "erro_inesperado" }];
+    failure("Parcel (rastreio)", error);
   }
+  return results;
 }
 
 /** Botão "Atualizar agora": só as conexões que o usuário pode ver (compartilhadas ou das suas lojas). */

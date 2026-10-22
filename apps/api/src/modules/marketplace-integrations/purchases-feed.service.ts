@@ -158,11 +158,16 @@ async function loadCandidateRows(identity: AuthIdentity, input: { status?: strin
       ? { id: connection.lojaPermitida.id, slug: connection.lojaPermitida.slug, nome: connection.lojaPermitida.nome }
       : null;
     const shipments = order.shipments;
+    // Entrega informada pelo próprio eBay (quando ele tem o dado da transportadora): vale para os rastreios sem status do Parcel.
+    const deliveredAt = shipments.map((shipment) => shipment.deliveredAt).find(Boolean) ?? null;
+    const ebayDelivery: Tracking["entrega"] = deliveredAt
+      ? { status: DELIVERED, rotulo: statusLabel(DELIVERED), evento: "Entregue (informado pelo eBay)", local: null, data: deliveredAt, consultadoEm: order.updatedAt }
+      : null;
     const trackings = shipments.flatMap((shipment) =>
       shipment.packages.flatMap((pack) =>
         pack.trackings.map((tracking) => {
           const delivery = deliveries.get(normalizeTracking(tracking.code));
-          return { carrier: tracking.carrier ?? pack.carrier ?? null, code: tracking.code, entrega: delivery ? deliveryOf(delivery) : null };
+          return { carrier: tracking.carrier ?? pack.carrier ?? null, code: tracking.code, entrega: delivery ? deliveryOf(delivery) : ebayDelivery };
         })
       )
     );
@@ -191,7 +196,7 @@ async function loadCandidateRows(identity: AuthIdentity, input: { status?: strin
       etapa: stage ? stageOf(stage) : null,
       canEditTracking: false,
       trackings,
-      entregue: trackings.length > 0 && trackings.every((tracking) => tracking.entrega?.status === DELIVERED),
+      entregue: Boolean(deliveredAt) || (trackings.length > 0 && trackings.every((tracking) => tracking.entrega?.status === DELIVERED)),
       rawItems: order.items,
       canApprove: candidate.status === "AGUARDANDO_APROVACAO" && !candidate.compraImportadaId && can(identity, "BUYER_INGESTION_APROVAR")
     };

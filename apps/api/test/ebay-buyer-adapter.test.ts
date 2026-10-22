@@ -183,6 +183,22 @@ describe("EbayBuyerAdapter (GetOrders buyer)", () => {
     ).toHaveLength(1);
   });
 
+  it("lê a entrega real (ActualDeliveryTime) no pedido ou na transação; sem ela o envio continua só como enviado", async () => {
+    const delivery = (time: string) => `<ShippingServiceSelected><ShippingPackageInfo><ActualDeliveryTime>${time}</ActualDeliveryTime></ShippingPackageInfo></ShippingServiceSelected>`;
+    const inTransaction = ebayOrder("D-1", { trackings: [["USPS", "94D1"]] }).replace("</QuantityPurchased>", `</QuantityPurchased>${delivery("2026-10-14T16:20:00.000Z")}`);
+    const inOrder = ebayOrder("D-2", { trackings: [["UPS", "1ZD2"]] }).replace("<TransactionArray>", `${delivery("2026-10-15T10:00:00.000Z")}<TransactionArray>`);
+    const notDelivered = ebayOrder("D-3", { trackings: [["FEDEX", "FDX3"]] });
+    const ebay = fakeEbay([getOrdersXml(inTransaction + inOrder + notDelivered)]);
+    const adapter = new EbayBuyerAdapter(ebay.secrets, ebay.fetchImpl, () => NOW);
+    const page = await adapter.listOrders(connection, { from: new Date("2026-10-10T00:00:00.000Z") });
+    for (const order of page.orders) expect(normalizedMarketplaceOrderSchema.safeParse(order).success).toBe(true);
+    const [first, second, third] = page.orders.map((order) => order.shipments[0]!);
+    expect(first).toMatchObject({ status: "DELIVERED", shippedAt: "2026-10-11T08:00:00.000Z", deliveredAt: "2026-10-14T16:20:00.000Z" });
+    expect(second).toMatchObject({ status: "DELIVERED", deliveredAt: "2026-10-15T10:00:00.000Z" });
+    expect(third).toMatchObject({ status: "SHIPPED" });
+    expect(third).not.toHaveProperty("deliveredAt");
+  });
+
   it("pagina dentro da janela e, ao concluir janela antiga, abre a próxima com sobreposição até agora", async () => {
     const ebay = fakeEbay([
       getOrdersXml(ebayOrder("O-1"), true),

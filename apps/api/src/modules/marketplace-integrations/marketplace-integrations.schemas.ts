@@ -159,6 +159,8 @@ export const normalizedMarketplaceOrderSchema = z
             externalShipmentId: z.string().trim().min(1).max(240),
             status: z.string().trim().max(120).optional(),
             shippedAt: z.string().datetime().optional(),
+            /** Entrega real informada pela plataforma (eBay: ActualDeliveryTime), quando ela tem o dado da transportadora. */
+            deliveredAt: z.string().datetime().optional(),
             updatedAt: z.string().datetime(),
             packages: z
               .array(
